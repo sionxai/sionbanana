@@ -1,0 +1,12 @@
+<svg width="640" height="640" viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gradientBefore" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#121C2D" />
+      <stop offset="100%" stop-color="#274063" />
+    </linearGradient>
+  </defs>
+  <rect width="640" height="640" rx="32" fill="url(#gradientBefore)" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#E6EDF5" font-size="36" font-family="Inter, sans-serif">
+    Original Preview
+  </text>
+</svg>

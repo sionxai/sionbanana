@@ -1,0 +1,6 @@
+<svg width="256" height="192" viewBox="0 0 256 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="192" rx="20" fill="#254EDB" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="20" font-family="Inter, sans-serif">
+    Thumbnail
+  </text>
+</svg>
