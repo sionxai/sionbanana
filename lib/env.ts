@@ -46,13 +46,21 @@ const defaultClientEnv = {
   NEXT_PUBLIC_FIREBASE_DATABASE_ID: "sionbanana1"
 };
 
+// Only use environment variables if they exist and are not empty
+const cleanRawClientEnv = Object.fromEntries(
+  Object.entries(rawClientEnv).filter(([key, value]) => value && value.trim() !== '')
+);
+
 export const clientEnv = {
   ...defaultClientEnv,
-  ...rawClientEnv
+  ...cleanRawClientEnv
 };
 
 export const isFirebaseConfigured = Boolean(
-  rawClientEnv.NEXT_PUBLIC_FIREBASE_API_KEY && rawClientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+  clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY &&
+  clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
+  clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo" &&
+  clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== "demo-project"
 );
 export const shouldUseFirestore = isFirebaseConfigured && clientEnv.NEXT_PUBLIC_FIREBASE_USE_FIRESTORE !== "false";
 
