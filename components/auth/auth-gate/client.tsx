@@ -28,7 +28,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
   if (user) {
     return (
       <div className="flex min-h-screen flex-col">
-        <header className="flex items-center justify-between border-b bg-background/80 px-8 py-4 backdrop-blur">
+        <header className="flex items-center justify-between border-b bg-background/80 px-8 py-4 backdrop-blur overflow-visible">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex flex-col hover:opacity-90">
               <span className="text-sm font-semibold text-foreground">YesGem Studio</span>
@@ -39,7 +39,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
               알파 버전
             </Badge>
           </div>
-          <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4">
+          <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4 relative overflow-visible">
             <UserMenu />
             <AccountMenu />
           </div>
