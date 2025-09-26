@@ -5,6 +5,7 @@ import type { User } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
@@ -39,8 +40,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const unsubscribe = auth.onAuthStateChanged(async currentUser => {
-      setUser(currentUser);
-      setLoading(false);
+      if (!currentUser) {
+        // 익명 로그인 자동 실행
+        try {
+          await signInAnonymously(auth);
+        } catch (error) {
+          console.warn("익명 로그인 실패:", error);
+          setUser(null);
+          setLoading(false);
+        }
+      } else {
+        setUser(currentUser);
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
