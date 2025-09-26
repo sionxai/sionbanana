@@ -1,0 +1,44 @@
+[debug] [2025-09-26T21:48:17.265Z] ----------------------------------------------------------------------
+[debug] [2025-09-26T21:48:17.266Z] Command:       /opt/homebrew/Cellar/node/24.8.0/bin/node /opt/homebrew/bin/firebase deploy --only firestore:indexes
+[debug] [2025-09-26T21:48:17.266Z] CLI Version:   14.17.0
+[debug] [2025-09-26T21:48:17.266Z] Platform:      darwin
+[debug] [2025-09-26T21:48:17.267Z] Node Version:  v24.8.0
+[debug] [2025-09-26T21:48:17.267Z] Time:          Sat Sep 27 2025 06:48:17 GMT+0900 (Korean Standard Time)
+[debug] [2025-09-26T21:48:17.267Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-09-26T21:48:17.267Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2025-09-26T21:48:17.358Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-09-26T21:48:17.358Z] > authorizing via signed-in user (nshcarlue@gmail.com)
+[debug] [2025-09-26T21:48:17.358Z] [iam] checking project sionbanana for permissions ["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]
+[debug] [2025-09-26T21:48:17.358Z] Checked if tokens are valid: false, expires at: 1758858996713
+[debug] [2025-09-26T21:48:17.358Z] Checked if tokens are valid: false, expires at: 1758858996713
+[debug] [2025-09-26T21:48:17.358Z] > refreshing access token with scopes: []
+[debug] [2025-09-26T21:48:17.359Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-09-26T21:48:17.359Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-09-26T21:48:17.599Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2025-09-26T21:48:17.599Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-09-26T21:48:17.611Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/sionbanana:testIamPermissions [none]
+[debug] [2025-09-26T21:48:17.611Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/sionbanana:testIamPermissions x-goog-quota-user=projects/sionbanana
+[debug] [2025-09-26T21:48:17.611Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/sionbanana:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[debug] [2025-09-26T21:48:17.728Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2025-09-26T21:48:17.728Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2025-09-26T21:48:17.917Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/sionbanana:testIamPermissions 200
+[debug] [2025-09-26T21:48:17.917Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/sionbanana:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[info] 
+[info] === Deploying to 'sionbanana'...
+[info] 
+[info] i  deploying firestore 
+[debug] [2025-09-26T21:48:17.918Z] Checked if tokens are valid: true, expires at: 1758926896599
+[debug] [2025-09-26T21:48:17.918Z] Checked if tokens are valid: true, expires at: 1758926896599
+[debug] [2025-09-26T21:48:17.918Z] >>> [apiv2][query] GET https://firestore.googleapis.com/v1/projects/sionbanana/databases/(default) [none]
+[debug] [2025-09-26T21:48:19.116Z] <<< [apiv2][status] GET https://firestore.googleapis.com/v1/projects/sionbanana/databases/(default) 200
+[debug] [2025-09-26T21:48:19.116Z] <<< [apiv2][body] GET https://firestore.googleapis.com/v1/projects/sionbanana/databases/(default) {"name":"projects/sionbanana/databases/(default)","uid":"1f6610bf-0dd2-4032-9ec6-db63a965517c","createTime":"2025-09-25T23:54:19.215670Z","updateTime":"2025-09-25T23:54:19.215670Z","locationId":"nam5","type":"FIRESTORE_NATIVE","concurrencyMode":"PESSIMISTIC","versionRetentionPeriod":"3600s","earliestVersionTime":"2025-09-26T20:48:19.025818Z","appEngineIntegrationMode":"DISABLED","keyPrefix":"s","pointInTimeRecoveryEnablement":"POINT_IN_TIME_RECOVERY_DISABLED","deleteProtectionState":"DELETE_PROTECTION_DISABLED","databaseEdition":"STANDARD","freeTier":false,"etag":"IKzhs/Oz948DMN3rnK6O9Y8D"}
+[info] i  firestore: deploying indexes... 
+[debug] [2025-09-26T21:48:19.360Z] TypeError: Cannot read properties of undefined (reading 'map')
+    at deployIndexes (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/firestore/deploy.js:70:38)
+    at default_1 (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/firestore/deploy.js:98:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async chain (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js:42:9)
+    at async deploy (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js:120:5)
+[error] 
+[error] Error: An unexpected error has occurred.

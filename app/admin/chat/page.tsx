@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
+import { subscribeToChatRooms } from "@/lib/firebase/chat";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { StudioNavigation } from "@/components/studio/studio-navigation";
+import type { ChatRoom } from "@/lib/types";
 import Link from "next/link";
 
-// 임시 데이터 - 실제로는 Firebase에서 가져와야 함
-const mockChatRooms = [
+// 백업용 임시 데이터
+const fallbackChatRooms = [
   {
     id: "user123_ACHNkfU8GNT5u8AtGNP0UsszqIR2",
     participants: ["user123", ADMIN_UID],
@@ -40,7 +43,8 @@ const mockChatRooms = [
 
 export default function AdminChatPage() {
   const { user, loading } = useAuth();
-  const [chatRooms, setChatRooms] = useState(mockChatRooms);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [loadingChats, setLoadingChats] = useState(true);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -74,9 +78,27 @@ export default function AdminChatPage() {
     return chatRoom.unreadCount[ADMIN_UID] || 0;
   };
 
+  // 실제 Firebase 채팅방 데이터 구독
+  useEffect(() => {
+    if (!user || user.uid !== ADMIN_UID) return;
+
+    console.log("[AdminChatPage] Subscribing to chat rooms for admin:", user.uid);
+
+    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
+      console.log("[AdminChatPage] Received chat rooms:", rooms);
+      setChatRooms(rooms);
+      setLoadingChats(false);
+    });
+
+    return () => {
+      console.log("[AdminChatPage] Unsubscribing from chat rooms");
+      unsubscribe();
+    };
+  }, [user]);
+
   const totalUnreadCount = chatRooms.reduce((sum, chat) => sum + getUnreadCount(chat), 0);
 
-  if (loading) {
+  if (loading || loadingChats) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-sm text-muted-foreground">
@@ -122,7 +144,7 @@ export default function AdminChatPage() {
       </div>
 
       {/* 채팅방 목록 */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 pb-20">
         <div className="p-4">
           {chatRooms.length === 0 ? (
             <Card>
@@ -210,6 +232,9 @@ export default function AdminChatPage() {
           </Button>
         </div>
       </div>
+
+      {/* 하단 네비게이션 */}
+      <StudioNavigation />
     </div>
   );
 }

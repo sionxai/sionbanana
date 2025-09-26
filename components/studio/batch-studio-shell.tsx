@@ -855,17 +855,17 @@ export function BatchStudioShell() {
     <div className="flex flex-col gap-6 pb-28">
       <section className="border-b bg-muted/60 backdrop-blur-sm">
         <Tabs value={activeMode} onValueChange={value => setActiveMode(value as GenerationMode)}>
-          <div className="flex flex-wrap gap-2 px-6 py-4">
-            <TabsList className="flex flex-wrap gap-1 rounded-lg border bg-background/80 p-1 shadow-sm">
+          <div className="px-4 py-3">
+            <TabsList className="flex flex-wrap gap-1 bg-background/80 backdrop-blur-sm rounded-lg p-1 shadow-sm border">
               {BATCH_MODES.map(mode =>
                 mode.href ? (
                   <Link
                     key={mode.id}
                     href={mode.href}
                     className={cn(
-                      "rounded-lg border border-transparent px-4 py-3 text-xs transition-all duration-200",
+                      "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
                       "bg-background/70 text-foreground hover:bg-primary/10 hover:border-primary/20",
-                      "flex flex-col text-left shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
+                      "flex flex-col text-center shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
                     )}
                   >
                     <span className="font-medium leading-none">{mode.label}</span>
@@ -877,12 +877,12 @@ export function BatchStudioShell() {
                     value={mode.id}
                     className={cn(
                       "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg",
-                      "rounded-lg border border-transparent px-4 py-3 text-xs transition-all duration-200",
+                      "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
                       "bg-background/50 text-muted-foreground hover:bg-background/70 hover:text-foreground",
                       "data-[state=active]:border-primary/30 hover:shadow-sm transform hover:-translate-y-0.5"
                     )}
                   >
-                    <div className="flex flex-col text-left">
+                    <div className="flex flex-col text-center">
                       <span className="font-medium leading-none">{mode.label}</span>
                       <span className="text-[11px] text-muted-foreground">{mode.description}</span>
                     </div>

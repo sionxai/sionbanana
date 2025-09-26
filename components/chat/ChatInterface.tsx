@@ -62,7 +62,7 @@ export function ChatInterface({ chatId, currentUserId, currentUserName }: ChatIn
   }, [messages, currentUserId, markAsRead]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col pb-20">
       {/* 채팅 헤더 */}
       <Card className="rounded-none border-x-0 border-t-0">
         <CardHeader className="pb-3">

@@ -3,16 +3,20 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
+import { chatDocRef } from "@/lib/firebase/chat";
+import { getDoc } from "firebase/firestore";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AdminChatInterface } from "@/components/chat/AdminChatInterface";
+import { StudioNavigation } from "@/components/studio/studio-navigation";
+import type { ChatRoom } from "@/lib/types";
 import Link from "next/link";
 
-// 임시 데이터 - 실제로는 Firebase에서 가져와야 함
-const mockChatRooms: Record<string, any> = {
+// 백업용 임시 데이터
+const fallbackChatRooms: Record<string, any> = {
   "user123_ACHNkfU8GNT5u8AtGNP0UsszqIR2": {
     id: "user123_ACHNkfU8GNT5u8AtGNP0UsszqIR2",
     participants: ["user123", ADMIN_UID],
@@ -49,12 +53,53 @@ export default function AdminChatDetailPage() {
   const { user, loading } = useAuth();
   const chatId = params.chatId as string;
   const [chatRoom, setChatRoom] = useState<any>(null);
+  const [loadingChat, setLoadingChat] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // 실제 Firebase에서 채팅방 데이터 가져오기
   useEffect(() => {
-    if (chatId && mockChatRooms[chatId]) {
-      setChatRoom(mockChatRooms[chatId]);
-    }
+    const loadChatRoom = async () => {
+      if (!chatId) return;
+
+      try {
+        console.log("[AdminChatDetail] Loading chat room:", chatId);
+        const chatDocReference = chatDocRef(chatId);
+        const chatSnap = await getDoc(chatDocReference);
+
+        if (chatSnap.exists()) {
+          const data = chatSnap.data();
+          const chatRoomData = {
+            id: chatSnap.id,
+            participants: data.participants,
+            participantNames: data.participantNames,
+            lastMessage: data.lastMessage,
+            lastMessageAt: data.lastMessageAt?.toDate?.()?.toISOString() || data.lastMessageAt,
+            unreadCount: data.unreadCount || {},
+            createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+            updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
+            // 사용자 정보 (임시)
+            userInfo: {
+              email: "user@example.com",
+              plan: "basic",
+              joinedAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+              lastActive: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt
+            }
+          };
+          console.log("[AdminChatDetail] Chat room loaded:", chatRoomData);
+          setChatRoom(chatRoomData);
+        } else {
+          console.log("[AdminChatDetail] Chat room not found:", chatId);
+          setChatRoom(null);
+        }
+      } catch (error) {
+        console.error("[AdminChatDetail] Error loading chat room:", error);
+        setChatRoom(null);
+      } finally {
+        setLoadingChat(false);
+      }
+    };
+
+    loadChatRoom();
   }, [chatId]);
 
   const getUserName = (chatRoom: any) => {
@@ -70,7 +115,7 @@ export default function AdminChatDetailPage() {
     return new Date(timestamp).toLocaleString("ko-KR");
   };
 
-  if (loading) {
+  if (loading || loadingChat) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-sm text-muted-foreground">
@@ -121,11 +166,12 @@ export default function AdminChatDetailPage() {
   const userId = getUserId(chatRoom);
 
   return (
-    <div className="flex h-screen bg-background">
-      {/* 사이드바 - 사용자 정보 */}
-      <div className={`border-r bg-muted/30 transition-all duration-300 ${
-        sidebarCollapsed ? "w-0 overflow-hidden" : "w-80"
-      }`}>
+    <div className="flex min-h-screen bg-background flex-col">
+      <div className="flex flex-1 overflow-hidden">
+        {/* 사이드바 - 사용자 정보 */}
+        <div className={`border-r bg-muted/30 transition-all duration-300 ${
+          sidebarCollapsed ? "w-0 overflow-hidden" : "w-80"
+        }`}>
         <div className="p-4 space-y-4">
           {/* 헤더 */}
           <div className="flex items-center justify-between">
@@ -261,6 +307,10 @@ export default function AdminChatDetailPage() {
           />
         </div>
       </div>
+      </div>
+
+      {/* 하단 네비게이션 */}
+      <StudioNavigation />
     </div>
   );
 }

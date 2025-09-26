@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useAuth } from "@/components/providers/auth-provider";
+import { subscribeToChatRooms } from "@/lib/firebase/chat";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ADMIN_UID } from "@/lib/constants";
+import type { ChatRoom } from "@/lib/types";
 
 // 임시 데이터 - 실제로는 Firebase에서 가져와야 함
 const mockChatRooms = [
@@ -36,7 +39,28 @@ const mockChatRooms = [
 ];
 
 export default function ChatManagement() {
+  const { user } = useAuth();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 실제 Firebase 채팅방 데이터 구독
+  useEffect(() => {
+    if (!user || user.uid !== ADMIN_UID) {
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
+      console.log("[ChatManagement] Received chat rooms:", rooms);
+      setChatRooms(rooms.slice(0, 3)); // 최대 3개만 표시
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user]);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -69,18 +93,22 @@ export default function ChatManagement() {
         <CardTitle className="flex items-center justify-between">
           1:1 상담 관리
           <Badge variant="secondary">
-            {mockChatRooms.length}개 채팅방
+            {chatRooms.length}개 채팅방
           </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {mockChatRooms.length === 0 ? (
+          {loading ? (
+            <div className="py-4 text-center text-muted-foreground">
+              채팅 목록을 불러오고 있습니다...
+            </div>
+          ) : chatRooms.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
               아직 상담 요청이 없습니다.
             </div>
           ) : (
-            mockChatRooms.map((chatRoom) => {
+            chatRooms.map((chatRoom) => {
               const unreadCount = getUnreadCount(chatRoom);
               const userName = getUserName(chatRoom);
 
@@ -124,10 +152,10 @@ export default function ChatManagement() {
           )}
         </div>
 
-        {mockChatRooms.length > 0 && (
+        {chatRooms.length > 0 && (
           <div className="mt-4 pt-4 border-t">
             <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>총 {mockChatRooms.filter(chat => getUnreadCount(chat) > 0).length}개의 읽지 않은 대화</span>
+              <span>총 {chatRooms.filter(chat => getUnreadCount(chat) > 0).length}개의 읽지 않은 대화</span>
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/admin/chat">
                   모든 채팅 보기

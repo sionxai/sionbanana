@@ -160,12 +160,12 @@ export async function markChatAsRead(chatId: string, userId: string): Promise<vo
   }
 }
 
-// 관리자용: 모든 채팅방 가져오기
+// 관리자용: 모든 채팅방 가져오기 (임시로 orderBy 제거)
 export function adminChatsQuery() {
   return query(
     chatsCollection(),
-    where("participants", "array-contains", ADMIN_UID),
-    orderBy("updatedAt", "desc")
+    where("participants", "array-contains", ADMIN_UID)
+    // orderBy("updatedAt", "desc") // 인덱스 생성 후 활성화
   );
 }
 
@@ -203,8 +203,8 @@ export function subscribeToChatRooms(
 ): () => void {
   const q = query(
     chatsCollection(),
-    where("participants", "array-contains", userId),
-    orderBy("updatedAt", "desc")
+    where("participants", "array-contains", userId)
+    // orderBy("updatedAt", "desc") // 인덱스 생성 후 활성화
   );
 
   return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
@@ -228,6 +228,14 @@ export function subscribeToChatRooms(
           data.updatedAt
       });
     });
+
+    // 클라이언트에서 정렬 (인덱스 생성 전까지 임시)
+    chatRooms.sort((a, b) => {
+      const dateA = new Date(a.updatedAt || a.createdAt);
+      const dateB = new Date(b.updatedAt || b.createdAt);
+      return dateB.getTime() - dateA.getTime();
+    });
+
     callback(chatRooms);
   });
 }

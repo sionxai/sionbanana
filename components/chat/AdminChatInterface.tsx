@@ -91,7 +91,7 @@ export function AdminChatInterface({
   }, [messages, currentUserId, markAsRead]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col pb-20">
       {/* 상태 표시 */}
       <div className="border-b bg-muted/30 px-4 py-2">
         <div className="flex items-center justify-between">

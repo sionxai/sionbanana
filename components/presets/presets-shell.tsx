@@ -45,6 +45,14 @@ import {
 import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { cn } from "@/lib/utils";
 import { Download, Image as ImageIcon, Sparkles, Stars, Zap } from "lucide-react";
+import Link from "next/link";
+import { Tabs, TabsList } from "@/components/ui/tabs";
+
+const PRESET_MODES = [
+  { id: "create", label: "1개 생성", description: "기본 프롬프트 기반 이미지 생성", href: "/studio" },
+  { id: "batch", label: "다수 생성", description: "여러 이미지를 한번에 생성", href: "/studio/batch" },
+  { id: "presets", label: "프리셋", description: "자주 쓰는 시나리오 모음" }
+];
 
 const PHOTO_DUMP_VIEWS: ViewSpec[] = [
   { id: "style-film", label: "필름 감성", instruction: "Apply warm film photography look with subtle grain and soft highlights" },
@@ -1538,6 +1546,42 @@ type ReferenceImageState = {
 
   return (
     <>
+      {/* 상단 네비게이션 */}
+      <div className="border-b bg-muted/60 backdrop-blur-sm">
+        <Tabs value="presets">
+          <div className="px-4 py-3">
+            <TabsList className="flex flex-wrap gap-1 bg-background/80 backdrop-blur-sm rounded-lg p-1 shadow-sm border">
+              {PRESET_MODES.map(mode =>
+                mode.href ? (
+                  <Link
+                    key={mode.id}
+                    href={mode.href}
+                    className={cn(
+                      "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
+                      "bg-background/70 text-foreground hover:bg-primary/10 hover:border-primary/20",
+                      "flex flex-col text-center shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
+                    )}
+                  >
+                    <span className="font-medium leading-none">{mode.label}</span>
+                  </Link>
+                ) : (
+                  <div
+                    key={mode.id}
+                    className={cn(
+                      "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
+                      "bg-primary text-primary-foreground shadow-lg border-primary/30",
+                      "flex flex-col text-center"
+                    )}
+                  >
+                    <span className="font-medium leading-none">{mode.label}</span>
+                  </div>
+                )
+              )}
+            </TabsList>
+          </div>
+        </Tabs>
+      </div>
+
       <div className="flex min-h-screen flex-col gap-8 bg-background p-6">
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card>

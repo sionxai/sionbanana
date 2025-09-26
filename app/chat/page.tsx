@@ -1,20 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { getOrCreateChatRoom } from "@/lib/firebase/chat";
 import { ChatInterface } from "@/components/chat/ChatInterface";
 import { StudioNavigation } from "@/components/studio/studio-navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ADMIN_UID } from "@/lib/constants";
 
 export default function ChatPage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const [chatId, setChatId] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
     const initializeChat = async () => {
       if (!user || loading) return;
+
+      // 관리자인 경우 관리자 채팅 페이지로 리다이렉트
+      if (user.uid === ADMIN_UID) {
+        router.replace("/admin/chat");
+        return;
+      }
 
       try {
         const chatRoomId = await getOrCreateChatRoom(
@@ -30,7 +39,7 @@ export default function ChatPage() {
     };
 
     initializeChat();
-  }, [user, loading]);
+  }, [user, loading, router]);
 
   if (loading || initializing) {
     return (
@@ -67,7 +76,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <div className="flex-1 pb-16">
+      <div className="flex-1 pb-20">
         {chatId ? (
           <ChatInterface
             chatId={chatId}

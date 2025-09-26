@@ -365,7 +365,7 @@ const MODES: Array<{
     id: "presets",
     label: "프리셋",
     description: "자주 쓰는 시나리오 모음",
-    href: "/presets"
+    href: "/studio/presets"
   }
 ];
 
