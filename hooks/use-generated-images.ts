@@ -20,6 +20,7 @@ export function useGeneratedImages({ limitResults = 50, onNewRecord }: UseGenera
 
   useEffect(() => {
     if (!shouldUseFirestore) {
+      console.log("[useGeneratedImages] Firestore is disabled");
       setRecords([]);
       setLoading(false);
     }
@@ -35,11 +36,14 @@ export function useGeneratedImages({ limitResults = 50, onNewRecord }: UseGenera
     }
 
     if (!user) {
+      console.log("[useGeneratedImages] No user found - clearing records");
       setRecords([]);
       setLoading(false);
       lastRecordIdsRef.current = new Set();
       return;
     }
+
+    console.log("[useGeneratedImages] User found:", user.uid, "isAnonymous:", user.isAnonymous);
 
     let cancelled = false;
     setLoading(true);
@@ -52,7 +56,9 @@ export function useGeneratedImages({ limitResults = 50, onNewRecord }: UseGenera
       try {
         isLoadingRef.current = true;
         const q = query(userImagesCollection(user.uid), orderBy("createdAt", "desc"), limit(limitResults));
+        console.log("[useGeneratedImages] Querying for user:", user.uid, "limit:", limitResults);
         const snapshot = await getDocs(q);
+        console.log("[useGeneratedImages] Query result:", snapshot.docs.length, "documents");
 
         const items: GeneratedImageDocument[] = snapshot.docs.map(doc => {
           const data = doc.data();
