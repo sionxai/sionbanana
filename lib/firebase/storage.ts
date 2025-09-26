@@ -10,7 +10,11 @@ export async function uploadUserImage(
   imageId: string,
   file: Blob | ArrayBuffer
 ) {
-  const storageRef = ref(storage(), userImagePath(userId, imageId));
+  const storageInstance = storage();
+  if (!storageInstance) {
+    throw new Error("Firebase Storage not initialized");
+  }
+  const storageRef = ref(storageInstance, userImagePath(userId, imageId));
   const data = file instanceof Blob ? file : new Blob([file]);
   const result = await uploadBytes(storageRef, data, {
     contentType: "image/png",
@@ -22,7 +26,11 @@ export async function uploadUserImage(
 }
 
 export async function deleteUserImage(userId: string, imageId: string) {
-  const storageRef = ref(storage(), userImagePath(userId, imageId));
+  const storageInstance = storage();
+  if (!storageInstance) {
+    throw new Error("Firebase Storage not initialized");
+  }
+  const storageRef = ref(storageInstance, userImagePath(userId, imageId));
   try {
     await deleteObject(storageRef);
   } catch (error) {
