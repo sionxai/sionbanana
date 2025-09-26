@@ -108,7 +108,12 @@ export function useGeneratedImages({ limitResults = 50, onNewRecord }: UseGenera
         setRecords(items);
         setLoading(false);
       } catch (err) {
-        console.error("Failed to load generated images:", err);
+        console.error("[useGeneratedImages] Failed to load generated images:", err);
+        console.error("[useGeneratedImages] Error details:", {
+          message: err instanceof Error ? err.message : String(err),
+          code: (err as any)?.code,
+          userId: user.uid
+        });
         setRecords([]);
         setLoading(false);
       } finally {

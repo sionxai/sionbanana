@@ -1,44 +1,33 @@
 import { NextResponse } from "next/server";
-import { query, orderBy, limit, getDocs } from "firebase/firestore";
-import { userImagesCollection } from "@/lib/firebase/firestore";
-import { firestore } from "@/lib/firebase/client";
-import { shouldUseFirestore } from "@/lib/env";
+import { getAdminDb } from "@/lib/firebase/admin";
 
 export async function GET() {
   try {
-    const result = {
-      shouldUseFirestore,
-      firestoreInitialized: false,
-      testQuery: false,
-      error: null as string | null
-    };
+    const db = getAdminDb();
+    const userId = "ACHNkfU8GNT5u8AtGNP0UsszqIR2";
 
-    const db = firestore();
-    result.firestoreInitialized = !!db;
+    // 프로덕션에서 실제 사용자 데이터 확인
+    const collection = db.collection(`users/${userId}/images`);
+    const snapshot = await collection.limit(10).get();
 
-    if (!db || !shouldUseFirestore) {
-      return NextResponse.json(result);
-    }
+    const docs = snapshot.docs.map(doc => ({
+      id: doc.id,
+      createdAt: doc.data().createdAt,
+      status: doc.data().status,
+      imageUrl: doc.data().imageUrl ? "present" : "missing"
+    }));
 
-    // 테스트용 더미 사용자 ID로 쿼리 시도
-    const testUserId = "test-user-123";
-    const q = query(userImagesCollection(testUserId), orderBy("createdAt", "desc"), limit(1));
-
-    try {
-      await getDocs(q);
-      result.testQuery = true;
-    } catch (error: any) {
-      result.error = error.message;
-    }
-
-    return NextResponse.json(result);
+    return NextResponse.json({
+      userId,
+      totalDocs: snapshot.docs.length,
+      docs,
+      databaseType: "default"
+    });
 
   } catch (error: any) {
     return NextResponse.json({
       error: error.message,
-      shouldUseFirestore,
-      firestoreInitialized: false,
-      testQuery: false
+      userId: "ACHNkfU8GNT5u8AtGNP0UsszqIR2"
     });
   }
 }
