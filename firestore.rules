@@ -1,8 +1,13 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 임시로 모든 읽기/쓰기 허용 (테스트용)
+    // 완전히 개방된 규칙 (테스트용)
     match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // 사용자별 데이터 접근 허용
+    match /users/{userId}/{document=**} {
       allow read, write: if true;
     }
   }

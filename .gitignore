@@ -4,5 +4,26 @@
 # local tooling
 .claude/
 
+# dependencies
+/node_modules
+
+# build output
+/.next
+/out
+/dist
+/build
+
+# env files
+.env
+.env.*
+.env.local
+
 # secrets
 firebase key/
+
+# misc
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vscode
+.idea
