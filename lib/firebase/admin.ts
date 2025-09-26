@@ -38,7 +38,8 @@ function ensureAdminApp(): App {
       clientEmail: serviceAccount.clientEmail,
       privateKey: serviceAccount.privateKey
     }),
-    projectId: serviceAccount.projectId
+    projectId: serviceAccount.projectId,
+    storageBucket: "sionbanana.firebasestorage.app"
   });
 
   return adminApp;
