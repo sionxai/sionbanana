@@ -88,3 +88,24 @@ export interface UserProfileDocument {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ChatMessage {
+  id: string;
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: string;
+  readBy: Record<string, string>;
+}
+
+export interface ChatRoom {
+  id: string;
+  participants: string[];
+  participantNames: Record<string, string>;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  unreadCount: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+}

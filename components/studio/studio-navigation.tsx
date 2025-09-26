@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/studio", label: "1개 생성" },
   { href: "/studio/batch", label: "다수 생성" },
-  { href: "/studio/presets", label: "프리셋" }
+  { href: "/studio/presets", label: "프리셋" },
+  { href: "/chat", label: "1:1 상담하기" }
 ];
 
 export function StudioNavigation() {

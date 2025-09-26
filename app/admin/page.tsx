@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AuthGate from "@/components/auth/auth-gate";
 import PendingRequestsList from "@/components/admin/PendingRequestsList";
 import UserSearchSelect from "@/components/admin/UserSearchSelect";
+import ChatManagement from "@/components/admin/ChatManagement";
 import { firebaseAuth } from "@/lib/firebase/client";
 import { ADMIN_UID, PLANS, type PlanId } from "@/lib/constants";
 
@@ -188,6 +189,9 @@ export default function AdminPage() {
 
         {/* 대기 중인 플랜 신청 목록 */}
         <PendingRequestsList onRequestProcessed={load} />
+
+        {/* 1:1 상담 관리 */}
+        <ChatManagement />
 
         {/* 사용자 개별 관리 */}
         <div className="rounded-lg border p-6">
