@@ -2806,19 +2806,19 @@ ${viewInstruction}`;
         <div className="border-t bg-muted/60 backdrop-blur-sm">
           <Tabs value={activeMode} onValueChange={value => setActiveMode(value as GenerationMode)}>
             <div className="px-4 py-3">
-              <TabsList className="grid grid-cols-5 lg:grid-cols-10 gap-1 bg-background/80 backdrop-blur-sm rounded-lg p-1 shadow-sm border w-full">
+              <TabsList className="flex flex-wrap gap-1 bg-background/80 backdrop-blur-sm rounded-lg p-1 shadow-sm border">
                 {MODES.map(mode => (
                   mode.href ? (
                     <Link
                       key={mode.id}
                       href={mode.href}
                       className={cn(
-                        "rounded-lg border border-transparent px-2 py-2 text-xs transition-all duration-200",
+                        "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
                         "bg-background/70 text-foreground hover:bg-primary/10 hover:border-primary/20",
-                        "flex flex-col items-center justify-center text-center shadow-sm hover:shadow-md transform hover:-translate-y-0.5 aspect-square"
+                        "flex flex-col text-center shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
                       )}
                     >
-                      <span className="font-medium leading-tight text-[11px] lg:text-xs">{mode.label}</span>
+                      <span className="font-medium leading-none">{mode.label}</span>
                     </Link>
                   ) : (
                     <TabsTrigger
@@ -2826,13 +2826,13 @@ ${viewInstruction}`;
                       value={mode.id}
                       className={cn(
                         "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg",
-                        "rounded-lg border border-transparent px-2 py-2 text-xs transition-all duration-200",
+                        "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
                         "bg-background/50 text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                        "data-[state=active]:border-primary/30 hover:shadow-sm transform hover:-translate-y-0.5 aspect-square",
-                        "flex flex-col items-center justify-center text-center"
+                        "data-[state=active]:border-primary/30 hover:shadow-sm transform hover:-translate-y-0.5",
+                        "flex flex-col text-center"
                       )}
                     >
-                      <span className="font-medium leading-tight text-[11px] lg:text-xs">{mode.label}</span>
+                      <span className="font-medium leading-none">{mode.label}</span>
                     </TabsTrigger>
                   )
                 ))}
