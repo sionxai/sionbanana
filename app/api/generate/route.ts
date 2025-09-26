@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { serverEnv } from "@/lib/env";
-import { MissingServiceAccountKeyError, getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { MissingServiceAccountKeyError, getAdminAuth, getAdminDb, getAdminStorage } from "@/lib/firebase/admin";
 import { ADMIN_UID, PLANS } from "@/lib/constants";
 import { startOfNextMonthUTC } from "@/lib/entitlements";
 import type { GenerationMode } from "@/lib/types";
@@ -52,6 +52,29 @@ const TEXT_RESPONSE_MIME_SET = new Set([
   "text/x.enum"
 ]);
 const DEFAULT_IMAGE_MIME = "image/png";
+
+function filterLargeBase64FromOptions(options: Record<string, any>): Record<string, any> {
+  const filtered: Record<string, any> = {};
+
+  for (const [key, value] of Object.entries(options)) {
+    if (typeof value === "string" && value.startsWith("data:") && value.length > 100000) {
+      // Replace large base64 data with a placeholder
+      filtered[key] = `[BASE64_DATA_FILTERED_${value.length}_BYTES]`;
+    } else if (Array.isArray(value)) {
+      // Check array elements for large base64 data
+      filtered[key] = value.map(item => {
+        if (typeof item === "string" && item.startsWith("data:") && item.length > 100000) {
+          return `[BASE64_DATA_FILTERED_${item.length}_BYTES]`;
+        }
+        return item;
+      });
+    } else {
+      filtered[key] = value;
+    }
+  }
+
+  return filtered;
+}
 
 async function canGenerateAndConsume(uid: string) {
   const ref = getAdminDb().collection("users").doc(uid);
@@ -215,6 +238,32 @@ export async function POST(request: NextRequest) {
       const now = Timestamp.now();
 
       try {
+        // Convert base64 to blob and upload to Firebase Storage
+        const base64DataUrl = result.base64Image;
+        // Extract base64 part from data URL (remove "data:image/png;base64," prefix)
+        const base64Data = base64DataUrl.split(',')[1];
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+
+        const bucket = getAdminStorage().bucket();
+        const fileName = `users/${decoded.uid}/images/${imageId}.png`;
+        const file = bucket.file(fileName);
+
+        await file.save(imageBuffer, {
+          metadata: {
+            contentType: 'image/png',
+          },
+        });
+
+        // Make file publicly accessible
+        await file.makePublic();
+
+        // Get public URL
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+        console.log(`🔍 Debug publicUrl: ${publicUrl} (length: ${publicUrl.length})`);
+        console.log(`🔍 Debug base64DataUrl length: ${base64DataUrl.length}`);
+        console.log(`🔍 Debug payload.options:`, JSON.stringify(payload.options).length, "bytes");
+
         const imageDocData = {
           mode: payload.mode,
           status: "completed",
@@ -224,11 +273,11 @@ export async function POST(request: NextRequest) {
             negativePrompt: payload.negativePrompt || null,
             aspectRatio: payload.options?.aspectRatio || "original"
           },
-          imageUrl: `data:image/png;base64,${result.base64Image}`,
+          imageUrl: publicUrl,
           originalImageUrl: null,
           thumbnailUrl: null,
           diff: null,
-          metadata: payload.options || {},
+          metadata: filterLargeBase64FromOptions(payload.options || {}),
           model: result.modelId,
           costCredits: 1,
           createdAt: now,
@@ -237,6 +286,8 @@ export async function POST(request: NextRequest) {
           updatedAtIso: now.toDate().toISOString()
         };
 
+        console.log(`🔍 Debug imageDocData serialized length: ${JSON.stringify(imageDocData).length} bytes`);
+
         await getAdminDb()
           .collection("users")
           .doc(decoded.uid)
@@ -244,7 +295,7 @@ export async function POST(request: NextRequest) {
           .doc(imageId)
           .set(imageDocData);
 
-        console.log(`💾 Image saved to Firestore: users/${decoded.uid}/images/${imageId}`);
+        console.log(`💾 Image saved to Storage and Firestore: ${publicUrl}`);
       } catch (firestoreError) {
         console.error("Failed to save image to Firestore:", firestoreError);
         // Continue without failing the request
