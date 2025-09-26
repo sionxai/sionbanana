@@ -79,7 +79,7 @@ export default function AccountMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-[9999] mt-2 w-48 rounded-md border bg-background p-1 shadow-md"
+          className="absolute right-0 z-[10001] mt-2 w-48 rounded-md border bg-background p-1 shadow-md"
         >
           <Link
             href="/billing"

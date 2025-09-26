@@ -28,7 +28,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
   if (user) {
     return (
       <div className="flex min-h-screen flex-col">
-        <header className="flex items-center justify-between border-b bg-background/80 px-8 py-4 backdrop-blur overflow-visible">
+        <header className="flex items-center justify-between border-b bg-background/80 px-8 py-4 backdrop-blur overflow-visible relative z-[10000]">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex flex-col hover:opacity-90">
               <span className="text-sm font-semibold text-foreground">YesGem Studio</span>
