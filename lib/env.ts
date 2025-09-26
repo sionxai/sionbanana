@@ -66,7 +66,7 @@ export const shouldUseFirestore = isFirebaseConfigured && clientEnv.NEXT_PUBLIC_
 
 
 export const serverEnv = serverSchema.parse({
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "AIzaSyBehU6k3-mudHkJV1xQiSgMVUgZ-tBKHw4",
+  GEMINI_API_KEY: "AIzaSyBehU6k3-mudHkJV1xQiSgMVUgZ-tBKHw4",
   FIREBASE_SERVICE_ACCOUNT_KEY: process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID || "sionbanana1"
