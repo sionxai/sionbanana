@@ -16,6 +16,13 @@ export function getFirebaseApp(): FirebaseApp {
       const apiKey = clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY;
       const projectId = clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
+      console.log('Firebase Config Debug:', {
+        apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : 'undefined',
+        projectId,
+        authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+        hasValidConfig: !(!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project")
+      });
+
       if (!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project") {
         throw new Error("Firebase가 설정되지 않았습니다. 로컬 모드로 작동합니다.");
       }
