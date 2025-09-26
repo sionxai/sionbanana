@@ -34,16 +34,16 @@ const rawClientEnv = clientSchema.parse({
 });
 
 const defaultClientEnv = {
-  NEXT_PUBLIC_FIREBASE_API_KEY: "demo",
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "demo.firebaseapp.com",
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-project",
-  NEXT_PUBLIC_FIREBASE_DATABASE_URL: "https://demo-project.firebaseio.com",
-  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "demo.appspot.com",
-  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "111111111111",
-  NEXT_PUBLIC_FIREBASE_APP_ID: "1:111111111111:web:demo",
-  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: undefined as string | undefined,
+  NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyCO8jsRaN0KAk4hZ1qVO4YLzChtf3A4zek",
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "sionbanana.firebaseapp.com",
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: "sionbanana",
+  NEXT_PUBLIC_FIREBASE_DATABASE_URL: "https://sionbanana-default-rtdb.firebaseio.com/",
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "sionbanana.firebasestorage.app",
+  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "309643440962",
+  NEXT_PUBLIC_FIREBASE_APP_ID: "1:309643440962:web:285958c6382c94761a0edb",
+  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: "G-7PJLWZR0EH",
   NEXT_PUBLIC_FIREBASE_USE_FIRESTORE: "true",
-  NEXT_PUBLIC_FIREBASE_DATABASE_ID: undefined as string | undefined
+  NEXT_PUBLIC_FIREBASE_DATABASE_ID: "sionbanana1"
 };
 
 export const clientEnv = {
@@ -58,10 +58,10 @@ export const shouldUseFirestore = isFirebaseConfigured && clientEnv.NEXT_PUBLIC_
 
 
 export const serverEnv = serverSchema.parse({
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "AIzaSyBehU6k3-mudHkJV1xQiSgMVUgZ-tBKHw4",
   FIREBASE_SERVICE_ACCOUNT_KEY: process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID
+  FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID || "sionbanana1"
 });
 
 export function getServiceAccountKey(): {
