@@ -14,6 +14,7 @@ export default function ChatPage() {
   const router = useRouter();
   const [chatId, setChatId] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const initializeChat = async () => {
@@ -33,6 +34,17 @@ export default function ChatPage() {
         setChatId(chatRoomId);
       } catch (error) {
         console.error("Failed to initialize chat:", error);
+        // Firebase 초기화 에러인 경우 더 자세한 로그
+        if (error instanceof Error) {
+          console.error("Chat initialization error details:", {
+            message: error.message,
+            stack: error.stack,
+            userId: user.uid
+          });
+          setErrorMessage(error.message);
+        } else {
+          setErrorMessage("채팅방을 생성하는 중 알 수 없는 오류가 발생했습니다.");
+        }
       } finally {
         setInitializing(false);
       }
@@ -84,10 +96,24 @@ export default function ChatPage() {
             currentUserName={user.displayName || user.email || "사용자"}
           />
         ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-muted-foreground">
-              채팅방을 생성하는 중 오류가 발생했습니다.
-            </div>
+          <div className="flex h-full items-center justify-center p-4">
+            <Card className="w-full max-w-md">
+              <CardHeader>
+                <CardTitle className="text-destructive">채팅 오류</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  채팅방을 생성하는 중 오류가 발생했습니다.
+                </p>
+                {errorMessage && (
+                  <div className="bg-muted p-3 rounded-md">
+                    <p className="text-sm text-muted-foreground">
+                      오류 상세: {errorMessage}
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
       </div>

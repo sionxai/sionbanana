@@ -23,19 +23,28 @@ import { ADMIN_UID } from "@/lib/constants";
 
 export function chatsCollection() {
   const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
+  if (!db) {
+    console.error("Firestore initialization failed - check Firebase configuration");
+    throw new Error("Firebase Firestore가 초기화되지 않았습니다. 설정을 확인해주세요.");
+  }
   return collection(db, "chats");
 }
 
 export function chatDocRef(chatId: string) {
   const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
+  if (!db) {
+    console.error("Firestore initialization failed - check Firebase configuration");
+    throw new Error("Firebase Firestore가 초기화되지 않았습니다. 설정을 확인해주세요.");
+  }
   return doc(db, "chats", chatId);
 }
 
 export function messagesCollection(chatId: string) {
   const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
+  if (!db) {
+    console.error("Firestore initialization failed - check Firebase configuration");
+    throw new Error("Firebase Firestore가 초기화되지 않았습니다. 설정을 확인해주세요.");
+  }
   return collection(db, "chats", chatId, "messages");
 }
 
