@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork, terminate, clearIndexedDbPersistence } from "firebase/firestore";
+import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork, terminate, clearIndexedDbPersistence, initializeFirestore, CACHE_SIZE_UNLIMITED } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { clientEnv } from "@/lib/env";
 
@@ -73,7 +73,7 @@ export const firebaseAuth = () => {
 let firestoreInstance: any = null;
 let initializationPromise: Promise<any> | null = null;
 
-// Vercel 호환 Firestore 초기화 방식
+// 완전히 새로운 접근: 강제 온라인 모드 + 캐시 비활성화
 export const firestore = () => {
   if (firestoreInstance) {
     return firestoreInstance;
@@ -83,33 +83,69 @@ export const firestore = () => {
     const app = getFirebaseApp();
     const databaseId = clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID;
 
-    console.log('[Firestore] Initializing with database ID:', databaseId);
+    console.log('[Firestore] Creating force-online instance with database ID:', databaseId);
     console.log('[Firestore] Environment:', process.env.NODE_ENV);
 
-    // 기본 getFirestore 사용 (Vercel 호환성을 위해)
-    if (databaseId && databaseId !== '(default)') {
-      firestoreInstance = getFirestore(app, databaseId);
-    } else {
-      firestoreInstance = getFirestore(app);
+    let db;
+
+    // initializeFirestore를 사용해서 캐시를 완전히 제어
+    try {
+      const settings: any = {
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+        // 강제 온라인 모드를 위한 설정
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true
+      };
+
+      if (databaseId && databaseId !== '(default)') {
+        settings.databaseId = databaseId;
+      }
+
+      db = initializeFirestore(app, settings);
+      console.log('[Firestore] initializeFirestore with force-online settings successful');
+    } catch (initError) {
+      console.warn('[Firestore] initializeFirestore failed, falling back to getFirestore:', initError);
+
+      // initializeFirestore 실패시 기본 getFirestore 사용
+      if (databaseId && databaseId !== '(default)') {
+        db = getFirestore(app, databaseId);
+      } else {
+        db = getFirestore(app);
+      }
     }
 
-    console.log('[Firestore] Instance created, forcing online mode...');
+    console.log('[Firestore] Instance created, forcing network online...');
 
-    // 즉시 온라인 모드 강제 활성화
-    enableNetwork(firestoreInstance)
+    // 강제 온라인 모드 활성화
+    enableNetwork(db)
       .then(() => {
-        console.log('[Firestore] Network enabled successfully');
-        isForceOfflineModeEnabled = false;
+        console.log('[Firestore] ✅ Network successfully enabled');
       })
-      .catch(error => {
-        console.warn("[Firestore] Failed to enable network:", error);
-        // 네트워크 활성화가 실패해도 계속 진행
+      .catch(enableError => {
+        console.warn("[Firestore] ⚠️ Enable network failed, but continuing:", enableError);
       });
 
-    return firestoreInstance;
+    firestoreInstance = db;
+    return db;
   } catch (error) {
     console.error("Firebase Firestore 초기화 완전 실패:", error);
-    return null;
+
+    // 마지막 수단: 완전 기본 설정
+    try {
+      console.log('[Firestore] 🆘 Attempting emergency fallback...');
+      const app = getFirebaseApp();
+      const emergencyDb = getFirestore(app);
+
+      // 응급 상황: 네트워크 강제 활성화
+      enableNetwork(emergencyDb);
+      console.log('[Firestore] 🚑 Emergency fallback successful');
+
+      firestoreInstance = emergencyDb;
+      return emergencyDb;
+    } catch (emergencyError) {
+      console.error("[Firestore] 💀 Emergency fallback also failed:", emergencyError);
+      return null;
+    }
   }
 };
 
