@@ -41,6 +41,12 @@ export default function ChatPage() {
 
       try {
         console.log("[Chat] Calling getOrCreateChatRoom...");
+
+        // Firebase가 계속 오프라인 상태라면 강제로 연결 시도
+        const { ensureFirebaseConnection } = await import("@/lib/firebase/client");
+        const isConnected = await ensureFirebaseConnection();
+        console.log("[Chat] Firebase connection status:", isConnected);
+
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"

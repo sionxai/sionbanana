@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork } from "firebase/firestore";
+import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork, terminate, clearIndexedDbPersistence } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { clientEnv } from "@/lib/env";
 
@@ -20,7 +20,9 @@ export function getFirebaseApp(): FirebaseApp {
         apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : 'undefined',
         projectId,
         authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-        hasValidConfig: !(!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project")
+        storageBucket: clientEnv.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        hasValidConfig: !(!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project"),
+        isDemoMode: apiKey === "demo" || projectId === "demo-project"
       });
 
       if (!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project") {
@@ -52,9 +54,19 @@ export const firebaseAuth = () => {
   }
 };
 
+let firestoreInstance: any = null;
+
 export const firestore = () => {
   try {
-    return getFirestore(getFirebaseApp());
+    if (!firestoreInstance) {
+      firestoreInstance = getFirestore(getFirebaseApp());
+
+      // 강제로 온라인 모드 활성화
+      enableNetwork(firestoreInstance).catch(error => {
+        console.warn("Failed to enable Firestore network:", error);
+      });
+    }
+    return firestoreInstance;
   } catch (error) {
     console.warn("Firebase Firestore를 초기화할 수 없습니다:", error);
     return null;
@@ -88,13 +100,47 @@ export function enableFirebaseEmulators() {
 export async function ensureFirebaseConnection(): Promise<boolean> {
   try {
     const db = firestore();
-    if (!db) return false;
+    if (!db) {
+      console.error("Firestore instance is null");
+      return false;
+    }
+
+    console.log("Attempting to enable Firebase network...");
+
+    // 먼저 기존 연결을 비활성화한 후 다시 활성화
+    try {
+      await disableNetwork(db);
+      console.log("Disabled Firebase network");
+    } catch (e) {
+      console.warn("Failed to disable network (might already be disabled):", e);
+    }
 
     // 네트워크 연결 재시도
     await enableNetwork(db);
+    console.log("Successfully enabled Firebase network");
     return true;
   } catch (error) {
-    console.warn("Firebase network enable failed:", error);
+    console.error("Firebase network enable failed:", error);
+
+    // 마지막 수단: IndexedDB 캐시 지우기 시도
+    try {
+      const db = firestore();
+      if (db) {
+        console.log("Attempting to clear Firebase cache...");
+        await terminate(db);
+        // 새로운 인스턴스로 재초기화
+        firestoreInstance = null;
+        const newDb = firestore();
+        if (newDb) {
+          await enableNetwork(newDb);
+          console.log("Successfully reconnected to Firebase");
+          return true;
+        }
+      }
+    } catch (cacheError) {
+      console.error("Failed to clear Firebase cache:", cacheError);
+    }
+
     return false;
   }
 }
