@@ -133,7 +133,7 @@ export default function ChatManagement() {
                         {chatRoom.lastMessage}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {formatTime(chatRoom.lastMessageAt)}
+                        {chatRoom.lastMessageAt ? formatTime(chatRoom.lastMessageAt) : '메시지 없음'}
                       </p>
                     </div>
                     <Button

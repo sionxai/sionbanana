@@ -193,7 +193,7 @@ export default function AdminChatPage() {
                                 )}
                               </div>
                               <span className="text-xs text-muted-foreground">
-                                {formatTime(chatRoom.lastMessageAt)}
+                                {chatRoom.lastMessageAt ? formatTime(chatRoom.lastMessageAt) : '메시지 없음'}
                               </span>
                             </div>
 

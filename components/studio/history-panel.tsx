@@ -76,19 +76,13 @@ export function HistoryPanel({
 }: HistoryPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const displayReferenceImage = useMemo(() => {
+    // Only show explicitly set reference images to prevent automatic changes
     if (referenceImageUrl) {
       return referenceImageUrl;
     }
-    const uploadedRecord = [...records].filter(record => record.metadata?.upload).sort((a, b) => {
-      const aTime = new Date(a.createdAt ?? a.updatedAt ?? 0).getTime();
-      const bTime = new Date(b.createdAt ?? b.updatedAt ?? 0).getTime();
-      return bTime - aTime;
-    })[0];
-    if (uploadedRecord) {
-      return uploadedRecord.imageUrl ?? uploadedRecord.originalImageUrl ?? null;
-    }
-    return records[0]?.originalImageUrl ?? records[0]?.imageUrl ?? null;
-  }, [records, referenceImageUrl]);
+    // No automatic fallback to prevent unexpected reference image changes
+    return null;
+  }, [referenceImageUrl]);
 
   const cacheBustedReferenceImage = useMemo(() => {
     if (!displayReferenceImage) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFirebaseAuth } from "@/lib/firebase/admin";
+import { getAdminAuth } from "@/lib/firebase/admin";
 import { sendMessage } from "@/lib/firebase/chat";
 
 export async function POST(request: NextRequest) {
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 인증 확인
-    const auth = getFirebaseAuth();
+    const auth = getAdminAuth();
     if (!auth) {
       return NextResponse.json(
         { error: "Firebase Auth가 설정되지 않았습니다." },
