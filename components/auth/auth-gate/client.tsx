@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoginForm } from "@/components/auth/login-form";
@@ -30,9 +31,15 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen flex-col">
         <header className="flex items-center justify-between border-b bg-background/80 px-8 py-4 backdrop-blur overflow-visible relative z-[10000]">
           <div className="flex items-center gap-3">
-            <Link href="/" className="flex flex-col hover:opacity-90">
-              <span className="text-sm font-semibold text-foreground">YesGem Studio</span>
-              <span className="text-xs text-muted-foreground">AI 이미지 생성 & 워크플로우</span>
+            <Link href="/" className="flex flex-col items-center gap-0.5 hover:opacity-90">
+              <Image
+                src="/img/logo/logo.png"
+                alt="시온 바나나 로고"
+                width={56}
+                height={56}
+                className="object-contain"
+              />
+              <span className="text-[9px] text-muted-foreground text-center leading-none">AI 이미지 생성 워크플로우</span>
             </Link>
             <Separator orientation="vertical" className="mx-2 hidden h-6 lg:block" />
             <Badge variant="secondary" className="hidden lg:inline-flex">
@@ -52,9 +59,21 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
       <Card className="w-full max-w-md border-border/60 shadow-lg">
-        <CardHeader className="space-y-2">
-          <CardTitle className="text-2xl font-semibold">YesGem Studio</CardTitle>
-          <CardDescription>AI 기반 이미지 제작 워크플로우를 사용하려면 로그인 해주세요.</CardDescription>
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col items-center gap-2">
+            <Image
+              src="/img/logo/logo.png"
+              alt="시온 바나나 로고"
+              width={80}
+              height={80}
+              className="object-contain"
+            />
+            <div className="text-center">
+              <CardTitle className="text-2xl font-semibold mb-0.5">시온 바나나</CardTitle>
+              <div className="text-xs text-muted-foreground">AI 이미지 생성 워크플로우</div>
+            </div>
+          </div>
+          <CardDescription className="text-center">로그인하여 AI 기반 이미지 제작을 시작해보세요.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center gap-2 text-sm">

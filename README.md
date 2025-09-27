@@ -1,6 +1,6 @@
-# YesGem Studio
+# 시온 바나나 (Sion Banana)
 
-웹 기반 AI 이미지 생성 스튜디오 초기 구현입니다. 프롬프트 작성, 카메라/조명 옵션, 결과 비교, 기록 관리 등 UI 워크플로우를 Next.js + Firebase + TailwindCSS 기반으로 구성했습니다.
+시온 바나나는 웹 기반 AI 이미지 생성 스튜디오입니다. 프롬프트 작성, 카메라/조명 옵션, 결과 비교, 기록 관리, 실시간 1:1 상담 등 완전한 UI 워크플로우를 Next.js + Firebase + TailwindCSS 기반으로 구현했습니다.
 
 ## 주요 기술 스택
 
@@ -53,6 +53,9 @@ GEMINI_API_KEY=
 - [x] 우측 패널: 기준 이미지 및 생성 히스토리 목록
 - [x] Gemini 이미지 생성 API Route 스텁 및 React Query 연동 (실패 시 샘플 이미지)
 - [x] **외부 프리셋 모드**: 91종의 사례 기반 프리셋을 버튼으로 제공하고, 영문/국문 레이블과 함께 프롬프트를 즉시 입력에 반영
+- [x] **실시간 1:1 상담**: Firebase Firestore 기반 실시간 채팅 시스템으로 사용자-관리자 간 소통
+- [x] **통합 UI 시스템**: 1개생성, 다수생성, 프리셋 페이지 간 일관된 상단 네비게이션과 하단 탭
+- [x] **반응형 디자인**: 모바일과 데스크톱 환경에서 모두 최적화된 UI/UX
 
 ## 외부 프리셋 컬렉션
 
@@ -97,7 +100,7 @@ GEMINI_API_KEY=
 ## 폴더 구조 (요약)
 
 ```
-yesgem/
+sion-banana/
   app/
     api/generate/route.ts   # Gemini 이미지 생성 Route Handler 스텁
     layout.tsx              # Providers (Auth, QueryClient)

@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "YesGem Studio",
-  description: "Generate, enhance, and manage AI-crafted visuals with YesGem"
+  title: "시온 바나나 | Sion Banana",
+  description: "AI 기반 이미지 생성 및 워크플로우 스튜디오 - Generate, enhance, and manage AI-crafted visuals with Sion Banana"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

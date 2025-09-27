@@ -37,6 +37,7 @@ export function useStorageImages({ limitResults = 50, onNewRecord }: UseStorageI
 
     const loadRecords = async () => {
       if (isLoadingRef.current) {
+        console.log("[useStorageImages] Already loading, skipping...");
         return;
       }
 
@@ -144,8 +145,14 @@ export function useStorageImages({ limitResults = 50, onNewRecord }: UseStorageI
 
     loadRecords();
 
-    // Refresh data periodically
-    const interval = setInterval(loadRecords, 5000);
+    // Refresh data periodically with optimized interval and visibility check
+    const interval = setInterval(() => {
+      // Only poll when page is visible to reduce unnecessary API calls
+      if (document.visibilityState === 'visible') {
+        loadRecords();
+      }
+    }, 30000); // Reduced from 5000ms to 30000ms (30 seconds)
+
     return () => {
       cancelled = true;
       clearInterval(interval);
