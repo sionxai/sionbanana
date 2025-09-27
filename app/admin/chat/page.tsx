@@ -151,12 +151,65 @@ export default function AdminChatPage() {
                   사용자가 1:1 상담을 요청하면<br />
                   여기에 채팅방이 표시됩니다.
                 </p>
-                <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-md max-w-md">
-                  <p className="text-sm text-yellow-800">
-                    💡 <strong>참고:</strong> 현재 REST API 기반으로 동작하며,
-                    사용자가 채팅을 시작하면 해당 브라우저의 localStorage에
-                    저장된 채팅방이 여기에 표시됩니다.
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-md max-w-md">
+                  <p className="text-sm text-blue-800 mb-2">
+                    💡 <strong>개선됨:</strong> 이제 Firestore에서 직접 채팅방을 조회합니다.
+                    localStorage와 Firestore 두 방식을 모두 사용하여
+                    누락 없이 모든 상담 요청을 찾습니다.
                   </p>
+                  <p className="text-sm text-green-700 mb-2">
+                    ✅ <strong>장점:</strong> 브라우저에 관계없이 모든 사용자의
+                    상담 요청을 확인할 수 있습니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const recentChatIds = localStorage.getItem('recentChatIds');
+                        alert(`localStorage 내용:\n${recentChatIds || '비어있음'}\n\n브라우저 콘솔에서 상세 로그를 확인하세요.`);
+                        console.log('[LocalStorage Debug]', {
+                          recentChatIds: JSON.parse(recentChatIds || '[]'),
+                          allLocalStorage: { ...localStorage }
+                        });
+                      }}
+                    >
+                      localStorage 확인
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        console.log('[Test Chat Creation] Starting test...');
+                        try {
+                          // 테스트용 채팅방 ID 생성
+                          const testUserId = `test_user_${Date.now()}`;
+                          const testChatId = `${testUserId}_${ADMIN_UID}`;
+
+                          console.log('[Test Chat Creation] Generated test chat ID:', testChatId);
+
+                          // localStorage에 추가
+                          const existingChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
+                          console.log('[Test Chat Creation] Existing chat IDs:', existingChatIds);
+
+                          if (!existingChatIds.includes(testChatId)) {
+                            existingChatIds.push(testChatId);
+                            localStorage.setItem('recentChatIds', JSON.stringify(existingChatIds));
+                            console.log('[Test Chat Creation] Added to localStorage:', existingChatIds);
+                          }
+
+                          // 페이지 새로고침하여 효과 확인
+                          alert(`테스트 채팅방 ID "${testChatId}"를 localStorage에 추가했습니다.\n\n페이지가 새로고침됩니다.`);
+                          window.location.reload();
+                        } catch (error) {
+                          console.error('[Test Chat Creation] Error:', error);
+                          alert(`테스트 중 오류 발생: ${error}`);
+                        }
+                      }}
+                    >
+                      테스트 채팅 추가
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

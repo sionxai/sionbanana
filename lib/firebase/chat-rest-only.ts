@@ -31,18 +31,38 @@ export async function getOrCreateChatRoomRestOnly(userId: string, userName: stri
 
     // 관리자가 채팅방을 확인할 수 있도록 localStorage에 임시 저장
     try {
+      console.log("[getOrCreateChatRoomRestOnly] 💾 Starting localStorage save process for chatId:", chatId);
+
       const existingChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
+      console.log("[getOrCreateChatRoomRestOnly] 💾 Current localStorage content:", existingChatIds);
+
       if (!existingChatIds.includes(chatId)) {
         existingChatIds.push(chatId);
+        console.log("[getOrCreateChatRoomRestOnly] 💾 Added chatId to array:", existingChatIds);
+
         // 최대 10개만 보관
         if (existingChatIds.length > 10) {
           existingChatIds.splice(0, existingChatIds.length - 10);
+          console.log("[getOrCreateChatRoomRestOnly] 💾 Trimmed to max 10 items:", existingChatIds);
         }
+
         localStorage.setItem('recentChatIds', JSON.stringify(existingChatIds));
-        console.log("[getOrCreateChatRoomRestOnly] 💾 Saved chatId to localStorage for admin reference:", chatId);
+        console.log("[getOrCreateChatRoomRestOnly] 💾 Successfully saved to localStorage");
+
+        // 저장 검증
+        const verifyStorage = localStorage.getItem('recentChatIds');
+        console.log("[getOrCreateChatRoomRestOnly] 💾 Verification - localStorage now contains:", verifyStorage);
+        console.log("[getOrCreateChatRoomRestOnly] 💾 Parsed verification:", JSON.parse(verifyStorage || '[]'));
+      } else {
+        console.log("[getOrCreateChatRoomRestOnly] 💾 ChatId already exists in localStorage:", chatId);
       }
     } catch (e) {
-      console.warn("[getOrCreateChatRoomRestOnly] Failed to save to localStorage:", e);
+      console.error("[getOrCreateChatRoomRestOnly] ❌ Failed to save to localStorage:", e);
+      console.error("[getOrCreateChatRoomRestOnly] ❌ Error details:", {
+        name: e.name,
+        message: e.message,
+        stack: e.stack
+      });
     }
 
     return chatId;

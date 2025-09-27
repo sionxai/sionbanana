@@ -179,38 +179,97 @@ export async function getChatRoomByIdViaRest(chatId: string): Promise<any | null
   }
 }
 
-// 관리자용 채팅방 목록 조회 (REST API 버전 - localStorage 기반)
+// Firestore REST API를 사용한 컬렉션 조회
+export async function getCollectionViaRest(collection: string): Promise<any[]> {
+  const url = `${FIRESTORE_REST_BASE}/${collection}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${await getFirebaseToken()}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Firebase REST API error: ${response.status} ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    const documents = result.documents || [];
+
+    return documents.map((doc: any) => {
+      const id = doc.name.split('/').pop();
+      return {
+        id,
+        ...convertFromFirestoreFields(doc.fields || {})
+      };
+    });
+  } catch (error: any) {
+    console.error('[REST API] Failed to get collection:', error);
+    return [];
+  }
+}
+
+// 관리자용 채팅방 목록 조회 (REST API 버전 - Firestore 직접 조회)
 export async function getAdminChatRoomsViaRest(adminId: string): Promise<any[]> {
   try {
     console.log('[REST API] Fetching admin chat rooms for:', adminId);
 
-    const chatRooms = [];
-
-    // localStorage에서 최근 생성된 채팅방 ID들 가져오기
+    // 첫 번째 방법: localStorage에서 찾기 (빠른 방법)
+    const localStorageChatRooms = [];
     try {
       const recentChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
       console.log('[REST API] Found recent chat IDs in localStorage:', recentChatIds);
 
-      // 각 채팅방 ID로 실제 채팅방 데이터 조회
       for (const chatId of recentChatIds) {
         try {
           const chatRoom = await getChatRoomByIdViaRest(chatId);
           if (chatRoom) {
-            chatRooms.push(chatRoom);
-            console.log('[REST API] Successfully loaded chat room:', chatId);
-          } else {
-            console.log('[REST API] Chat room not found:', chatId);
+            localStorageChatRooms.push(chatRoom);
+            console.log('[REST API] Successfully loaded chat room from localStorage:', chatId);
           }
         } catch (error) {
-          console.warn('[REST API] Failed to load chat room:', chatId, error);
+          console.warn('[REST API] Failed to load chat room from localStorage:', chatId, error);
         }
       }
     } catch (error) {
       console.warn('[REST API] Failed to read from localStorage:', error);
     }
 
-    console.log('[REST API] Admin chat rooms fetch completed, found:', chatRooms.length);
-    return chatRooms;
+    // 두 번째 방법: Firestore에서 관리자가 참여한 모든 채팅방 직접 조회
+    console.log('[REST API] Fetching all chat rooms from Firestore...');
+    const allChatRooms = await getCollectionViaRest('chats');
+    console.log('[REST API] Found all chat rooms in Firestore:', allChatRooms.length);
+
+    // 관리자가 참여한 채팅방만 필터링
+    const adminChatRooms = allChatRooms.filter(chatRoom => {
+      const participants = chatRoom.participants || [];
+      const isAdminParticipant = participants.includes(adminId);
+      if (isAdminParticipant) {
+        console.log('[REST API] Found admin chat room:', chatRoom.id);
+      }
+      return isAdminParticipant;
+    });
+
+    // localStorage 결과와 Firestore 결과 합치기 (중복 제거)
+    const allResults = [...localStorageChatRooms];
+    for (const firestoreChatRoom of adminChatRooms) {
+      const exists = allResults.find(room => room.id === firestoreChatRoom.id);
+      if (!exists) {
+        allResults.push(firestoreChatRoom);
+        console.log('[REST API] Added chat room from Firestore:', firestoreChatRoom.id);
+      }
+    }
+
+    console.log('[REST API] Admin chat rooms fetch completed, total found:', allResults.length);
+    console.log('[REST API] Results breakdown:', {
+      fromLocalStorage: localStorageChatRooms.length,
+      fromFirestore: adminChatRooms.length,
+      totalUnique: allResults.length
+    });
+
+    return allResults;
 
   } catch (error: any) {
     console.error('[REST API] Failed to fetch admin chat rooms:', error);

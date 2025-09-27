@@ -20,6 +20,20 @@ export function useAdminChatsRest() {
       try {
         console.log("[useAdminChatsRest] Loading admin chat rooms via REST API for:", ADMIN_UID);
 
+        // localStorage 디버깅 정보
+        const recentChatIds = localStorage.getItem('recentChatIds');
+        console.log("[useAdminChatsRest] 🔍 LocalStorage debug:", {
+          recentChatIds: recentChatIds,
+          parsed: recentChatIds ? JSON.parse(recentChatIds) : null,
+          localStorage: { ...localStorage }
+        });
+
+        if (!recentChatIds || recentChatIds === '[]') {
+          console.log("[useAdminChatsRest] ⚠️ No chat IDs found in localStorage - no user chats created yet");
+        } else {
+          console.log("[useAdminChatsRest] ✅ Found chat IDs in localStorage, proceeding with REST API calls");
+        }
+
         const rooms = await getAdminChatRoomsViaRest(ADMIN_UID);
         console.log("[useAdminChatsRest] Received chat rooms:", rooms);
 
