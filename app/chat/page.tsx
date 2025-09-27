@@ -84,13 +84,13 @@ export default function ChatPage() {
           throw new Error(`Firebase 연결 실패: ${firebaseError.message}`);
         }
 
-        // 단계 3: 채팅방 생성/조회
-        console.log("[Chat] Step 3: Creating/getting chat room");
+        // 단계 3: 채팅방 생성/조회 (하이브리드 SDK + REST API)
+        console.log("[Chat] Step 3: Creating/getting chat room with hybrid approach");
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"
         );
-        console.log("[Chat] Successfully created/got chat room:", chatRoomId);
+        console.log("[Chat] Successfully created/got chat room via hybrid approach:", chatRoomId);
         setChatId(chatRoomId);
         clearTimeout(timeoutId);
       } catch (error) {
@@ -110,7 +110,19 @@ export default function ChatPage() {
 
           // 더 자세한 에러 메시지 표시
           let detailedErrorMessage = error.message;
-          if (error.message.includes("Firebase")) {
+
+          // 하이브리드 접근법 실패인 경우 특별한 안내
+          if (error.message.includes("SDK") && error.message.includes("REST")) {
+            detailedErrorMessage = "Firebase 연결에 심각한 문제가 발생했습니다.\n\n";
+            detailedErrorMessage += "SDK와 REST API 모두 실패했습니다:\n";
+            detailedErrorMessage += `${error.message}\n\n`;
+            detailedErrorMessage += "해결 방법:\n";
+            detailedErrorMessage += "1. 인터넷 연결 상태 확인\n";
+            detailedErrorMessage += "2. VPN 사용중이라면 비활성화\n";
+            detailedErrorMessage += "3. 브라우저 캐시 및 쿠키 삭제\n";
+            detailedErrorMessage += "4. 시크릿/프라이빗 브라우징 모드로 시도\n";
+            detailedErrorMessage += "5. 다른 브라우저에서 시도";
+          } else if (error.message.includes("Firebase")) {
             detailedErrorMessage += "\n\nFirebase 설정을 확인해주세요:";
             detailedErrorMessage += "\n- 프로젝트 ID가 올바른지 확인";
             detailedErrorMessage += "\n- API 키가 유효한지 확인";

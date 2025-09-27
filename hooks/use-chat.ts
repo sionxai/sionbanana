@@ -6,7 +6,7 @@ import {
   sendMessage as sendChatMessage,
   markChatAsRead
 } from "@/lib/firebase/chat";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, ChatRoom } from "@/lib/types";
 
 interface UseChatOptions {
   onNewMessage?: (message: ChatMessage) => void;
@@ -97,7 +97,7 @@ export function useAdminChats() {
 
     console.log("[useAdminChats] Starting subscription for admin:", ADMIN_UID);
 
-    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
+    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms: ChatRoom[]) => {
       console.log("[useAdminChats] Received chat rooms:", rooms);
       setChatRooms(rooms);
       setLoading(false);

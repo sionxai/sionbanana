@@ -18,6 +18,7 @@ import {
   increment
 } from "firebase/firestore";
 import { firestore, retryFirebaseOperation } from "@/lib/firebase/client";
+import { createChatRoomViaRest, getDocumentViaRest } from "@/lib/firebase/rest-api";
 import type { ChatMessage, ChatRoom } from "@/lib/types";
 import { ADMIN_UID } from "@/lib/constants";
 
@@ -65,49 +66,85 @@ export function generateChatId(userId: string): string {
   return `${userId}_${ADMIN_UID}`;
 }
 
-// 채팅방 생성 또는 가져오기
+// 채팅방 생성 또는 가져오기 (하이브리드: Firebase SDK + REST API 폴백)
 export async function getOrCreateChatRoom(userId: string, userName: string): Promise<string> {
   const chatId = generateChatId(userId);
-  console.log("[getOrCreateChatRoom] Starting with chatId:", chatId, "userId:", userId, "userName:", userName);
+  console.log("[getOrCreateChatRoom] Starting hybrid approach with chatId:", chatId, "userId:", userId, "userName:", userName);
 
-  return retryFirebaseOperation(async () => {
-    console.log("[getOrCreateChatRoom] Getting chat document reference...");
-    const chatRef = chatDocRef(chatId);
+  // 먼저 Firebase SDK 시도
+  try {
+    console.log("[getOrCreateChatRoom] Attempt 1: Firebase SDK approach...");
 
-    console.log("[getOrCreateChatRoom] Checking if chat document exists...");
-    const chatSnap = await getDoc(chatRef);
+    return await retryFirebaseOperation(async () => {
+      console.log("[getOrCreateChatRoom] Getting chat document reference...");
+      const chatRef = chatDocRef(chatId);
 
-    if (!chatSnap.exists()) {
-      console.log("[getOrCreateChatRoom] Chat room doesn't exist, creating new one...");
-      // 채팅방이 없으면 새로 생성
-      const newChatRoom: Omit<ChatRoom, 'id'> = {
-        participants: [userId, ADMIN_UID],
-        participantNames: {
-          [userId]: userName,
-          [ADMIN_UID]: "관리자"
-        },
-        unreadCount: {
-          [userId]: 0,
-          [ADMIN_UID]: 0
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      console.log("[getOrCreateChatRoom] Checking if chat document exists...");
+      const chatSnap = await getDoc(chatRef);
 
-      console.log("[getOrCreateChatRoom] Setting new chat document...");
-      await setDoc(chatRef, {
-        ...newChatRoom,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+      if (!chatSnap.exists()) {
+        console.log("[getOrCreateChatRoom] Chat room doesn't exist, creating new one...");
+        // 채팅방이 없으면 새로 생성
+        const newChatRoom: Omit<ChatRoom, 'id'> = {
+          participants: [userId, ADMIN_UID],
+          participantNames: {
+            [userId]: userName,
+            [ADMIN_UID]: "관리자"
+          },
+          unreadCount: {
+            [userId]: 0,
+            [ADMIN_UID]: 0
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        console.log("[getOrCreateChatRoom] Setting new chat document...");
+        await setDoc(chatRef, {
+          ...newChatRoom,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        console.log("[getOrCreateChatRoom] Successfully created new chat room via SDK");
+      } else {
+        console.log("[getOrCreateChatRoom] Chat room already exists via SDK");
+      }
+
+      console.log("[getOrCreateChatRoom] Returning chatId from SDK:", chatId);
+      return chatId;
+    }, 2, 1000); // 2번 재시도, 1초 간격 (더 빠른 폴백)
+
+  } catch (sdkError: any) {
+    console.warn("[getOrCreateChatRoom] Firebase SDK failed, falling back to REST API:", sdkError.message);
+
+    // Firebase SDK 실패시 REST API 폴백
+    try {
+      console.log("[getOrCreateChatRoom] Attempt 2: REST API fallback approach...");
+
+      // REST API로 문서 존재 확인
+      const existingChat = await getDocumentViaRest('chats', chatId);
+
+      if (!existingChat) {
+        console.log("[getOrCreateChatRoom] Creating chat room via REST API...");
+        await createChatRoomViaRest(userId, userName, ADMIN_UID);
+        console.log("[getOrCreateChatRoom] Successfully created chat room via REST API");
+      } else {
+        console.log("[getOrCreateChatRoom] Chat room already exists via REST API");
+      }
+
+      console.log("[getOrCreateChatRoom] Returning chatId from REST API:", chatId);
+      return chatId;
+
+    } catch (restError: any) {
+      console.error("[getOrCreateChatRoom] Both SDK and REST API failed:", {
+        sdkError: sdkError.message,
+        restError: restError.message
       });
-      console.log("[getOrCreateChatRoom] Successfully created new chat room");
-    } else {
-      console.log("[getOrCreateChatRoom] Chat room already exists");
-    }
 
-    console.log("[getOrCreateChatRoom] Returning chatId:", chatId);
-    return chatId;
-  }, 3, 1500); // 3번 재시도, 1.5초 간격
+      // 최종 에러 - 사용자 친화적 메시지
+      throw new Error(`채팅방 생성에 실패했습니다. Firebase 연결 문제가 지속되고 있습니다. 잠시 후 다시 시도해주세요. (SDK: ${sdkError.message}, REST: ${restError.message})`);
+    }
+  }
 }
 
 // 메시지 전송
