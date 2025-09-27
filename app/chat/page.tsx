@@ -32,33 +32,60 @@ export default function ChatPage() {
         return;
       }
 
-      // 60초 타임아웃 설정 (더 길게)
+      // 20초 타임아웃 설정 (빠른 피드백)
       const timeoutId = setTimeout(() => {
-        console.error("[Chat] Initialization timeout after 60 seconds");
-        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. 브라우저를 새로고침하거나 잠시 후 다시 시도해주세요.");
+        console.error("[Chat] Initialization timeout after 20 seconds");
+        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. Firebase 연결에 문제가 있을 수 있습니다. 브라우저를 새로고침하거나 잠시 후 다시 시도해주세요.");
         setInitializing(false);
-      }, 60000);
+      }, 20000);
 
       try {
         console.log("[Chat] Starting enhanced Firebase connection process...");
 
+        // 환경변수 디버깅
+        console.log("[Chat] Environment Debug:", {
+          NODE_ENV: process.env.NODE_ENV,
+          hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+          hasProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          apiKeyPrefix: process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.substring(0, 10)
+        });
+
         // 강화된 Firebase 연결 프로세스
-        const { ensureFirebaseConnection, firestore } = await import("@/lib/firebase/client");
+        const { ensureFirebaseConnection, firestore, clientEnv } = await import("@/lib/firebase/client");
+
+        console.log("[Chat] Client Environment Check:", {
+          apiKey: clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY?.substring(0, 10) + "...",
+          projectId: clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+          databaseId: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID
+        });
 
         // 단계 1: 기본 Firestore 인스턴스 확인
         console.log("[Chat] Step 1: Check basic Firestore instance");
         const db = firestore();
         if (!db) {
-          throw new Error("Firebase Firestore 인스턴스를 생성할 수 없습니다.");
+          throw new Error("Firebase Firestore 인스턴스를 생성할 수 없습니다. 환경변수를 확인해주세요.");
+        }
+        console.log("[Chat] Firestore instance created successfully");
+
+        // 단계 2: 간단한 Firebase 테스트
+        console.log("[Chat] Step 2: Testing basic Firebase connection");
+        try {
+          // 가장 간단한 Firebase 작업 시도
+          const { doc, getDoc } = await import("firebase/firestore");
+          const testDoc = doc(db, "test", "connection-test");
+          console.log("[Chat] Attempting basic Firebase operation...");
+
+          const testSnap = await getDoc(testDoc);
+          console.log("[Chat] Basic Firebase operation successful, exists:", testSnap.exists());
+        } catch (firebaseError: any) {
+          console.error("[Chat] Basic Firebase operation failed:", firebaseError);
+          throw new Error(`Firebase 연결 실패: ${firebaseError.message}`);
         }
 
-        // 단계 2: 연결 복구 시도
-        console.log("[Chat] Step 2: Attempt connection recovery");
-        const isConnected = await ensureFirebaseConnection();
-        console.log("[Chat] Firebase connection recovery result:", isConnected);
-
-        // 단계 3: 채팅방 생성/조회 (연결 상태와 무관하게 시도)
-        console.log("[Chat] Step 3: Creating/getting chat room (connection status:", isConnected, ")");
+        // 단계 3: 채팅방 생성/조회
+        console.log("[Chat] Step 3: Creating/getting chat room");
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"
@@ -76,11 +103,23 @@ export default function ChatPage() {
             stack: error.stack,
             userId: user.uid,
             userDisplayName: user.displayName,
-            userEmail: user.email
+            userEmail: user.email,
+            name: error.name,
+            cause: (error as any).cause
           });
-          setErrorMessage(error.message);
+
+          // 더 자세한 에러 메시지 표시
+          let detailedErrorMessage = error.message;
+          if (error.message.includes("Firebase")) {
+            detailedErrorMessage += "\n\nFirebase 설정을 확인해주세요:";
+            detailedErrorMessage += "\n- 프로젝트 ID가 올바른지 확인";
+            detailedErrorMessage += "\n- API 키가 유효한지 확인";
+            detailedErrorMessage += "\n- Firestore 데이터베이스가 활성화되었는지 확인";
+          }
+          setErrorMessage(detailedErrorMessage);
         } else {
-          setErrorMessage("채팅방을 생성하는 중 알 수 없는 오류가 발생했습니다.");
+          console.error("Chat initialization unknown error:", error);
+          setErrorMessage(`채팅방을 생성하는 중 알 수 없는 오류가 발생했습니다: ${JSON.stringify(error)}`);
         }
       } finally {
         setInitializing(false);

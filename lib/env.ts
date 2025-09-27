@@ -51,10 +51,29 @@ const cleanRawClientEnv = Object.fromEntries(
   Object.entries(rawClientEnv).filter(([key, value]) => value && value.trim() !== '')
 );
 
+// Debug environment variables
+console.log('[ENV] Environment Variables Debug:', {
+  NODE_ENV: process.env.NODE_ENV,
+  VERCEL: process.env.VERCEL,
+  hasRawApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  hasRawProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  rawProjectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  cleanedEnvKeys: Object.keys(cleanRawClientEnv),
+  defaultEnvKeys: Object.keys(defaultClientEnv)
+});
+
 export const clientEnv = {
   ...defaultClientEnv,
   ...cleanRawClientEnv
 };
+
+console.log('[ENV] Final Client Environment:', {
+  apiKey: clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY ? `${clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY.substring(0, 10)}...` : 'undefined',
+  projectId: clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  databaseId: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID,
+  isUsingDefaults: Object.keys(cleanRawClientEnv).length === 0
+});
 
 export const isFirebaseConfigured = Boolean(
   clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY &&

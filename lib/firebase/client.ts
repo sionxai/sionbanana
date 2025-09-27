@@ -4,6 +4,9 @@ import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork, 
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { clientEnv } from "@/lib/env";
 
+// 환경변수 export (디버깅용)
+export { clientEnv };
+
 let app: FirebaseApp | undefined;
 let isForceOfflineModeEnabled = false;
 
@@ -23,23 +26,35 @@ export function getFirebaseApp(): FirebaseApp {
         authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
         storageBucket: clientEnv.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
         hasValidConfig: !(!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project"),
-        isDemoMode: apiKey === "demo" || projectId === "demo-project"
+        isDemoMode: apiKey === "demo" || projectId === "demo-project",
+        environment: process.env.NODE_ENV,
+        isVercel: process.env.VERCEL ? 'true' : 'false'
       });
 
-      if (!apiKey || !projectId || apiKey === "demo" || projectId === "demo-project") {
-        throw new Error("Firebase가 설정되지 않았습니다. 로컬 모드로 작동합니다.");
+      if (!apiKey || !projectId) {
+        throw new Error(`Firebase 환경변수가 설정되지 않았습니다. API_KEY: ${!!apiKey}, PROJECT_ID: ${!!projectId}`);
       }
 
-      app = initializeApp({
-        apiKey,
-        authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-        projectId,
-        databaseURL: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-        storageBucket: clientEnv.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-        messagingSenderId: clientEnv.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-        appId: clientEnv.NEXT_PUBLIC_FIREBASE_APP_ID,
-        measurementId: clientEnv.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
-      });
+      if (apiKey === "demo" || projectId === "demo-project") {
+        throw new Error("Firebase가 데모 모드로 설정되어 있습니다. 실제 Firebase 설정을 확인해주세요.");
+      }
+
+      try {
+        app = initializeApp({
+          apiKey,
+          authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+          projectId,
+          databaseURL: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+          storageBucket: clientEnv.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+          messagingSenderId: clientEnv.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+          appId: clientEnv.NEXT_PUBLIC_FIREBASE_APP_ID,
+          measurementId: clientEnv.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+        });
+        console.log('[Firebase] App initialized successfully');
+      } catch (error: any) {
+        console.error('[Firebase] App initialization failed:', error);
+        throw new Error(`Firebase 앱 초기화 실패: ${error.message}`);
+      }
     }
   }
 
