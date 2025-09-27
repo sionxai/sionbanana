@@ -68,12 +68,17 @@ export function generateChatId(userId: string): string {
 // 채팅방 생성 또는 가져오기
 export async function getOrCreateChatRoom(userId: string, userName: string): Promise<string> {
   const chatId = generateChatId(userId);
+  console.log("[getOrCreateChatRoom] Starting with chatId:", chatId, "userId:", userId, "userName:", userName);
 
   return retryFirebaseOperation(async () => {
+    console.log("[getOrCreateChatRoom] Getting chat document reference...");
     const chatRef = chatDocRef(chatId);
+
+    console.log("[getOrCreateChatRoom] Checking if chat document exists...");
     const chatSnap = await getDoc(chatRef);
 
     if (!chatSnap.exists()) {
+      console.log("[getOrCreateChatRoom] Chat room doesn't exist, creating new one...");
       // 채팅방이 없으면 새로 생성
       const newChatRoom: Omit<ChatRoom, 'id'> = {
         participants: [userId, ADMIN_UID],
@@ -89,13 +94,18 @@ export async function getOrCreateChatRoom(userId: string, userName: string): Pro
         updatedAt: new Date().toISOString()
       };
 
+      console.log("[getOrCreateChatRoom] Setting new chat document...");
       await setDoc(chatRef, {
         ...newChatRoom,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      console.log("[getOrCreateChatRoom] Successfully created new chat room");
+    } else {
+      console.log("[getOrCreateChatRoom] Chat room already exists");
     }
 
+    console.log("[getOrCreateChatRoom] Returning chatId:", chatId);
     return chatId;
   }, 3, 1500); // 3번 재시도, 1.5초 간격
 }

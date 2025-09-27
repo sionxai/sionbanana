@@ -18,28 +18,47 @@ export default function ChatPage() {
 
   useEffect(() => {
     const initializeChat = async () => {
-      if (!user || loading) return;
+      if (!user || loading) {
+        console.log("[Chat] Waiting for user/auth to load...", { user: !!user, loading });
+        return;
+      }
+
+      console.log("[Chat] Starting chat initialization for user:", user.uid);
 
       // 관리자인 경우 관리자 채팅 페이지로 리다이렉트
       if (user.uid === ADMIN_UID) {
+        console.log("[Chat] Admin user detected, redirecting to admin chat");
         router.replace("/admin/chat");
         return;
       }
 
+      // 30초 타임아웃 설정
+      const timeoutId = setTimeout(() => {
+        console.error("[Chat] Initialization timeout after 30 seconds");
+        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. 페이지를 새로고침해주세요.");
+        setInitializing(false);
+      }, 30000);
+
       try {
+        console.log("[Chat] Calling getOrCreateChatRoom...");
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"
         );
+        console.log("[Chat] Successfully created/got chat room:", chatRoomId);
         setChatId(chatRoomId);
+        clearTimeout(timeoutId);
       } catch (error) {
         console.error("Failed to initialize chat:", error);
+        clearTimeout(timeoutId);
         // Firebase 초기화 에러인 경우 더 자세한 로그
         if (error instanceof Error) {
           console.error("Chat initialization error details:", {
             message: error.message,
             stack: error.stack,
-            userId: user.uid
+            userId: user.uid,
+            userDisplayName: user.displayName,
+            userEmail: user.email
           });
           setErrorMessage(error.message);
         } else {

@@ -107,24 +107,35 @@ export async function retryFirebaseOperation<T>(
 ): Promise<T> {
   let lastError: unknown;
 
+  console.log(`[retryFirebaseOperation] Starting operation with ${maxRetries} max retries`);
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      console.log(`[retryFirebaseOperation] Attempt ${attempt}/${maxRetries}`);
+
       // 첫 번째 시도가 아니면 연결 상태 확인
       if (attempt > 1) {
+        console.log(`[retryFirebaseOperation] Ensuring Firebase connection before retry...`);
         await ensureFirebaseConnection();
+        console.log(`[retryFirebaseOperation] Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
-      return await operation();
+      console.log(`[retryFirebaseOperation] Executing operation...`);
+      const result = await operation();
+      console.log(`[retryFirebaseOperation] Operation successful on attempt ${attempt}`);
+      return result;
     } catch (error: any) {
       lastError = error;
+      console.error(`[retryFirebaseOperation] Attempt ${attempt} failed:`, error.message);
 
       // 오프라인 에러가 아니거나 마지막 시도면 바로 에러 던지기
       if (!error?.message?.includes("offline") || attempt === maxRetries) {
+        console.error(`[retryFirebaseOperation] Giving up after ${attempt} attempts. Final error:`, error);
         throw error;
       }
 
-      console.warn(`Firebase operation failed (attempt ${attempt}/${maxRetries}):`, error.message);
+      console.warn(`[retryFirebaseOperation] Will retry (offline error detected)`);
     }
   }
 
