@@ -17,7 +17,7 @@ import {
   updateDoc,
   increment
 } from "firebase/firestore";
-import { firestore } from "@/lib/firebase/client";
+import { firestore, retryFirebaseOperation } from "@/lib/firebase/client";
 import type { ChatMessage, ChatRoom } from "@/lib/types";
 import { ADMIN_UID } from "@/lib/constants";
 
@@ -68,9 +68,9 @@ export function generateChatId(userId: string): string {
 // 채팅방 생성 또는 가져오기
 export async function getOrCreateChatRoom(userId: string, userName: string): Promise<string> {
   const chatId = generateChatId(userId);
-  const chatRef = chatDocRef(chatId);
 
-  try {
+  return retryFirebaseOperation(async () => {
+    const chatRef = chatDocRef(chatId);
     const chatSnap = await getDoc(chatRef);
 
     if (!chatSnap.exists()) {
@@ -97,10 +97,7 @@ export async function getOrCreateChatRoom(userId: string, userName: string): Pro
     }
 
     return chatId;
-  } catch (error) {
-    console.error("Error creating/getting chat room:", error);
-    throw error;
-  }
+  }, 3, 1500); // 3번 재시도, 1.5초 간격
 }
 
 // 메시지 전송

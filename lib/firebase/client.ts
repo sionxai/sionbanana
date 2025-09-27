@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { clientEnv } from "@/lib/env";
 
@@ -82,4 +82,51 @@ export function enableFirebaseEmulators() {
   if (auth) connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
   if (db) connectFirestoreEmulator(db, "localhost", 8080);
   if (bucket) connectStorageEmulator(bucket, "localhost", 9199);
+}
+
+// Firebase 연결 상태 확인 및 재시도 유틸리티
+export async function ensureFirebaseConnection(): Promise<boolean> {
+  try {
+    const db = firestore();
+    if (!db) return false;
+
+    // 네트워크 연결 재시도
+    await enableNetwork(db);
+    return true;
+  } catch (error) {
+    console.warn("Firebase network enable failed:", error);
+    return false;
+  }
+}
+
+// 오프라인 에러 재시도 함수
+export async function retryFirebaseOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 첫 번째 시도가 아니면 연결 상태 확인
+      if (attempt > 1) {
+        await ensureFirebaseConnection();
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+
+      // 오프라인 에러가 아니거나 마지막 시도면 바로 에러 던지기
+      if (!error?.message?.includes("offline") || attempt === maxRetries) {
+        throw error;
+      }
+
+      console.warn(`Firebase operation failed (attempt ${attempt}/${maxRetries}):`, error.message);
+    }
+  }
+
+  throw lastError;
 }

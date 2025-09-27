@@ -106,9 +106,16 @@ export default function ChatPage() {
                   채팅방을 생성하는 중 오류가 발생했습니다.
                 </p>
                 {errorMessage && (
-                  <div className="bg-muted p-3 rounded-md">
+                  <div className="bg-muted p-3 rounded-md mb-4">
                     <p className="text-sm text-muted-foreground">
                       오류 상세: {errorMessage}
+                    </p>
+                  </div>
+                )}
+                {errorMessage?.includes("offline") && (
+                  <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-md">
+                    <p className="text-sm text-yellow-800">
+                      💡 인터넷 연결을 확인하고 페이지를 새로고침해주세요.
                     </p>
                   </div>
                 )}
