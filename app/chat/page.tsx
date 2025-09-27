@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import { getOrCreateChatRoom } from "@/lib/firebase/chat";
+import { getOrCreateChatRoomRestOnly } from "@/lib/firebase/chat-rest-only";
 import { ChatInterface } from "@/components/chat/ChatInterface";
 import { StudioNavigation } from "@/components/studio/studio-navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,46 +51,17 @@ export default function ChatPage() {
           apiKeyPrefix: process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.substring(0, 10)
         });
 
-        // 강화된 Firebase 연결 프로세스
-        const { ensureFirebaseConnection, firestore, clientEnv } = await import("@/lib/firebase/client");
+        // REST API 전용 접근 (Firebase SDK 우회)
+        console.log("[Chat] Using REST API only approach to avoid SDK offline issues");
+        console.log("[Chat] Note: Other Firebase features work fine, this is a chat-specific workaround");
 
-        console.log("[Chat] Client Environment Check:", {
-          apiKey: clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY?.substring(0, 10) + "...",
-          projectId: clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-          authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-          databaseId: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID
-        });
-
-        // 단계 1: 기본 Firestore 인스턴스 확인
-        console.log("[Chat] Step 1: Check basic Firestore instance");
-        const db = firestore();
-        if (!db) {
-          throw new Error("Firebase Firestore 인스턴스를 생성할 수 없습니다. 환경변수를 확인해주세요.");
-        }
-        console.log("[Chat] Firestore instance created successfully");
-
-        // 단계 2: 간단한 Firebase 테스트
-        console.log("[Chat] Step 2: Testing basic Firebase connection");
-        try {
-          // 가장 간단한 Firebase 작업 시도
-          const { doc, getDoc } = await import("firebase/firestore");
-          const testDoc = doc(db, "test", "connection-test");
-          console.log("[Chat] Attempting basic Firebase operation...");
-
-          const testSnap = await getDoc(testDoc);
-          console.log("[Chat] Basic Firebase operation successful, exists:", testSnap.exists());
-        } catch (firebaseError: any) {
-          console.error("[Chat] Basic Firebase operation failed:", firebaseError);
-          throw new Error(`Firebase 연결 실패: ${firebaseError.message}`);
-        }
-
-        // 단계 3: 채팅방 생성/조회 (REST API 우선 + SDK 폴백)
-        console.log("[Chat] Step 3: Creating/getting chat room with REST API first approach");
-        const chatRoomId = await getOrCreateChatRoom(
+        // 단계 3: 채팅방 생성/조회 (REST API 전용)
+        console.log("[Chat] Step 3: Creating/getting chat room with REST API only approach");
+        const chatRoomId = await getOrCreateChatRoomRestOnly(
           user.uid,
           user.displayName || user.email || "사용자"
         );
-        console.log("[Chat] Successfully created/got chat room via REST API first approach:", chatRoomId);
+        console.log("[Chat] Successfully created/got chat room via REST API only approach:", chatRoomId);
         setChatId(chatRoomId);
         clearTimeout(timeoutId);
       } catch (error) {
