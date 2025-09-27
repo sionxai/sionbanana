@@ -56,12 +56,12 @@ export async function getOrCreateChatRoomRestOnly(userId: string, userName: stri
       } else {
         console.log("[getOrCreateChatRoomRestOnly] 💾 ChatId already exists in localStorage:", chatId);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("[getOrCreateChatRoomRestOnly] ❌ Failed to save to localStorage:", e);
       console.error("[getOrCreateChatRoomRestOnly] ❌ Error details:", {
-        name: e.name,
-        message: e.message,
-        stack: e.stack
+        name: e?.name,
+        message: e?.message,
+        stack: e?.stack
       });
     }
 
