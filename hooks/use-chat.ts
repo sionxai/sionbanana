@@ -86,14 +86,32 @@ export function useChat(chatId: string, options: UseChatOptions = {}) {
 export function useAdminChats() {
   const [chatRooms, setChatRooms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 구현은 관리자 기능이 필요할 때 추가
   useEffect(() => {
-    setLoading(false);
+    const { subscribeToChatRooms } = require("@/lib/firebase/chat");
+    const { ADMIN_UID } = require("@/lib/constants");
+
+    setLoading(true);
+    setError(null);
+
+    console.log("[useAdminChats] Starting subscription for admin:", ADMIN_UID);
+
+    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
+      console.log("[useAdminChats] Received chat rooms:", rooms);
+      setChatRooms(rooms);
+      setLoading(false);
+    });
+
+    return () => {
+      console.log("[useAdminChats] Unsubscribing from chat rooms");
+      unsubscribe();
+    };
   }, []);
 
   return {
     chatRooms,
-    loading
+    loading,
+    error
   };
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
-import { subscribeToChatRooms } from "@/lib/firebase/chat";
+import { useAdminChats } from "@/hooks/use-chat";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,26 +41,7 @@ const mockChatRooms = [
 export default function ChatManagement() {
   const { user } = useAuth();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // 실제 Firebase 채팅방 데이터 구독
-  useEffect(() => {
-    if (!user || user.uid !== ADMIN_UID) {
-      setLoading(false);
-      return;
-    }
-
-    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
-      console.log("[ChatManagement] Received chat rooms:", rooms);
-      setChatRooms(rooms.slice(0, 3)); // 최대 3개만 표시
-      setLoading(false);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [user]);
+  const { chatRooms, loading, error } = useAdminChats();
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -102,6 +83,10 @@ export default function ChatManagement() {
           {loading ? (
             <div className="py-4 text-center text-muted-foreground">
               채팅 목록을 불러오고 있습니다...
+            </div>
+          ) : error ? (
+            <div className="py-4 text-center text-destructive">
+              채팅 목록을 불러오는 중 오류가 발생했습니다: {error}
             </div>
           ) : chatRooms.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
