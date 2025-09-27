@@ -32,21 +32,33 @@ export default function ChatPage() {
         return;
       }
 
-      // 30초 타임아웃 설정
+      // 60초 타임아웃 설정 (더 길게)
       const timeoutId = setTimeout(() => {
-        console.error("[Chat] Initialization timeout after 30 seconds");
-        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. 페이지를 새로고침해주세요.");
+        console.error("[Chat] Initialization timeout after 60 seconds");
+        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. 브라우저를 새로고침하거나 잠시 후 다시 시도해주세요.");
         setInitializing(false);
-      }, 30000);
+      }, 60000);
 
       try {
-        console.log("[Chat] Calling getOrCreateChatRoom...");
+        console.log("[Chat] Starting enhanced Firebase connection process...");
 
-        // Firebase가 계속 오프라인 상태라면 강제로 연결 시도
-        const { ensureFirebaseConnection } = await import("@/lib/firebase/client");
+        // 강화된 Firebase 연결 프로세스
+        const { ensureFirebaseConnection, firestore } = await import("@/lib/firebase/client");
+
+        // 단계 1: 기본 Firestore 인스턴스 확인
+        console.log("[Chat] Step 1: Check basic Firestore instance");
+        const db = firestore();
+        if (!db) {
+          throw new Error("Firebase Firestore 인스턴스를 생성할 수 없습니다.");
+        }
+
+        // 단계 2: 연결 복구 시도
+        console.log("[Chat] Step 2: Attempt connection recovery");
         const isConnected = await ensureFirebaseConnection();
-        console.log("[Chat] Firebase connection status:", isConnected);
+        console.log("[Chat] Firebase connection recovery result:", isConnected);
 
+        // 단계 3: 채팅방 생성/조회 (연결 상태와 무관하게 시도)
+        console.log("[Chat] Step 3: Creating/getting chat room (connection status:", isConnected, ")");
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"

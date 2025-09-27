@@ -43,7 +43,7 @@ const defaultClientEnv = {
   NEXT_PUBLIC_FIREBASE_APP_ID: "1:309643440962:web:285958c6382c94761a0edb",
   NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: "G-7PJLWZR0EH",
   NEXT_PUBLIC_FIREBASE_USE_FIRESTORE: "true",
-  NEXT_PUBLIC_FIREBASE_DATABASE_ID: "sionbanana1"
+  NEXT_PUBLIC_FIREBASE_DATABASE_ID: "(default)"
 };
 
 // Only use environment variables if they exist and are not empty
@@ -69,7 +69,7 @@ export const serverEnv = serverSchema.parse({
   GEMINI_API_KEY: "AIzaSyBehU6k3-mudHkJV1xQiSgMVUgZ-tBKHw4",
   FIREBASE_SERVICE_ACCOUNT_KEY: process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID || "sionbanana1"
+  FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID || "(default)"
 });
 
 export function getServiceAccountKey(): {

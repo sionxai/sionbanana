@@ -5,6 +5,7 @@ import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { clientEnv } from "@/lib/env";
 
 let app: FirebaseApp | undefined;
+let isForceOfflineModeEnabled = false;
 
 export function getFirebaseApp(): FirebaseApp {
   if (!app) {
@@ -55,20 +56,44 @@ export const firebaseAuth = () => {
 };
 
 let firestoreInstance: any = null;
+let initializationPromise: Promise<any> | null = null;
 
+// Vercel 호환 Firestore 초기화 방식
 export const firestore = () => {
-  try {
-    if (!firestoreInstance) {
-      firestoreInstance = getFirestore(getFirebaseApp());
+  if (firestoreInstance) {
+    return firestoreInstance;
+  }
 
-      // 강제로 온라인 모드 활성화
-      enableNetwork(firestoreInstance).catch(error => {
-        console.warn("Failed to enable Firestore network:", error);
-      });
+  try {
+    const app = getFirebaseApp();
+    const databaseId = clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID;
+
+    console.log('[Firestore] Initializing with database ID:', databaseId);
+    console.log('[Firestore] Environment:', process.env.NODE_ENV);
+
+    // 기본 getFirestore 사용 (Vercel 호환성을 위해)
+    if (databaseId && databaseId !== '(default)') {
+      firestoreInstance = getFirestore(app, databaseId);
+    } else {
+      firestoreInstance = getFirestore(app);
     }
+
+    console.log('[Firestore] Instance created, forcing online mode...');
+
+    // 즉시 온라인 모드 강제 활성화
+    enableNetwork(firestoreInstance)
+      .then(() => {
+        console.log('[Firestore] Network enabled successfully');
+        isForceOfflineModeEnabled = false;
+      })
+      .catch(error => {
+        console.warn("[Firestore] Failed to enable network:", error);
+        // 네트워크 활성화가 실패해도 계속 진행
+      });
+
     return firestoreInstance;
   } catch (error) {
-    console.warn("Firebase Firestore를 초기화할 수 없습니다:", error);
+    console.error("Firebase Firestore 초기화 완전 실패:", error);
     return null;
   }
 };
@@ -96,59 +121,93 @@ export function enableFirebaseEmulators() {
   if (bucket) connectStorageEmulator(bucket, "localhost", 9199);
 }
 
-// Firebase 연결 상태 확인 및 재시도 유틸리티
+// 더 강력한 Firebase 연결 복구 함수
 export async function ensureFirebaseConnection(): Promise<boolean> {
+  console.log("[ensureFirebaseConnection] Starting connection recovery...");
+
   try {
     const db = firestore();
     if (!db) {
-      console.error("Firestore instance is null");
+      console.error("[ensureFirebaseConnection] Firestore instance is null");
       return false;
     }
 
-    console.log("Attempting to enable Firebase network...");
-
-    // 먼저 기존 연결을 비활성화한 후 다시 활성화
+    // 1단계: 강제 재연결 시도
+    console.log("[ensureFirebaseConnection] Step 1: Force reconnect");
     try {
       await disableNetwork(db);
-      console.log("Disabled Firebase network");
+      console.log("[ensureFirebaseConnection] Network disabled");
+
+      // 짧은 대기 후 재연결
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await enableNetwork(db);
+      console.log("[ensureFirebaseConnection] Network re-enabled");
+      return true;
     } catch (e) {
-      console.warn("Failed to disable network (might already be disabled):", e);
+      console.warn("[ensureFirebaseConnection] Step 1 failed:", e);
     }
 
-    // 네트워크 연결 재시도
-    await enableNetwork(db);
-    console.log("Successfully enabled Firebase network");
-    return true;
-  } catch (error) {
-    console.error("Firebase network enable failed:", error);
-
-    // 마지막 수단: IndexedDB 캐시 지우기 시도
+    // 2단계: 인스턴스 완전 재생성
+    console.log("[ensureFirebaseConnection] Step 2: Full instance recreation");
     try {
-      const db = firestore();
-      if (db) {
-        console.log("Attempting to clear Firebase cache...");
-        await terminate(db);
-        // 새로운 인스턴스로 재초기화
-        firestoreInstance = null;
-        const newDb = firestore();
-        if (newDb) {
-          await enableNetwork(newDb);
-          console.log("Successfully reconnected to Firebase");
-          return true;
-        }
+      await terminate(db);
+      console.log("[ensureFirebaseConnection] Old instance terminated");
+
+      // 인스턴스 초기화
+      firestoreInstance = null;
+      initializationPromise = null;
+
+      // 캐시 클리어 시도
+      try {
+        await clearIndexedDbPersistence(db);
+        console.log("[ensureFirebaseConnection] IndexedDB cleared");
+      } catch (clearError) {
+        console.warn("[ensureFirebaseConnection] IndexedDB clear failed (expected):", clearError);
       }
-    } catch (cacheError) {
-      console.error("Failed to clear Firebase cache:", cacheError);
+
+      // 새 인스턴스 생성
+      const newDb = firestore();
+      if (newDb) {
+        await enableNetwork(newDb);
+        console.log("[ensureFirebaseConnection] New instance created and connected");
+        return true;
+      }
+    } catch (terminateError) {
+      console.error("[ensureFirebaseConnection] Step 2 failed:", terminateError);
     }
 
+    // 3단계: 완전 리셋 (앱 레벨)
+    console.log("[ensureFirebaseConnection] Step 3: Complete reset");
+    try {
+      // 앱 인스턴스까지 리셋
+      app = undefined;
+      firestoreInstance = null;
+      initializationPromise = null;
+
+      // 새로 초기화
+      const newApp = getFirebaseApp();
+      const newDb = firestore();
+      if (newDb) {
+        await enableNetwork(newDb);
+        console.log("[ensureFirebaseConnection] Complete reset successful");
+        return true;
+      }
+    } catch (resetError) {
+      console.error("[ensureFirebaseConnection] Complete reset failed:", resetError);
+    }
+
+    console.error("[ensureFirebaseConnection] All recovery attempts failed");
+    return false;
+  } catch (error) {
+    console.error("[ensureFirebaseConnection] Unexpected error:", error);
     return false;
   }
 }
 
-// 오프라인 에러 재시도 함수
+// 강화된 오프라인 에러 재시도 함수
 export async function retryFirebaseOperation<T>(
   operation: () => Promise<T>,
-  maxRetries: number = 3,
+  maxRetries: number = 5, // 재시도 횟수 증가
   delay: number = 1000
 ): Promise<T> {
   let lastError: unknown;
@@ -159,29 +218,51 @@ export async function retryFirebaseOperation<T>(
     try {
       console.log(`[retryFirebaseOperation] Attempt ${attempt}/${maxRetries}`);
 
-      // 첫 번째 시도가 아니면 연결 상태 확인
+      // 재시도 시 더 강화된 복구 프로세스
       if (attempt > 1) {
-        console.log(`[retryFirebaseOperation] Ensuring Firebase connection before retry...`);
-        await ensureFirebaseConnection();
-        console.log(`[retryFirebaseOperation] Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        console.log(`[retryFirebaseOperation] Enhanced recovery for attempt ${attempt}...`);
+
+        // 지수적 백오프
+        const waitTime = Math.min(delay * Math.pow(2, attempt - 2), 10000);
+        console.log(`[retryFirebaseOperation] Waiting ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+
+        // 강화된 연결 복구
+        const connectionSuccess = await ensureFirebaseConnection();
+        console.log(`[retryFirebaseOperation] Connection recovery result: ${connectionSuccess}`);
+
+        // 연결 복구에 실패해도 계속 시도
+        if (!connectionSuccess) {
+          console.warn(`[retryFirebaseOperation] Connection recovery failed, but continuing with attempt ${attempt}`);
+        }
       }
 
       console.log(`[retryFirebaseOperation] Executing operation...`);
       const result = await operation();
-      console.log(`[retryFirebaseOperation] Operation successful on attempt ${attempt}`);
+      console.log(`[retryFirebaseOperation] ✅ Operation successful on attempt ${attempt}`);
       return result;
     } catch (error: any) {
       lastError = error;
-      console.error(`[retryFirebaseOperation] Attempt ${attempt} failed:`, error.message);
+      console.error(`[retryFirebaseOperation] ❌ Attempt ${attempt} failed:`, error.message);
 
-      // 오프라인 에러가 아니거나 마지막 시도면 바로 에러 던지기
-      if (!error?.message?.includes("offline") || attempt === maxRetries) {
-        console.error(`[retryFirebaseOperation] Giving up after ${attempt} attempts. Final error:`, error);
+      // 다양한 오프라인 관련 에러 패턴 체크
+      const isOfflineError = error?.message?.includes("offline") ||
+                           error?.message?.includes("network") ||
+                           error?.message?.includes("connection") ||
+                           error?.code === "unavailable";
+
+      // 마지막 시도거나 오프라인 에러가 아니면 바로 에러 던지기
+      if (attempt === maxRetries) {
+        console.error(`[retryFirebaseOperation] 🚫 Giving up after ${attempt} attempts. Final error:`, error);
         throw error;
       }
 
-      console.warn(`[retryFirebaseOperation] Will retry (offline error detected)`);
+      if (!isOfflineError) {
+        console.error(`[retryFirebaseOperation] 🚫 Non-offline error detected, giving up:`, error);
+        throw error;
+      }
+
+      console.warn(`[retryFirebaseOperation] 🔄 Will retry (offline-related error detected)`);
     }
   }
 
