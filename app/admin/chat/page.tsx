@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { subscribeToChatRooms } from "@/lib/firebase/chat";
+import { useAdminChatsRest } from "@/hooks/use-chat-rest";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,8 +43,7 @@ const fallbackChatRooms = [
 
 export default function AdminChatPage() {
   const { user, loading } = useAuth();
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [loadingChats, setLoadingChats] = useState(true);
+  const { chatRooms, loading: loadingChats, error } = useAdminChatsRest();
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -78,23 +77,7 @@ export default function AdminChatPage() {
     return chatRoom.unreadCount[ADMIN_UID] || 0;
   };
 
-  // 실제 Firebase 채팅방 데이터 구독
-  useEffect(() => {
-    if (!user || user.uid !== ADMIN_UID) return;
-
-    console.log("[AdminChatPage] Subscribing to chat rooms for admin:", user.uid);
-
-    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms) => {
-      console.log("[AdminChatPage] Received chat rooms:", rooms);
-      setChatRooms(rooms);
-      setLoadingChats(false);
-    });
-
-    return () => {
-      console.log("[AdminChatPage] Unsubscribing from chat rooms");
-      unsubscribe();
-    };
-  }, [user]);
+  // REST API를 통한 채팅방 데이터 로딩 (useAdminChatsRest 훅에서 처리됨)
 
   const totalUnreadCount = chatRooms.reduce((sum, chat) => sum + getUnreadCount(chat), 0);
 
@@ -146,15 +129,35 @@ export default function AdminChatPage() {
       {/* 채팅방 목록 */}
       <ScrollArea className="flex-1 pb-20">
         <div className="p-4">
-          {chatRooms.length === 0 ? (
+          {error ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <div className="mb-4 text-4xl">⚠️</div>
+                <h3 className="mb-2 text-lg font-semibold">채팅방 목록 로딩 오류</h3>
+                <p className="text-center text-muted-foreground mb-4">
+                  {error}
+                </p>
+                <Button onClick={() => window.location.reload()}>
+                  다시 시도
+                </Button>
+              </CardContent>
+            </Card>
+          ) : chatRooms.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <div className="mb-4 text-4xl">💬</div>
                 <h3 className="mb-2 text-lg font-semibold">상담 요청이 없습니다</h3>
-                <p className="text-center text-muted-foreground">
+                <p className="text-center text-muted-foreground mb-4">
                   사용자가 1:1 상담을 요청하면<br />
                   여기에 채팅방이 표시됩니다.
                 </p>
+                <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-md max-w-md">
+                  <p className="text-sm text-yellow-800">
+                    💡 <strong>참고:</strong> 현재 REST API 기반으로 동작하며,
+                    사용자가 채팅을 시작하면 해당 브라우저의 localStorage에
+                    저장된 채팅방이 여기에 표시됩니다.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           ) : (

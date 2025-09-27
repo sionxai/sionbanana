@@ -155,3 +155,65 @@ export async function createChatRoomViaRest(
     throw new Error(`REST API로 채팅방 생성 실패: ${error.message}`);
   }
 }
+
+// 채팅방 ID로 직접 조회 (REST API 버전)
+export async function getChatRoomByIdViaRest(chatId: string): Promise<any | null> {
+  try {
+    console.log('[REST API] Fetching chat room by ID:', chatId);
+
+    const chatRoom = await getDocumentViaRest('chats', chatId);
+
+    if (chatRoom) {
+      console.log('[REST API] Chat room found:', chatId);
+      return {
+        id: chatId,
+        ...chatRoom
+      };
+    } else {
+      console.log('[REST API] Chat room not found:', chatId);
+      return null;
+    }
+  } catch (error: any) {
+    console.error('[REST API] Failed to fetch chat room:', error);
+    return null;
+  }
+}
+
+// 관리자용 채팅방 목록 조회 (REST API 버전 - localStorage 기반)
+export async function getAdminChatRoomsViaRest(adminId: string): Promise<any[]> {
+  try {
+    console.log('[REST API] Fetching admin chat rooms for:', adminId);
+
+    const chatRooms = [];
+
+    // localStorage에서 최근 생성된 채팅방 ID들 가져오기
+    try {
+      const recentChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
+      console.log('[REST API] Found recent chat IDs in localStorage:', recentChatIds);
+
+      // 각 채팅방 ID로 실제 채팅방 데이터 조회
+      for (const chatId of recentChatIds) {
+        try {
+          const chatRoom = await getChatRoomByIdViaRest(chatId);
+          if (chatRoom) {
+            chatRooms.push(chatRoom);
+            console.log('[REST API] Successfully loaded chat room:', chatId);
+          } else {
+            console.log('[REST API] Chat room not found:', chatId);
+          }
+        } catch (error) {
+          console.warn('[REST API] Failed to load chat room:', chatId, error);
+        }
+      }
+    } catch (error) {
+      console.warn('[REST API] Failed to read from localStorage:', error);
+    }
+
+    console.log('[REST API] Admin chat rooms fetch completed, found:', chatRooms.length);
+    return chatRooms;
+
+  } catch (error: any) {
+    console.error('[REST API] Failed to fetch admin chat rooms:', error);
+    throw new Error(`관리자 채팅방 목록 조회 실패: ${error.message}`);
+  }
+}

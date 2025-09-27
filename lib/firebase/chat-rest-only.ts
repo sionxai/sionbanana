@@ -28,6 +28,23 @@ export async function getOrCreateChatRoomRestOnly(userId: string, userName: stri
     }
 
     console.log("[getOrCreateChatRoomRestOnly] Returning chatId from REST API:", chatId);
+
+    // 관리자가 채팅방을 확인할 수 있도록 localStorage에 임시 저장
+    try {
+      const existingChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
+      if (!existingChatIds.includes(chatId)) {
+        existingChatIds.push(chatId);
+        // 최대 10개만 보관
+        if (existingChatIds.length > 10) {
+          existingChatIds.splice(0, existingChatIds.length - 10);
+        }
+        localStorage.setItem('recentChatIds', JSON.stringify(existingChatIds));
+        console.log("[getOrCreateChatRoomRestOnly] 💾 Saved chatId to localStorage for admin reference:", chatId);
+      }
+    } catch (e) {
+      console.warn("[getOrCreateChatRoomRestOnly] Failed to save to localStorage:", e);
+    }
+
     return chatId;
 
   } catch (restError: any) {
