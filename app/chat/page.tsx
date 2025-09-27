@@ -32,12 +32,12 @@ export default function ChatPage() {
         return;
       }
 
-      // 20초 타임아웃 설정 (빠른 피드백)
+      // 5초 타임아웃 설정 (더 빠른 피드백 및 REST API 전환)
       const timeoutId = setTimeout(() => {
-        console.error("[Chat] Initialization timeout after 20 seconds");
-        setErrorMessage("채팅방 초기화가 너무 오래 걸리고 있습니다. Firebase 연결에 문제가 있을 수 있습니다. 브라우저를 새로고침하거나 잠시 후 다시 시도해주세요.");
-        setInitializing(false);
-      }, 20000);
+        console.error("[Chat] Initialization timeout after 5 seconds - likely Firebase SDK issue");
+        setErrorMessage("Firebase SDK 연결 지연 감지. REST API 방식으로 재시도하고 있습니다...");
+        // 타임아웃 발생시 바로 종료하지 않고 더 기다림 (REST API가 동작할 시간 제공)
+      }, 5000);
 
       try {
         console.log("[Chat] Starting enhanced Firebase connection process...");
@@ -84,13 +84,13 @@ export default function ChatPage() {
           throw new Error(`Firebase 연결 실패: ${firebaseError.message}`);
         }
 
-        // 단계 3: 채팅방 생성/조회 (하이브리드 SDK + REST API)
-        console.log("[Chat] Step 3: Creating/getting chat room with hybrid approach");
+        // 단계 3: 채팅방 생성/조회 (REST API 우선 + SDK 폴백)
+        console.log("[Chat] Step 3: Creating/getting chat room with REST API first approach");
         const chatRoomId = await getOrCreateChatRoom(
           user.uid,
           user.displayName || user.email || "사용자"
         );
-        console.log("[Chat] Successfully created/got chat room via hybrid approach:", chatRoomId);
+        console.log("[Chat] Successfully created/got chat room via REST API first approach:", chatRoomId);
         setChatId(chatRoomId);
         clearTimeout(timeoutId);
       } catch (error) {
