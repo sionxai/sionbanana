@@ -160,12 +160,18 @@ export function BatchStudioShell() {
 
   // 액션 핸들러 함수들
   const handleToggleFavorite = async (recordId: string) => {
+    console.log('[Favorite] Starting toggle for recordId:', recordId);
     const target = mergedRecords.find(record => record.id === recordId);
     if (!target) {
+      console.error('[Favorite] Target record not found:', recordId);
       toast.error("기록을 찾을 수 없습니다.");
       return;
     }
-    const nextFavorite = target.metadata?.favorite !== true;
+
+    const currentFavorite = target.metadata?.favorite === true;
+    const nextFavorite = !currentFavorite;
+    console.log('[Favorite] Current favorite state:', currentFavorite, '-> Next:', nextFavorite);
+
     const updatedRecord: GeneratedImageDocument = {
       ...target,
       metadata: {
@@ -173,43 +179,86 @@ export function BatchStudioShell() {
         favorite: nextFavorite
       }
     };
+    console.log('[Favorite] Updated record metadata:', updatedRecord.metadata);
+
+    // 로컬 상태를 즉시 업데이트 (Firebase 여부와 관계없이)
+    setLocalRecords(prev => {
+      const existingIndex = prev.findIndex(record => record.id === recordId);
+      console.log('[Favorite] Existing index in localRecords:', existingIndex);
+      if (existingIndex >= 0) {
+        // 기존 로컬 기록 업데이트
+        const newRecords = [...prev];
+        newRecords[existingIndex] = updatedRecord;
+        console.log('[Favorite] Updated existing local record');
+        return newRecords;
+      } else {
+        // 새 로컬 기록 추가
+        console.log('[Favorite] Adding new local record');
+        return [...prev, updatedRecord];
+      }
+    });
 
     if (user && shouldUseFirestore) {
       try {
+        console.log('[Favorite] Updating Firebase...');
         await updateGeneratedImageDoc(user.uid, recordId, {
           metadata: updatedRecord.metadata
         });
+        console.log('[Favorite] Firebase update successful');
       } catch (error) {
-        console.error(error);
+        console.error('[Favorite] Firebase update failed:', error);
         toast.error("즐겨찾기 상태를 변경하는 중 오류가 발생했습니다.");
+        // 오류 시 로컬 상태 롤백
+        setLocalRecords(prev => prev.map(record =>
+          record.id === recordId ? target : record
+        ));
         return;
       }
     } else {
-      setLocalRecords(prev => prev.map(record =>
-        record.id === recordId ? updatedRecord : record
-      ));
+      console.log('[Favorite] Skipping Firebase update (no user or Firebase disabled)');
     }
 
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
-  const handleDownloadRecord = (recordId: string) => {
+  const handleDownloadRecord = async (recordId: string) => {
     const target = mergedRecords.find(record => record.id === recordId);
     const url = target?.imageUrl ?? target?.originalImageUrl;
     if (!target || !url) {
       toast.error("다운로드할 이미지를 찾을 수 없습니다.");
       return;
     }
+
     if (typeof window !== "undefined") {
-      if (url.startsWith("data:")) {
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `generated-${recordId}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        window.open(url, "_blank");
+      try {
+        if (url.startsWith("data:")) {
+          // Base64 이미지 다운로드
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `generated-${recordId}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        } else {
+          // 외부 URL 이미지 다운로드
+          const response = await fetch(url);
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.download = `generated-${recordId}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          // 메모리 정리
+          window.URL.revokeObjectURL(blobUrl);
+        }
+        toast.success("이미지가 다운로드되었습니다.");
+      } catch (error) {
+        console.error("다운로드 실패:", error);
+        toast.error("다운로드 중 오류가 발생했습니다.");
       }
     }
   };
