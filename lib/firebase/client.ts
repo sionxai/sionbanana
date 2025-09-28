@@ -166,6 +166,11 @@ export const realtimeDatabase = () => {
     const databaseURL = clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
 
     console.log('[Realtime Database] Initializing with URL:', databaseURL);
+    console.log('[Realtime Database] Environment check:', {
+      isVercel: process.env.VERCEL,
+      nodeEnv: process.env.NODE_ENV,
+      rawURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL
+    });
 
     if (!databaseURL) {
       throw new Error("NEXT_PUBLIC_FIREBASE_DATABASE_URL이 설정되지 않았습니다.");
