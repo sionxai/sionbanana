@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MessageBubble } from "./MessageBubble";
-import { useChat } from "@/hooks/use-chat";
+import { useChatRTDB } from "@/hooks/use-chat-rtdb";
 import { ADMIN_UID } from "@/lib/constants";
 
 interface AdminChatInterfaceProps {
@@ -29,7 +29,7 @@ export function AdminChatInterface({
   const [isMultiline, setIsMultiline] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, loading, sendMessage, markAsRead } = useChat(chatId);
+  const { messages, loading, sendMessage, markAsRead } = useChatRTDB(chatId);
 
   // 빠른 답변 템플릿
   const quickReplies = [

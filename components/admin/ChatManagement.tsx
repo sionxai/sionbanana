@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
-import { useAdminChats } from "@/hooks/use-chat";
+import { useAdminChatsRTDB } from "@/hooks/use-admin-chats-rtdb";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,7 @@ const mockChatRooms = [
 export default function ChatManagement() {
   const { user } = useAuth();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const { chatRooms, loading, error } = useAdminChats();
+  const { chatRooms, loading, error } = useAdminChatsRTDB();
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
