@@ -160,17 +160,14 @@ export function BatchStudioShell() {
 
   // 액션 핸들러 함수들
   const handleToggleFavorite = async (recordId: string) => {
-    console.log('[Favorite] Starting toggle for recordId:', recordId);
     const target = mergedRecords.find(record => record.id === recordId);
     if (!target) {
-      console.error('[Favorite] Target record not found:', recordId);
       toast.error("기록을 찾을 수 없습니다.");
       return;
     }
 
     const currentFavorite = target.metadata?.favorite === true;
     const nextFavorite = !currentFavorite;
-    console.log('[Favorite] Current favorite state:', currentFavorite, '-> Next:', nextFavorite);
 
     const updatedRecord: GeneratedImageDocument = {
       ...target,
@@ -179,34 +176,28 @@ export function BatchStudioShell() {
         favorite: nextFavorite
       }
     };
-    console.log('[Favorite] Updated record metadata:', updatedRecord.metadata);
 
     // 로컬 상태를 즉시 업데이트 (Firebase 여부와 관계없이)
     setLocalRecords(prev => {
       const existingIndex = prev.findIndex(record => record.id === recordId);
-      console.log('[Favorite] Existing index in localRecords:', existingIndex);
       if (existingIndex >= 0) {
         // 기존 로컬 기록 업데이트
         const newRecords = [...prev];
         newRecords[existingIndex] = updatedRecord;
-        console.log('[Favorite] Updated existing local record');
         return newRecords;
       } else {
         // 새 로컬 기록 추가
-        console.log('[Favorite] Adding new local record');
         return [...prev, updatedRecord];
       }
     });
 
     if (user && shouldUseFirestore) {
       try {
-        console.log('[Favorite] Updating Firebase...');
         await updateGeneratedImageDoc(user.uid, recordId, {
           metadata: updatedRecord.metadata
         });
-        console.log('[Favorite] Firebase update successful');
       } catch (error) {
-        console.error('[Favorite] Firebase update failed:', error);
+        console.error("즐겨찾기 업데이트 실패:", error);
         toast.error("즐겨찾기 상태를 변경하는 중 오류가 발생했습니다.");
         // 오류 시 로컬 상태 롤백
         setLocalRecords(prev => prev.map(record =>
@@ -214,8 +205,6 @@ export function BatchStudioShell() {
         ));
         return;
       }
-    } else {
-      console.log('[Favorite] Skipping Firebase update (no user or Firebase disabled)');
     }
 
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
