@@ -34,10 +34,13 @@ import { uploadUserImage } from "@/lib/firebase/storage";
 import { saveGeneratedImageDoc } from "@/lib/firebase/firestore";
 import { shouldUseFirestore } from "@/lib/env";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
+import { HistoryPanel } from "@/components/studio/history-panel";
 import Image from "next/image";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
 import { mergeHistoryRecords } from "@/components/studio/history-sync";
+import { deleteUserImage } from "@/lib/firebase/storage";
+import { deleteGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
 
 const MAX_BATCH_ITEMS = 30;
 
@@ -119,6 +122,29 @@ export function BatchStudioShell() {
   // 프리셋 페이지와 동일한 히스토리 구조 사용
   const { records, loading } = useGeneratedImages();
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+  const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
+
+  // 페이지 이동 시 상태 지속성을 위한 로컬 스토리지 동기화
+  useEffect(() => {
+    const savedRecords = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (savedRecords) {
+      try {
+        const parsed = JSON.parse(savedRecords);
+        if (Array.isArray(parsed)) {
+          setLocalRecords(parsed);
+        }
+      } catch (error) {
+        console.warn("[BatchStudio] Failed to parse saved records:", error);
+      }
+    }
+  }, []);
+
+  // 로컬 기록이 변경될 때 저장
+  useEffect(() => {
+    if (localRecords.length > 0) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localRecords));
+    }
+  }, [localRecords]);
 
   const mergedRecords = useMemo(() => {
     const merged = mergeHistoryRecords(localRecords, records);
@@ -132,6 +158,92 @@ export function BatchStudioShell() {
   ), [mergedRecords]);
 
   const historyRecordsLimited = useMemo(() => historyRecords.slice(0, 30), [historyRecords]);
+
+  // 액션 핸들러 함수들
+  const handleToggleFavorite = async (recordId: string) => {
+    const target = mergedRecords.find(record => record.id === recordId);
+    if (!target) {
+      toast.error("기록을 찾을 수 없습니다.");
+      return;
+    }
+    const nextFavorite = target.metadata?.favorite !== true;
+    const updatedRecord: GeneratedImageDocument = {
+      ...target,
+      metadata: {
+        ...target.metadata,
+        favorite: nextFavorite
+      }
+    };
+
+    if (user && shouldUseFirestore) {
+      try {
+        await updateGeneratedImageDoc(user.uid, recordId, {
+          metadata: updatedRecord.metadata
+        });
+      } catch (error) {
+        console.error(error);
+        toast.error("즐겨찾기 상태를 변경하는 중 오류가 발생했습니다.");
+        return;
+      }
+    } else {
+      setLocalRecords(prev => prev.map(record =>
+        record.id === recordId ? updatedRecord : record
+      ));
+    }
+
+    toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
+  };
+
+  const handleDownloadRecord = (recordId: string) => {
+    const target = mergedRecords.find(record => record.id === recordId);
+    const url = target?.imageUrl ?? target?.originalImageUrl;
+    if (!target || !url) {
+      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      if (url.startsWith("data:")) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `generated-${recordId}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        window.open(url, "_blank");
+      }
+    }
+  };
+
+  const handleDeleteRecord = async (recordId: string) => {
+    const target = mergedRecords.find(record => record.id === recordId);
+    if (!target) {
+      toast.error("삭제할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    if (user && shouldUseFirestore) {
+      try {
+        await deleteGeneratedImageDoc(user.uid, recordId);
+        if (target.imageUrl && !target.imageUrl.startsWith("data:")) {
+          await deleteUserImage(user.uid, recordId);
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error("이미지를 삭제하는 중 오류가 발생했습니다.");
+        return;
+      }
+    } else {
+      setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    }
+
+    toast.success("이미지가 삭제되었습니다.");
+  };
+
+  const handleSetReference = (recordId: string) => {
+    // 배치 생성에서는 기준이미지 등록 기능을 비활성화하거나 간단하게 처리
+    toast.info("배치 생성에서는 기준이미지 등록 기능을 지원하지 않습니다.");
+  };
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -1140,60 +1252,19 @@ export function BatchStudioShell() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-              {historyRecordsLimited.map(record => {
-                const imageUrl = record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl;
-                const recordLabel =
-                  (record.metadata?.characterViewLabel as string | undefined) ??
-                  (record.promptMeta?.refinedPrompt as string | undefined) ??
-                  (record.promptMeta?.rawPrompt as string | undefined) ??
-                  "";
-                return (
-                  <div
-                    key={record.id}
-                    className="group relative overflow-hidden rounded-lg border bg-card aspect-[4/3]"
-                    role="button"
-                    tabIndex={0}
-                  >
-                    {imageUrl ? (
-                      <Image
-                        src={imageUrl}
-                        alt="generated"
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16.67vw"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        이미지 없음
-                      </div>
-                    )}
-                    <div className="absolute inset-0 flex flex-col justify-between bg-black/0 transition group-hover:bg-black/60">
-                      <div className="flex items-start justify-between p-2 opacity-0 transition group-hover:opacity-100">
-                        <div className="rounded bg-black/80 px-2 py-1 text-xs text-white">
-                          {record.metadata?.batchItem ? "배치" :
-                           record.mode === "create" ? "생성" :
-                           record.mode === "remix" ? "변형" : "기타"}
-                        </div>
-                        <div className="rounded bg-black/80 px-2 py-1 text-xs text-white">
-                          {new Date(record.createdAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <div className="p-2 opacity-0 transition group-hover:opacity-100">
-                        <div className="rounded bg-black/80 px-2 py-1 text-xs text-white line-clamp-2">
-                          {recordLabel}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {historyRecordsLimited.length === 0 && (
-                <div className="col-span-full flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
-                  {loading ? "기록을 불러오는 중..." : "아직 생성된 이미지가 없습니다."}
-                </div>
-              )}
-            </div>
+            <HistoryPanel
+              records={historyRecords}
+              selectedId={null}
+              onSelect={() => {}}
+              onSetReference={handleSetReference}
+              onToggleFavorite={handleToggleFavorite}
+              onDownload={handleDownloadRecord}
+              onDelete={handleDeleteRecord}
+              view={historyView}
+              onChangeView={setHistoryView}
+              emptyStateMessage={loading ? "기록을 불러오는 중..." : "아직 생성된 이미지가 없습니다."}
+              emptyStateFavoriteMessage="즐겨찾기에 추가한 이미지가 없습니다."
+            />
           </CardContent>
         </Card>
       </section>
