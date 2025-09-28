@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MessageBubble } from "./MessageBubble";
-import { useChat } from "@/hooks/use-chat";
+import { useChatRTDB } from "@/hooks/use-chat-rtdb";
 import { ADMIN_UID } from "@/lib/constants";
 
 interface ChatInterfaceProps {
@@ -20,7 +20,7 @@ export function ChatInterface({ chatId, currentUserId, currentUserName }: ChatIn
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, loading, sendMessage, markAsRead } = useChat(chatId);
+  const { messages, loading, sendMessage, markAsRead } = useChatRTDB(chatId);
 
   // 메시지 전송
   const handleSendMessage = async () => {
