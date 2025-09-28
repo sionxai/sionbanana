@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { useAdminChatsRest } from "@/hooks/use-chat-rest";
+import { useAdminChatsSDK } from "@/hooks/use-admin-chats-sdk";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,8 +42,7 @@ const fallbackChatRooms = [
 ];
 
 export default function AdminChatPage() {
-  const { user, loading } = useAuth();
-  const { chatRooms, loading: loadingChats, error } = useAdminChatsRest();
+  const { chatRooms, loading: loadingChats, error, isAdmin } = useAdminChatsSDK();
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -81,7 +80,7 @@ export default function AdminChatPage() {
 
   const totalUnreadCount = chatRooms.reduce((sum, chat) => sum + getUnreadCount(chat), 0);
 
-  if (loading || loadingChats) {
+  if (loadingChats) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-sm text-muted-foreground">
@@ -91,7 +90,7 @@ export default function AdminChatPage() {
     );
   }
 
-  if (!user || user.uid !== ADMIN_UID) {
+  if (!isAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-md">
@@ -151,15 +150,15 @@ export default function AdminChatPage() {
                   사용자가 1:1 상담을 요청하면<br />
                   여기에 채팅방이 표시됩니다.
                 </p>
-                <div className="bg-blue-50 border border-blue-200 p-3 rounded-md max-w-md">
-                  <p className="text-sm text-blue-800 mb-2">
-                    ⚡ <strong>빠른 로딩:</strong> localStorage에서 우선 검색하여
-                    빠른 결과를 제공합니다. 데이터가 없는 경우에만
-                    Firestore 전체 스캔을 수행합니다.
+                <div className="bg-green-50 border border-green-200 p-3 rounded-md max-w-md">
+                  <p className="text-sm text-green-800 mb-2">
+                    🚀 <strong>Firebase SDK 사용:</strong> 최적화된 Firestore 쿼리로
+                    관리자가 참여한 채팅방만 빠르게 조회합니다.
+                    실시간 업데이트로 새 상담 요청을 즉시 확인할 수 있습니다.
                   </p>
                   <p className="text-sm text-green-700 mb-2">
-                    ✅ <strong>장점:</strong> 일반적으로 2-3초 내에 로딩됩니다.
-                    최악의 경우 30초 타임아웃으로 무한 대기를 방지합니다.
+                    ✅ <strong>장점:</strong> 2-3초 내 로딩, 실시간 동기화,
+                    안정적인 네트워크 처리, 브라우저 무관.
                   </p>
                   <div className="flex gap-2">
                     <Button
