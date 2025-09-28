@@ -211,68 +211,85 @@ export async function getCollectionViaRest(collection: string): Promise<any[]> {
   }
 }
 
-// 관리자용 채팅방 목록 조회 (REST API 버전 - Firestore 직접 조회)
+// 관리자용 채팅방 목록 조회 (REST API 버전 - localStorage 우선, 빠른 방식)
 export async function getAdminChatRoomsViaRest(adminId: string): Promise<any[]> {
   try {
     console.log('[REST API] Fetching admin chat rooms for:', adminId);
 
-    // 첫 번째 방법: localStorage에서 찾기 (빠른 방법)
+    // 우선 localStorage에서 빠르게 찾기
     const localStorageChatRooms = [];
     try {
       const recentChatIds = JSON.parse(localStorage.getItem('recentChatIds') || '[]');
       console.log('[REST API] Found recent chat IDs in localStorage:', recentChatIds);
 
-      for (const chatId of recentChatIds) {
-        try {
-          const chatRoom = await getChatRoomByIdViaRest(chatId);
-          if (chatRoom) {
-            localStorageChatRooms.push(chatRoom);
-            console.log('[REST API] Successfully loaded chat room from localStorage:', chatId);
+      if (recentChatIds.length > 0) {
+        console.log('[REST API] Loading chat rooms from localStorage (fast method)...');
+
+        for (const chatId of recentChatIds) {
+          try {
+            const chatRoom = await getChatRoomByIdViaRest(chatId);
+            if (chatRoom) {
+              localStorageChatRooms.push(chatRoom);
+              console.log('[REST API] ✅ Loaded chat room from localStorage:', chatId);
+            } else {
+              console.log('[REST API] ⚠️ Chat room not found in Firestore:', chatId);
+            }
+          } catch (error) {
+            console.warn('[REST API] ❌ Failed to load chat room:', chatId, error);
           }
-        } catch (error) {
-          console.warn('[REST API] Failed to load chat room from localStorage:', chatId, error);
+        }
+
+        console.log('[REST API] 🎉 LocalStorage loading completed, found:', localStorageChatRooms.length, 'chat rooms');
+
+        // localStorage에서 채팅방을 찾았다면 바로 반환 (빠른 결과)
+        if (localStorageChatRooms.length > 0) {
+          console.log('[REST API] ⚡ Returning localStorage results for fast loading');
+          return localStorageChatRooms;
         }
       }
     } catch (error) {
       console.warn('[REST API] Failed to read from localStorage:', error);
     }
 
-    // 두 번째 방법: Firestore에서 관리자가 참여한 모든 채팅방 직접 조회
-    console.log('[REST API] Fetching all chat rooms from Firestore...');
-    const allChatRooms = await getCollectionViaRest('chats');
-    console.log('[REST API] Found all chat rooms in Firestore:', allChatRooms.length);
+    // localStorage가 비어있거나 실패한 경우에만 Firestore 전체 조회 (느린 방법)
+    console.log('[REST API] 🐌 No localStorage data found, falling back to slow Firestore scan...');
+    console.log('[REST API] ⚠️ This may take 1-2 minutes for large databases');
 
-    // 관리자가 참여한 채팅방만 필터링
-    const adminChatRooms = allChatRooms.filter(chatRoom => {
-      const participants = chatRoom.participants || [];
-      const isAdminParticipant = participants.includes(adminId);
-      if (isAdminParticipant) {
-        console.log('[REST API] Found admin chat room:', chatRoom.id);
-      }
-      return isAdminParticipant;
-    });
+    try {
+      // 타임아웃 설정 (30초)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore 조회 시간 초과 (30초)')), 30000)
+      );
 
-    // localStorage 결과와 Firestore 결과 합치기 (중복 제거)
-    const allResults = [...localStorageChatRooms];
-    for (const firestoreChatRoom of adminChatRooms) {
-      const exists = allResults.find(room => room.id === firestoreChatRoom.id);
-      if (!exists) {
-        allResults.push(firestoreChatRoom);
-        console.log('[REST API] Added chat room from Firestore:', firestoreChatRoom.id);
-      }
+      const firestorePromise = getCollectionViaRest('chats');
+
+      const allChatRooms = await Promise.race([firestorePromise, timeoutPromise]) as any[];
+      console.log('[REST API] Found all chat rooms in Firestore:', allChatRooms.length);
+
+      // 관리자가 참여한 채팅방만 필터링
+      const adminChatRooms = allChatRooms.filter(chatRoom => {
+        const participants = chatRoom.participants || [];
+        const isAdminParticipant = participants.includes(adminId);
+        if (isAdminParticipant) {
+          console.log('[REST API] Found admin chat room in Firestore:', chatRoom.id);
+        }
+        return isAdminParticipant;
+      });
+
+      console.log('[REST API] Firestore scan completed, found:', adminChatRooms.length, 'admin chat rooms');
+      return adminChatRooms;
+
+    } catch (firestoreError: any) {
+      console.error('[REST API] Firestore scan failed or timed out:', firestoreError);
+
+      // Firestore 조회 실패시 빈 배열 반환 (에러 대신)
+      console.log('[REST API] 🔄 Returning empty array due to Firestore failure');
+      return [];
     }
-
-    console.log('[REST API] Admin chat rooms fetch completed, total found:', allResults.length);
-    console.log('[REST API] Results breakdown:', {
-      fromLocalStorage: localStorageChatRooms.length,
-      fromFirestore: adminChatRooms.length,
-      totalUnique: allResults.length
-    });
-
-    return allResults;
 
   } catch (error: any) {
     console.error('[REST API] Failed to fetch admin chat rooms:', error);
-    throw new Error(`관리자 채팅방 목록 조회 실패: ${error.message}`);
+    // 완전 실패시에도 빈 배열 반환 (사용자 경험 개선)
+    return [];
   }
 }

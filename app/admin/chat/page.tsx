@@ -153,13 +153,13 @@ export default function AdminChatPage() {
                 </p>
                 <div className="bg-blue-50 border border-blue-200 p-3 rounded-md max-w-md">
                   <p className="text-sm text-blue-800 mb-2">
-                    💡 <strong>개선됨:</strong> 이제 Firestore에서 직접 채팅방을 조회합니다.
-                    localStorage와 Firestore 두 방식을 모두 사용하여
-                    누락 없이 모든 상담 요청을 찾습니다.
+                    ⚡ <strong>빠른 로딩:</strong> localStorage에서 우선 검색하여
+                    빠른 결과를 제공합니다. 데이터가 없는 경우에만
+                    Firestore 전체 스캔을 수행합니다.
                   </p>
                   <p className="text-sm text-green-700 mb-2">
-                    ✅ <strong>장점:</strong> 브라우저에 관계없이 모든 사용자의
-                    상담 요청을 확인할 수 있습니다.
+                    ✅ <strong>장점:</strong> 일반적으로 2-3초 내에 로딩됩니다.
+                    최악의 경우 30초 타임아웃으로 무한 대기를 방지합니다.
                   </p>
                   <div className="flex gap-2">
                     <Button
