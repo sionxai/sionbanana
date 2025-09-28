@@ -1,4 +1,4 @@
-// Firebase SDK 기반 관리자 채팅 훅 (인증 의존성 해결)
+// Firebase SDK 기반 관리자 채팅 훅 (인증 의존성 해결, TypeScript 타입 오류 수정 완료)
 "use client";
 
 import { useState, useEffect } from "react";
