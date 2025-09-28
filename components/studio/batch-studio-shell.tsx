@@ -37,7 +37,7 @@ import { useGeneratedImages } from "@/hooks/use-generated-images";
 import Image from "next/image";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
-import { mergeHistoryRecords } from "@/components/studio/history-sync";
+import { mergeHistoryRecords, broadcastHistoryUpdate } from "@/components/studio/history-sync";
 import { deleteUserImage } from "@/lib/firebase/storage";
 import { deleteGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
 
@@ -166,36 +166,33 @@ export function BatchStudioShell() {
       return;
     }
 
-    const currentFavorite = target.metadata?.favorite === true;
-    const nextFavorite = !currentFavorite;
+    const nextFavorite = target.metadata?.favorite !== true;
 
     const updatedRecord: GeneratedImageDocument = {
       ...target,
-      metadata: {
-        ...target.metadata,
-        favorite: nextFavorite
-      }
+      metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
     };
 
-    // 로컬 상태를 즉시 업데이트 (Firebase 여부와 관계없이)
     setLocalRecords(prev => {
-      const existingIndex = prev.findIndex(record => record.id === recordId);
-      if (existingIndex >= 0) {
-        // 기존 로컬 기록 업데이트
-        const newRecords = [...prev];
-        newRecords[existingIndex] = updatedRecord;
-        return newRecords;
-      } else {
-        // 새 로컬 기록 추가
-        return [...prev, updatedRecord];
+      const exists = prev.some(record => record.id === recordId);
+
+      if (exists) {
+        return prev.map(record => (record.id === recordId ? updatedRecord : record));
       }
+
+      return [updatedRecord, ...prev];
     });
 
     if (user && shouldUseFirestore) {
       try {
         await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: updatedRecord.metadata
+          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
         });
+
+        // 다른 페이지에 변경사항 브로드캐스트
+        broadcastHistoryUpdate(mergedRecords.map(record =>
+          record.id === recordId ? updatedRecord : record
+        ), "batch-studio");
       } catch (error) {
         console.error("즐겨찾기 업데이트 실패:", error);
         toast.error("즐겨찾기 상태를 변경하는 중 오류가 발생했습니다.");
