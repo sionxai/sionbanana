@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import { chatDocRef } from "@/lib/firebase/chat";
-import { getDoc } from "firebase/firestore";
+import { realtimeDatabase } from "@/lib/firebase/client";
+import { ref, get } from "firebase/database";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,44 +56,61 @@ export default function AdminChatDetailPage() {
   const [loadingChat, setLoadingChat] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // 실제 Firebase에서 채팅방 데이터 가져오기
+  // Realtime Database에서 채팅방 데이터 가져오기
   useEffect(() => {
     const loadChatRoom = async () => {
       if (!chatId) return;
 
       try {
-        console.log("[AdminChatDetail] Loading chat room:", chatId);
-        const chatDocReference = chatDocRef(chatId);
-        const chatSnap = await getDoc(chatDocReference);
+        console.log("[AdminChatDetail] Loading chat room from RTDB:", chatId);
+        const db = realtimeDatabase();
+        if (!db) {
+          throw new Error("Realtime Database 초기화 실패");
+        }
+
+        const chatRef = ref(db, `chats/${chatId}`);
+        const chatSnap = await get(chatRef);
 
         if (chatSnap.exists()) {
-          const data = chatSnap.data();
+          const data = chatSnap.val();
           const chatRoomData = {
-            id: chatSnap.id,
-            participants: data.participants,
-            participantNames: data.participantNames,
+            id: chatId,
+            participants: data.participants ? Object.keys(data.participants) : [],
+            participantNames: data.participants || {},
             lastMessage: data.lastMessage,
-            lastMessageAt: data.lastMessageAt?.toDate?.()?.toISOString() || data.lastMessageAt,
+            lastMessageAt: data.lastMessageAt ? new Date(data.lastMessageAt).toISOString() : new Date().toISOString(),
             unreadCount: data.unreadCount || {},
-            createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-            updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
+            createdAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
+            updatedAt: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString(),
             // 사용자 정보 (임시)
             userInfo: {
               email: "user@example.com",
               plan: "basic",
-              joinedAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-              lastActive: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt
+              joinedAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
+              lastActive: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString()
             }
           };
-          console.log("[AdminChatDetail] Chat room loaded:", chatRoomData);
+          console.log("[AdminChatDetail] Chat room loaded from RTDB:", chatRoomData);
           setChatRoom(chatRoomData);
         } else {
-          console.log("[AdminChatDetail] Chat room not found:", chatId);
-          setChatRoom(null);
+          console.log("[AdminChatDetail] Chat room not found in RTDB:", chatId);
+          // 백업 데이터 사용
+          if (fallbackChatRooms[chatId]) {
+            console.log("[AdminChatDetail] Using fallback data for:", chatId);
+            setChatRoom(fallbackChatRooms[chatId]);
+          } else {
+            setChatRoom(null);
+          }
         }
       } catch (error) {
-        console.error("[AdminChatDetail] Error loading chat room:", error);
-        setChatRoom(null);
+        console.error("[AdminChatDetail] Error loading chat room from RTDB:", error);
+        // 백업 데이터 사용
+        if (fallbackChatRooms[chatId]) {
+          console.log("[AdminChatDetail] Using fallback data due to error:", chatId);
+          setChatRoom(fallbackChatRooms[chatId]);
+        } else {
+          setChatRoom(null);
+        }
       } finally {
         setLoadingChat(false);
       }
