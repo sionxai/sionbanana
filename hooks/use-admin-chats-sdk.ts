@@ -6,14 +6,21 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { ADMIN_UID } from "@/lib/constants";
 import type { ChatRoom } from "@/lib/types";
 
+// 캐시된 채팅방 데이터 (컴포넌트 외부에 저장)
+let cachedChatRooms: ChatRoom[] = [];
+let lastCacheTime = 0;
+const CACHE_DURATION = 30000; // 30초 캐시
+
 export function useAdminChatsSDK() {
   const { user, loading: authLoading } = useAuth();
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>(cachedChatRooms);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadChatRooms = async () => {
+      const startTime = performance.now();
+
       // 인증이 완료될 때까지 대기
       if (authLoading) {
         console.log("[useAdminChatsSDK] Waiting for auth to complete...");
@@ -28,23 +35,33 @@ export function useAdminChatsSDK() {
         return;
       }
 
+      // 캐시 확인 (30초 이내라면 즉시 반환)
+      const now = Date.now();
+      if (cachedChatRooms.length > 0 && now - lastCacheTime < CACHE_DURATION) {
+        console.log("[useAdminChatsSDK] ⚡ Using cached data, skipping query");
+        setChatRooms(cachedChatRooms);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
 
       try {
+        console.log("[useAdminChatsSDK] ⏱️ Starting fresh query at:", startTime);
         console.log("[useAdminChatsSDK] Loading admin chat rooms with Firebase SDK for:", user.uid);
 
         // Firebase SDK 동적 import (클라이언트 측에서만)
         const { firestore } = await import("@/lib/firebase/client");
-        const { collection, query, where, onSnapshot, orderBy } = await import("firebase/firestore");
+        const { collection, query, where, onSnapshot, limit } = await import("firebase/firestore");
 
         const db = firestore();
 
-        // 관리자가 참여한 채팅방만 쿼리 (최적화된 방식)
+        // 관리자가 참여한 채팅방만 쿼리 (orderBy 제거로 속도 향상)
         const chatQuery = query(
           collection(db, "chats"),
           where("participants", "array-contains", ADMIN_UID),
-          orderBy("updatedAt", "desc")
+          limit(50) // 최대 50개로 제한
         );
 
         console.log("[useAdminChatsSDK] Setting up real-time listener for admin chats");
@@ -53,6 +70,9 @@ export function useAdminChatsSDK() {
         const unsubscribe = onSnapshot(
           chatQuery,
           (snapshot) => {
+            const endTime = performance.now();
+            const loadTime = Math.round(endTime - startTime);
+            console.log("[useAdminChatsSDK] ⏱️ Query completed in:", loadTime, "ms");
             console.log("[useAdminChatsSDK] Received snapshot update, docs:", snapshot.docs.length);
 
             const rooms = snapshot.docs.map(doc => ({
@@ -60,8 +80,20 @@ export function useAdminChatsSDK() {
               ...doc.data()
             })) as ChatRoom[];
 
-            console.log("[useAdminChatsSDK] Processed chat rooms:", rooms);
-            setChatRooms(rooms);
+            // 클라이언트에서 날짜순 정렬 (인덱스 불필요)
+            const sortedRooms = rooms.sort((a, b) => {
+              const aTime = a.updatedAt?.toDate?.() || a.createdAt?.toDate?.() || new Date(0);
+              const bTime = b.updatedAt?.toDate?.() || b.createdAt?.toDate?.() || new Date(0);
+              return bTime.getTime() - aTime.getTime();
+            });
+
+            console.log("[useAdminChatsSDK] Processed and sorted chat rooms:", sortedRooms.length);
+
+            // 캐시 업데이트
+            cachedChatRooms = sortedRooms;
+            lastCacheTime = Date.now();
+
+            setChatRooms(sortedRooms);
             setLoading(false);
           },
           (err) => {
