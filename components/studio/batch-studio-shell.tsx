@@ -34,7 +34,6 @@ import { uploadUserImage } from "@/lib/firebase/storage";
 import { saveGeneratedImageDoc } from "@/lib/firebase/firestore";
 import { shouldUseFirestore } from "@/lib/env";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
-import { HistoryPanel } from "@/components/studio/history-panel";
 import Image from "next/image";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
@@ -1252,19 +1251,124 @@ export function BatchStudioShell() {
             </div>
           </CardHeader>
           <CardContent>
-            <HistoryPanel
-              records={historyRecords}
-              selectedId={null}
-              onSelect={() => {}}
-              onSetReference={handleSetReference}
-              onToggleFavorite={handleToggleFavorite}
-              onDownload={handleDownloadRecord}
-              onDelete={handleDeleteRecord}
-              view={historyView}
-              onChangeView={setHistoryView}
-              emptyStateMessage={loading ? "기록을 불러오는 중..." : "아직 생성된 이미지가 없습니다."}
-              emptyStateFavoriteMessage="즐겨찾기에 추가한 이미지가 없습니다."
-            />
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex gap-2">
+                <Button
+                  variant={historyView === "all" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setHistoryView("all")}
+                >
+                  전체
+                </Button>
+                <Button
+                  variant={historyView === "favorite" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setHistoryView("favorite")}
+                >
+                  즐겨찾기
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+              {historyRecordsLimited
+                .filter(record => historyView === "all" || record.metadata?.favorite)
+                .map(record => {
+                const imageUrl = record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl;
+                const recordLabel =
+                  (record.metadata?.characterViewLabel as string | undefined) ??
+                  (record.promptMeta?.refinedPrompt as string | undefined) ??
+                  (record.promptMeta?.rawPrompt as string | undefined) ??
+                  "";
+                return (
+                  <div
+                    key={record.id}
+                    className="group relative overflow-hidden rounded-lg border bg-card aspect-[4/3]"
+                    role="button"
+                    tabIndex={0}
+                  >
+                    {imageUrl ? (
+                      <Image
+                        src={imageUrl}
+                        alt="generated"
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16.67vw"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                        이미지 없음
+                      </div>
+                    )}
+
+                    {/* 기존 정보 오버레이 */}
+                    <div className="absolute inset-0 flex flex-col justify-between bg-black/0 transition group-hover:bg-black/60">
+                      <div className="flex items-start justify-between p-2 opacity-0 transition group-hover:opacity-100">
+                        <div className="rounded bg-black/80 px-2 py-1 text-xs text-white">
+                          {record.metadata?.batchItem ? "배치" :
+                           record.mode === "create" ? "생성" :
+                           record.mode === "remix" ? "변형" : "기타"}
+                        </div>
+                        <div className="rounded bg-black/80 px-2 py-1 text-xs text-white">
+                          {new Date(record.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+
+                      {/* 액션 버튼들 */}
+                      <div className="p-2 opacity-0 transition group-hover:opacity-100">
+                        <div className="flex items-end justify-between">
+                          <div className="rounded bg-black/80 px-2 py-1 text-xs text-white line-clamp-2 flex-1 mr-2">
+                            {recordLabel}
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant={record.metadata?.favorite ? "default" : "secondary"}
+                              className="h-6 w-6 p-0 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleFavorite(record.id);
+                              }}
+                            >
+                              ★
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="h-6 w-6 p-0 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadRecord(record.id);
+                              }}
+                            >
+                              ↓
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 w-6 p-0 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteRecord(record.id);
+                              }}
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {historyRecordsLimited.filter(record => historyView === "all" || record.metadata?.favorite).length === 0 && (
+                <div className="col-span-full flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
+                  {historyView === "favorite"
+                    ? "즐겨찾기에 추가한 이미지가 없습니다."
+                    : loading ? "기록을 불러오는 중..." : "아직 생성된 이미지가 없습니다."
+                  }
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </section>
