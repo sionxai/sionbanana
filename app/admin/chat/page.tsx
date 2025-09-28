@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { useAdminChatsSDK } from "@/hooks/use-admin-chats-sdk";
+import { useAdminChatsRTDB } from "@/hooks/use-admin-chats-rtdb";
 import { ADMIN_UID } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +42,7 @@ const fallbackChatRooms = [
 ];
 
 export default function AdminChatPage() {
-  const { chatRooms, loading: loadingChats, error, isAdmin } = useAdminChatsSDK();
+  const { chatRooms, loading: loadingChats, error, isAdmin } = useAdminChatsRTDB();
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -152,13 +152,13 @@ export default function AdminChatPage() {
                 </p>
                 <div className="bg-green-50 border border-green-200 p-3 rounded-md max-w-md">
                   <p className="text-sm text-green-800 mb-2">
-                    🚀 <strong>Firebase SDK 사용:</strong> 최적화된 Firestore 쿼리로
-                    관리자가 참여한 채팅방만 빠르게 조회합니다.
-                    실시간 업데이트로 새 상담 요청을 즉시 확인할 수 있습니다.
+                    🚀 <strong>Realtime Database 사용:</strong> Firebase Realtime Database로
+                    관리자가 참여한 채팅방을 실시간으로 조회합니다.
+                    새 상담 요청이 들어오면 즉시 업데이트됩니다.
                   </p>
                   <p className="text-sm text-green-700 mb-2">
-                    ✅ <strong>장점:</strong> 2-3초 내 로딩, 실시간 동기화,
-                    안정적인 네트워크 처리, 브라우저 무관.
+                    ✅ <strong>장점:</strong> 즉시 로딩, 실시간 동기화,
+                    오프라인 문제 해결, 안정적인 연결.
                   </p>
                   <div className="flex gap-2">
                     <Button

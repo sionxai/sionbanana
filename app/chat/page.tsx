@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import { getOrCreateChatRoomSDK } from "@/lib/firebase/chat-sdk";
+import { getOrCreateChatRoomRTDB } from "@/lib/firebase/realtime-chat-sdk";
 import { ChatInterface } from "@/components/chat/ChatInterface";
 import { StudioNavigation } from "@/components/studio/studio-navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,11 +33,11 @@ export default function ChatPage() {
       }
 
       try {
-        console.log("[Chat] Starting Firebase SDK chat initialization...");
+        console.log("[Chat] Starting Realtime Database chat initialization...");
 
-        // 채팅방 생성/조회 (Firebase SDK)
-        console.log("[Chat] Creating/getting chat room with Firebase SDK");
-        const chatRoomId = await getOrCreateChatRoomSDK(
+        // 채팅방 생성/조회 (Realtime Database)
+        console.log("[Chat] Creating/getting chat room with Realtime Database");
+        const chatRoomId = await getOrCreateChatRoomRTDB(
           user.uid,
           user.displayName || user.email || "사용자"
         );

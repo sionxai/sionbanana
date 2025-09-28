@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore, enableNetwork, disableNetwork, terminate, clearIndexedDbPersistence, initializeFirestore, CACHE_SIZE_UNLIMITED } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
+import { getDatabase, connectDatabaseEmulator } from "firebase/database";
 import { clientEnv } from "@/lib/env";
 
 // 환경변수 export (디버깅용)
@@ -158,6 +159,27 @@ export const storage = () => {
   }
 };
 
+// Realtime Database 인스턴스
+export const realtimeDatabase = () => {
+  try {
+    const app = getFirebaseApp();
+    const databaseURL = clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
+
+    console.log('[Realtime Database] Initializing with URL:', databaseURL);
+
+    if (!databaseURL) {
+      throw new Error("NEXT_PUBLIC_FIREBASE_DATABASE_URL이 설정되지 않았습니다.");
+    }
+
+    const database = getDatabase(app, databaseURL);
+    console.log('[Realtime Database] ✅ Successfully initialized');
+    return database;
+  } catch (error) {
+    console.error("Firebase Realtime Database 초기화 실패:", error);
+    return null;
+  }
+};
+
 export function enableFirebaseEmulators() {
   if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true") {
     return;
@@ -166,10 +188,12 @@ export function enableFirebaseEmulators() {
   const auth = firebaseAuth();
   const db = firestore();
   const bucket = storage();
+  const rtdb = realtimeDatabase();
 
   if (auth) connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
   if (db) connectFirestoreEmulator(db, "localhost", 8080);
   if (bucket) connectStorageEmulator(bucket, "localhost", 9199);
+  if (rtdb) connectDatabaseEmulator(rtdb, "localhost", 9000);
 }
 
 // 더 강력한 Firebase 연결 복구 함수
