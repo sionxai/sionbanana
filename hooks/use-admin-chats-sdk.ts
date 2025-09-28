@@ -82,8 +82,16 @@ export function useAdminChatsSDK() {
 
             // 클라이언트에서 날짜순 정렬 (인덱스 불필요)
             const sortedRooms = rooms.sort((a, b) => {
-              const aTime = a.updatedAt?.toDate?.() || a.createdAt?.toDate?.() || new Date(0);
-              const bTime = b.updatedAt?.toDate?.() || b.createdAt?.toDate?.() || new Date(0);
+              const getDate = (timestamp: any) => {
+                if (!timestamp) return new Date(0);
+                if (typeof timestamp === 'string') return new Date(timestamp);
+                if (timestamp.toDate) return timestamp.toDate();
+                if (timestamp.seconds) return new Date(timestamp.seconds * 1000);
+                return new Date(timestamp);
+              };
+
+              const aTime = getDate(a.updatedAt) || getDate(a.createdAt) || new Date(0);
+              const bTime = getDate(b.updatedAt) || getDate(b.createdAt) || new Date(0);
               return bTime.getTime() - aTime.getTime();
             });
 
