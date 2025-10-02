@@ -102,16 +102,18 @@ export default function ChatPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <div className="flex-1 pb-20">
+      <div className="flex flex-1 justify-center px-4 pb-20">
         {chatId ? (
-          <ChatInterface
-            chatId={chatId}
-            currentUserId={user.uid}
-            currentUserName={user.displayName || user.email || "사용자"}
-          />
+          <div className="w-full max-w-3xl py-6">
+            <ChatInterface
+              chatId={chatId}
+              currentUserId={user.uid}
+              currentUserName={user.displayName || user.email || "사용자"}
+            />
+          </div>
         ) : (
-          <div className="flex h-full items-center justify-center p-4">
-            <Card className="w-full max-w-md">
+          <div className="flex w-full max-w-2xl items-center justify-center py-12">
+            <Card className="w-full">
               <CardHeader>
                 <CardTitle className="text-destructive">채팅 오류</CardTitle>
               </CardHeader>

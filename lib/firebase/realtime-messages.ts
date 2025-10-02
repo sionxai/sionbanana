@@ -36,14 +36,21 @@ export async function sendMessageRTDB(
     await set(newMessageRef, messageData);
 
     // 채팅방 정보 업데이트 (마지막 메시지, 읽지 않은 메시지 수)
+    const ADMIN_UID = "ACHNkfU8GNT5u8AtGNP0UsszqIR2";
+
+    // chatId에서 상대방 UID 추출 (chatId는 "admin_user" 또는 "user_admin" 형태)
+    // ADMIN_UID를 제거하고 남은 부분이 상대방 UID
+    const otherUserId = senderId === ADMIN_UID
+      ? chatId.replace(`${ADMIN_UID}_`, "").replace(`_${ADMIN_UID}`, "")
+      : ADMIN_UID;
+
     const chatRef = ref(db, `chats/${chatId}`);
     const chatUpdates = {
       lastMessage: content,
       lastMessageAt: Date.now(),
       updatedAt: Date.now(),
       // 보낸 사람이 아닌 다른 참여자의 읽지 않은 메시지 수 증가
-      [`unreadCount/${senderId === "ACHNkfU8GNT5u8AtGNP0UsszqIR2" ? chatId.split("_")[0] : "ACHNkfU8GNT5u8AtGNP0UsszqIR2"}`]:
-        await getUnreadCount(chatId, senderId === "ACHNkfU8GNT5u8AtGNP0UsszqIR2" ? chatId.split("_")[0] : "ACHNkfU8GNT5u8AtGNP0UsszqIR2") + 1
+      [`unreadCount/${otherUserId}`]: await getUnreadCount(chatId, otherUserId) + 1
     };
 
     await update(chatRef, chatUpdates);

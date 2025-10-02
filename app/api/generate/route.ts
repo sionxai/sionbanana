@@ -41,8 +41,8 @@ const requestSchema = z.object({
 });
 
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "imagen-3.0-generate-002";
-const FALLBACK_IMAGE_MODEL = "gemini-2.5-flash-image-preview";
+const DEFAULT_MODEL = "gemini-2.5-flash-image-preview";
+const FALLBACK_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
 const IMAGE_MODEL_PREFIXES = ["imagen-"];
 const TEXT_RESPONSE_MIME_SET = new Set([
   "text/plain",
@@ -251,14 +251,20 @@ export async function POST(request: NextRequest) {
         await file.save(imageBuffer, {
           metadata: {
             contentType: 'image/png',
+            metadata: {
+              firebaseStorageDownloadTokens: crypto.randomUUID(), // Firebase download token
+            }
           },
         });
 
-        // Make file publicly accessible
-        await file.makePublic();
+        // Get signed URL (valid for 1 year)
+        // Use signed URL instead of makePublic() to avoid "Uniform bucket-level access" errors
+        const [signedUrl] = await file.getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 365 * 24 * 60 * 60 * 1000, // 1 year
+        });
 
-        // Get public URL
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        const publicUrl = signedUrl;
 
         console.log(`🔍 Debug publicUrl: ${publicUrl} (length: ${publicUrl.length})`);
         console.log(`🔍 Debug base64DataUrl length: ${base64DataUrl.length}`);
@@ -524,13 +530,28 @@ async function callModel(
         generationConfig
       });
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timeout - 이미지 생성 요청이 시간 초과되었습니다.');
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const errorBody = await parseErrorBody(response);

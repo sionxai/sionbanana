@@ -35,11 +35,16 @@ export const generateCombinedCameraPrompt = (settings: {
     }
   }
 
-  // Aperture settings - include any aperture value
-  if (settings.aperture) {
-    if (settings.aperture.includes("f1.2") || settings.aperture.includes("f1.4") || settings.aperture.includes("f1.8") || settings.aperture.includes("f2.8") || settings.aperture.includes("f3.5") || settings.aperture.includes("f4.0") || settings.aperture.includes("f5.6")) {
+  // Aperture settings - skip if "기본값" is selected
+  if (settings.aperture && settings.aperture.trim().length > 0) {
+    const normalizedAperture = settings.aperture.trim().toLowerCase();
+
+    // Skip aperture prompt entirely if user selected "기본값" (no aperture)
+    if (normalizedAperture === "기본값") {
+      // Do nothing - no aperture prompt
+    } else if (normalizedAperture.includes("f1.2") || normalizedAperture.includes("f1.4") || normalizedAperture.includes("f1.8") || normalizedAperture.includes("f2.8") || normalizedAperture.includes("f3.5") || normalizedAperture.includes("f4.0") || normalizedAperture.includes("f5.6")) {
       prompts.push("Use wide aperture for shallow depth of field and bokeh effect.");
-    } else if (settings.aperture.includes("f8") || settings.aperture.includes("f11") || settings.aperture.includes("f16") || settings.aperture.includes("f22")) {
+    } else if (normalizedAperture.includes("f8") || normalizedAperture.includes("f11") || normalizedAperture.includes("f16") || normalizedAperture.includes("f22")) {
       prompts.push("Use narrow aperture for deep focus and sharp background detail.");
     }
   }

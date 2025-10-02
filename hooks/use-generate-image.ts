@@ -28,22 +28,50 @@ export async function callGenerateApi(variables: GenerateVariables, signal?: Abo
   const user = auth?.currentUser;
   const token = user ? await user.getIdToken() : "";
 
-  const response = await fetch("/api/generate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {})
-    },
-    body: JSON.stringify(variables),
-    signal
-  });
+  // Create a timeout signal if none provided
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 30000); // 30 second timeout
 
-  const data = (await response.json()) as GenerateResponse;
-  if (!response.ok) {
+  const effectiveSignal = signal || timeoutController.signal;
+
+  try {
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(variables),
+      signal: effectiveSignal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        ok: false,
+        reason: errorData.reason || `HTTP ${response.status}: ${response.statusText}`
+      };
+    }
+
+    const data = (await response.json()) as GenerateResponse;
     return data;
-  }
+  } catch (error) {
+    clearTimeout(timeoutId);
 
-  return data;
+    if (error instanceof Error && error.name === 'AbortError') {
+      return {
+        ok: false,
+        reason: "요청 시간이 초과되었습니다. 다시 시도해주세요."
+      };
+    }
+
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "네트워크 오류가 발생했습니다."
+    };
+  }
 }
 
 export function useGenerateImage() {

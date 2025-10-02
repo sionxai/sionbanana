@@ -337,6 +337,13 @@ async function runBatchSequence(options: RunBatchOptions) {
       const view = views[index];
       onProgress?.(view, index, views.length);
 
+      // Check cancel before starting API call
+      if (cancelRef?.current) {
+        cancelled = true;
+        onCancelled?.();
+        break;
+      }
+
       const viewInstructionSegments = [
         `${view.instruction}.`,
         singleViewGuideline,
@@ -448,11 +455,13 @@ ${viewInstructionSegments.join(" ")}`;
       }
 
       const now = new Date().toISOString();
+      const recordId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${actionLabel}-${view.id}-${Date.now()}`;
+
       const newRecord: GeneratedImageDocument = {
-        id:
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `${actionLabel}-${view.id}-${Date.now()}`,
+        id: recordId,
         userId: user?.uid ?? "local",
         mode: PRESET_ACTION_MODE,
         promptMeta: {
@@ -481,6 +490,10 @@ ${viewInstructionSegments.join(" ")}`;
         updatedAt: now
       };
 
+      // NOTE: 서버(/api/generate)에서 이미 Firestore에 저장하므로 클라이언트에서 중복 저장하지 않음
+      console.log(`[Preset] Skipping Firestore save (already saved by server): ${recordId}`);
+
+      console.log(`[Preset] Adding to local records: ${recordId}`);
       mergeLocalRecord(newRecord, { promoteToReference: false, broadcast: false });
       successCount += 1;
       onResult?.(view, index, views.length, "success");
@@ -657,7 +670,7 @@ export function PresetsShell() {
       console.warn("Failed to load reference slots", error);
       setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
     }
-  }, []);
+  }, [user?.uid, setReferenceSlots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -713,13 +726,57 @@ export function PresetsShell() {
   }, [user?.uid]);
 
   const mergedRecords = useMemo(() => {
+    console.log(`[Preset Merge] localRecords count: ${localRecords.length}, Firestore records count: ${records.length}`);
+
+    // Debug: Show first 3 IDs from each source
+    if (localRecords.length > 0) {
+      console.log('[Preset Merge] Local IDs:', localRecords.slice(0, 3).map(r => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        hasTimestamp: !!r.createdAt
+      })));
+    }
+    if (records.length > 0) {
+      console.log('[Preset Merge] Firestore IDs:', records.slice(0, 3).map(r => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        hasTimestamp: !!r.createdAt
+      })));
+    }
+
     const merged = mergeHistoryRecords(localRecords, records);
+    console.log(`[Preset Merge] After merge: ${merged.length} records`);
+
     const uid = user?.uid ?? null;
-    return uid ? merged.filter(record => record.userId === uid) : [];
+    const filtered = uid ? merged.filter(record => record.userId === uid) : [];
+    console.log(`[Preset Merge] After userId filter: ${filtered.length} records`);
+
+    return filtered;
   }, [localRecords, records, user?.uid]);
 
-  const historyRecords = useMemo(() => mergedRecords.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID), [mergedRecords]);
-  const historyRecordsLimited = useMemo(() => historyRecords.slice(0, TILE_LIMIT), [historyRecords]);
+  const historyRecords = useMemo(() => {
+    const filtered = mergedRecords.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID);
+    console.log('[Preset History] Total records after filtering reference:', filtered.length);
+
+    // Check for visual duplicates (same imageUrl)
+    const urlGroups = new Map<string, number>();
+    filtered.forEach(record => {
+      const url = record.imageUrl || record.thumbnailUrl || 'no-url';
+      urlGroups.set(url, (urlGroups.get(url) || 0) + 1);
+    });
+    const duplicateUrls = Array.from(urlGroups.entries()).filter(([url, count]) => count > 1);
+    if (duplicateUrls.length > 0) {
+      console.warn('[Preset History] Found records with duplicate imageUrls:', duplicateUrls);
+    }
+
+    return filtered;
+  }, [mergedRecords]);
+
+  const historyRecordsLimited = useMemo(() => {
+    const limited = historyRecords.slice(0, TILE_LIMIT);
+    console.log('[Preset History] Displaying', limited.length, 'records (limit:', TILE_LIMIT, ')');
+    return limited;
+  }, [historyRecords]);
   const emptyHistoryMessage = user ? "아직 생성된 이미지가 없습니다." : "로그인하여 생성 기록을 확인하세요.";
 
   useEffect(() => {
@@ -848,7 +905,7 @@ type ReferenceImageState = {
 
     window.addEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
-  }, [mergeLocalRecord, setLocalRecords]);
+  }, [mergeLocalRecord, setLocalRecords, user?.uid]);
 
   useEffect(() => {
     if (!derivedReferenceImageUrl) {
@@ -1597,11 +1654,13 @@ type ReferenceImageState = {
               )}
             >
               {cacheBustedReferenceImageUrl ? (
-                <img
+                <Image
                   key={cacheBustedReferenceImageUrl}
                   src={cacheBustedReferenceImageUrl}
                   alt="reference"
-                  className="absolute inset-0 h-full w-full object-cover"
+                  fill
+                  className="object-cover"
+                  unoptimized={cacheBustedReferenceImageUrl.startsWith('data:')}
                 />
               ) : (
                 <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
@@ -1762,7 +1821,7 @@ type ReferenceImageState = {
                 }}
               >
                 {imageUrl ? (
-                  <Image src={imageUrl} alt="generated" fill className="object-cover" />
+                  <Image src={imageUrl} alt="generated" fill sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" className="object-cover" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-muted-foreground">이미지 없음</div>
                 )}
@@ -1845,7 +1904,13 @@ type ReferenceImageState = {
               닫기
             </button>
             {previewImageUrl ? (
-              <img src={previewImageUrl} alt={previewPromptLabel || "preview"} className="h-full w-full object-contain" />
+              <Image
+                src={previewImageUrl}
+                alt={previewPromptLabel || "preview"}
+                fill
+                className="object-contain"
+                unoptimized={previewImageUrl.startsWith('data:')}
+              />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm text-white/80">이미지를 불러올 수 없습니다.</div>
             )}

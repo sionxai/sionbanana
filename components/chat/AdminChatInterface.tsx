@@ -5,10 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MessageBubble } from "./MessageBubble";
-import { useChatRTDB } from "@/hooks/use-chat-rtdb";
+import { useChat } from "@/hooks/use-chat";
 import { ADMIN_UID } from "@/lib/constants";
 
 interface AdminChatInterfaceProps {
@@ -16,20 +15,22 @@ interface AdminChatInterfaceProps {
   currentUserId: string;
   currentUserName: string;
   otherUserName: string;
+  showHeader?: boolean;
 }
 
 export function AdminChatInterface({
   chatId,
   currentUserId,
   currentUserName,
-  otherUserName
+  otherUserName,
+  showHeader = true
 }: AdminChatInterfaceProps) {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [isMultiline, setIsMultiline] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, loading, sendMessage, markAsRead } = useChatRTDB(chatId);
+  const { messages, loading, sendMessage, markAsRead } = useChat(chatId);
 
   // 빠른 답변 템플릿
   const quickReplies = [
@@ -91,42 +92,39 @@ export function AdminChatInterface({
   }, [messages, currentUserId, markAsRead]);
 
   return (
-    <div className="flex h-full flex-col pb-20">
-      {/* 상태 표시 */}
-      <div className="border-b bg-muted/30 px-4 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">
-              {otherUserName}와의 상담
-            </Badge>
-            {messages.length > 0 && (
-              <Badge variant="secondary">
-                총 {messages.length}개 메시지
+    <div className="flex h-full flex-col rounded-xl border bg-card shadow-sm">
+      {showHeader && (
+        <div className="border-b px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
+                {otherUserName}님과의 상담
               </Badge>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            관리자 모드 • 실시간 동기화
+              {messages.length > 0 && (
+                <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
+                  총 {messages.length}개 메시지
+                </Badge>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground">관리자 모드 • 실시간 동기화</span>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* 메시지 영역 */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 px-4 py-6">
         <div className="space-y-4">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex h-40 items-center justify-center">
               <div className="animate-pulse text-sm text-muted-foreground">
                 메시지를 불러오고 있습니다...
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
+            <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed bg-muted/40 text-center">
               <div className="mb-2 text-lg">💬</div>
-              <h3 className="mb-1 font-medium">대화 시작</h3>
+              <h3 className="mb-1 font-medium">대화를 시작해보세요</h3>
               <p className="text-sm text-muted-foreground">
-                {otherUserName}님이 상담을 요청했습니다.<br />
-                빠른 답변으로 도움을 드려보세요.
+                {otherUserName}님이 상담을 요청했습니다. 빠른 답변으로 도움을 드려보세요.
               </p>
             </div>
           ) : (
@@ -143,10 +141,8 @@ export function AdminChatInterface({
         </div>
       </ScrollArea>
 
-      {/* 빠른 답변 영역 */}
-      <div className="border-t bg-muted/30 p-3">
-        <div className="mb-2 text-xs font-medium text-muted-foreground">빠른 답변</div>
-        <div className="flex flex-wrap gap-1">
+      <div className="border-t bg-background px-4 py-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {quickReplies.map((reply, index) => (
             <Button
               key={index}
@@ -159,61 +155,52 @@ export function AdminChatInterface({
             </Button>
           ))}
         </div>
-      </div>
 
-      {/* 메시지 입력 영역 */}
-      <Card className="rounded-none border-x-0 border-b-0">
-        <CardContent className="p-4">
-          <div className="space-y-2">
-            {/* 텍스트 입력 */}
-            <div className="flex gap-2">
-              {isMultiline ? (
-                <Textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈, Enter: 전송)"
-                  disabled={sending}
-                  className="min-h-[80px] resize-none"
-                  rows={3}
-                />
-              ) : (
-                <Input
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈)"
-                  disabled={sending}
-                  className="flex-1"
-                />
-              )}
-              <div className="flex flex-col gap-1">
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!message.trim() || sending}
-                  size="sm"
-                  className="h-9"
-                >
-                  {sending ? "전송 중..." : "전송"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsMultiline(!isMultiline)}
-                  className="h-9 text-xs"
-                >
-                  {isMultiline ? "단일행" : "여러행"}
-                </Button>
-              </div>
-            </div>
-
-            {/* 도움말 */}
-            <div className="text-xs text-muted-foreground">
-              💡 팁: 빠른 답변을 클릭하거나 직접 입력하세요. Shift+Enter로 줄바꿈할 수 있습니다.
-            </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {isMultiline ? (
+            <Textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈, Enter: 전송)"
+              disabled={sending}
+              className="min-h-[90px] flex-1 resize-none"
+              rows={4}
+            />
+          ) : (
+            <Input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈)"
+              disabled={sending}
+              className="flex-1"
+            />
+          )}
+          <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-stretch">
+            <Button
+              onClick={handleSendMessage}
+              disabled={!message.trim() || sending}
+              size="sm"
+              className="h-9"
+            >
+              {sending ? "전송 중..." : "전송"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMultiline(!isMultiline)}
+              className="h-9 text-xs"
+            >
+              {isMultiline ? "단일행" : "여러행"}
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="text-xs text-muted-foreground">
+          💡 팁: 빠른 답변을 클릭하거나 직접 입력하세요. Shift+Enter로 줄바꿈할 수 있습니다.
+        </div>
+      </div>
     </div>
   );
 }

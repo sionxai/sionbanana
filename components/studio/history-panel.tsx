@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import NextImage from "next/image";
+import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,6 +31,7 @@ interface HistoryPanelProps {
   onToggleFavorite?: (id: string) => void;
   onDownload?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onDeleteAll?: () => void;
   comparisonId?: string | null;
   onCompare?: (id: string) => void;
   onClearComparison?: () => void;
@@ -59,6 +61,7 @@ export function HistoryPanel({
   onToggleFavorite,
   onDownload,
   onDelete,
+  onDeleteAll,
   comparisonId,
   onCompare,
   onClearComparison,
@@ -341,11 +344,13 @@ export function HistoryPanel({
               onDrop={handleDrop}
             >
               {cacheBustedReferenceImage ? (
-                <img
+                <Image
                   key={`${cacheBustedReferenceImage}`}
                   src={cacheBustedReferenceImage}
                   alt="reference"
-                  className="absolute inset-0 h-full w-full object-cover"
+                  fill
+                  className="object-cover"
+                  unoptimized={cacheBustedReferenceImage.startsWith('data:')}
                 />
               ) : (
                 <EmptyState
@@ -481,29 +486,41 @@ export function HistoryPanel({
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-sm">생성 기록</CardTitle>
-            <div className="inline-flex items-center overflow-hidden rounded-md border bg-card text-xs">
-              <button
-                type="button"
-                className={cn(
-                  "px-3 py-1 transition",
-                  view === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
-                )}
-                onClick={() => onChangeView?.("all")}
-              >
-                전체
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "px-3 py-1 transition",
-                  view === "favorite"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted"
-                )}
-                onClick={() => onChangeView?.("favorite")}
-              >
-                즐겨찾기
-              </button>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center overflow-hidden rounded-md border bg-card text-xs">
+                <button
+                  type="button"
+                  className={cn(
+                    "px-3 py-1 transition",
+                    view === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                  )}
+                  onClick={() => onChangeView?.("all")}
+                >
+                  전체
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "px-3 py-1 transition",
+                    view === "favorite"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                  onClick={() => onChangeView?.("favorite")}
+                >
+                  즐겨찾기
+                </button>
+              </div>
+              {onDeleteAll && records.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={onDeleteAll}
+                >
+                  모두 삭제
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>

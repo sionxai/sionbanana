@@ -4,12 +4,12 @@
 
 ## 주요 기술 스택
 
-- Next.js 14 (App Router, Server Actions 준비)
+- Next.js 14 (App Router, Server Actions)
 - React 18 + TypeScript
 - TailwindCSS + shadcn/ui 스타일 시스템
-- Firebase (Authentication, Firestore, Storage 예정)
-- React Query, Zustand (상태 관리 확장 준비)
-- Google Gemini API (나노 바나나 이미지 생성) 연동 스텁
+- Firebase (Authentication, Firestore, Realtime Database, Storage)
+- React Query (서버 상태 관리), Zustand (클라이언트 상태 관리)
+- Google Gemini 2.0 Flash API (이미지 생성)
 
 ## 시작하기
 
@@ -48,14 +48,16 @@ GEMINI_API_KEY=
 
 - [x] Firebase Auth 기반 로그인/회원가입 UI (이메일/비밀번호)
 - [x] Tailwind + shadcn 스타일 시스템과 UI 컴포넌트 구축
-- [x] 프롬프트 입력, 카메라/조명/스케치 등 기능 패널 레이아웃
+- [x] 프롬프트 입력, 카메라/조명/포즈/스케치 등 기능 패널 레이아웃
 - [x] 중앙 작업 공간: 전후 비교 슬라이더, 프롬프트/메타 정보 카드
 - [x] 우측 패널: 기준 이미지 및 생성 히스토리 목록
-- [x] Gemini 이미지 생성 API Route 스텁 및 React Query 연동 (실패 시 샘플 이미지)
+- [x] **Gemini 2.0 Flash 이미지 생성**: Firebase Storage 자동 업로드 및 Firestore 메타데이터 동기화
 - [x] **외부 프리셋 모드**: 91종의 사례 기반 프리셋을 버튼으로 제공하고, 영문/국문 레이블과 함께 프롬프트를 즉시 입력에 반영
-- [x] **실시간 1:1 상담**: Firebase Firestore 기반 실시간 채팅 시스템으로 사용자-관리자 간 소통
-- [x] **통합 UI 시스템**: 1개생성, 다수생성, 프리셋 페이지 간 일관된 상단 네비게이션과 하단 탭
+- [x] **실시간 1:1 상담**: Firebase Realtime Database 기반 실시간 채팅 시스템으로 사용자-관리자 간 소통
+- [x] **통합 UI 시스템**: 1개생성, 다수생성, 변형생성, 프리셋 페이지 간 일관된 상단 네비게이션과 하단 탭
 - [x] **반응형 디자인**: 모바일과 데스크톱 환경에서 모두 최적화된 UI/UX
+- [x] **사용자 플랜/크레딧 시스템**: Guest/Basic/Pro 플랜별 월간 이미지 생성 할당량 관리
+- [x] **관리자 대시보드**: 사용자 검색, 플랜 변경, 임시 패스 발급, 채팅 관리
 
 ## 외부 프리셋 컬렉션
 
@@ -89,43 +91,76 @@ GEMINI_API_KEY=
 
 ## 구현 예정 / 다음 단계 제안
 
-1. **실제 Gemini 이미지 생성 연동** : `/api/generate` 에 받은 base64 이미지를 Firebase Storage 에 업로드하고 Firestore 에 메타데이터 기록.
-2. **프롬프트 리라이팅** : GPT 혹은 Gemini 텍스트 모델을 호출하여 `refinedPrompt` 를 자동 생성.
-3. **Firestore 실시간 동기화 강화** : 생성 결과를 Firestore 에 저장하고 `useGeneratedImages` 훅에서 실시간 반영되도록 정교화.
-4. **워터마크 제거 파이프라인** : 이미지 후처리(예: Cloud Functions/OpenCV) 파이프라인을 구성해 우측 하단 워터마크 제거 자동화.
-5. **비교 슬라이더 고도화** : 썸네일, 히스토리 관리, 전후 이미지 여러 장 비교 기능 추가.
-6. **사용자 플랜/크레딧** : 회원별 사용량 제한, 업그레이드 결제 연동 등 확장.
-7. **테스트 & 배포** : Vitest 혹은 Playwright 테스트 도입, Vercel 배포 설정.
+1. **프롬프트 리라이팅 고도화**: OpenAI GPT 모델을 호출하여 `refinedPrompt` 를 자동 생성하는 기능 강화
+2. **이미지 후처리 파이프라인**: Cloud Functions 기반 썸네일 생성, 워터마크 제거, 메타데이터 추출 자동화
+3. **배치 생성 최적화**: 다수 생성 시 병렬 처리 및 진행률 표시 개선
+4. **히스토리 검색/필터**: 생성 모드, 날짜, 프롬프트 키워드 기반 필터링 및 페이지네이션
+5. **결제 시스템 통합**: Stripe/Toss Payments 연동하여 플랜 업그레이드 자동화
+6. **통합 테스트 & CI/CD**: Playwright E2E 테스트 도입 및 GitHub Actions 배포 자동화
+7. **성능 모니터링**: Firebase Performance Monitoring, Sentry 에러 추적 연동
 
 ## 폴더 구조 (요약)
 
 ```
 sion-banana/
   app/
-    api/generate/route.ts   # Gemini 이미지 생성 Route Handler 스텁
-    layout.tsx              # Providers (Auth, QueryClient)
-    page.tsx                # AuthGate + StudioShell
-    providers.tsx
+    api/
+      generate/route.ts     # Gemini 이미지 생성 API + Storage 업로드
+      chat/send/route.ts    # 관리자 채팅 전송 API
+      admin/                # 관리자 전용 API (플랜 변경, 사용자 조회 등)
+      user/                 # 사용자 API (상태 조회, 플랜 전환 등)
+    studio/                 # 스튜디오 페이지 (단일/다수/변형/프리셋)
+    chat/                   # 사용자 채팅 페이지
+    admin/                  # 관리자 대시보드
+    billing/                # 플랜 요청 페이지
+    account/                # 계정 정보 페이지
   components/
     auth/                   # 로그인/회원가입 폼 & 게이트
-    providers/              # AuthProvider
+    chat/                   # 채팅 UI 컴포넌트
     studio/                 # 프롬프트/워크스페이스/히스토리 UI
+    presets/                # 프리셋 전용 UI
+    admin/                  # 관리자 전용 UI
     ui/                     # shadcn 스타일 UI 컴포넌트
   hooks/
     use-generate-image.ts   # 이미지 생성 뮤테이션
-    use-generated-images.ts # Firestore 구독 (샘플 데이터 포함)
+    use-generated-images.ts # Firestore/Storage 이미지 로딩
+    use-chat.ts             # 채팅 실시간 구독 (RTDB)
   lib/
     env.ts                  # 환경 변수 파싱
-    firebase/               # Firebase 초기화
-    types.ts
-    utils.ts
+    firebase/
+      client.ts             # Firebase 클라이언트 초기화
+      admin.ts              # Firebase Admin SDK
+      realtime-messages.ts  # RTDB 메시지 로직
+      firestore.ts          # Firestore 헬퍼 함수
+    types.ts                # TypeScript 타입 정의
+    constants.ts            # 플랜, 관리자 UID 등 상수
   public/samples/           # UI용 샘플 이미지
 ```
 
 ## 안전한 API 키 관리
 
-- `.env.local` 는 Git에 커밋하지 마세요.
-- Production 환경에서는 Vercel 환경 변수 또는 Firebase Functions Config로 관리하세요.
+⚠️ **보안 중요 사항**
+
+1. **절대 소스코드에 API 키를 하드코딩하지 마세요**
+   - 이전에 하드코딩된 키가 Git 히스토리에 남아있을 수 있습니다
+   - Firebase 콘솔에서 기존 키를 즉시 삭제하고 새 키를 발급받으세요
+   - Google AI Studio에서 Gemini API 키도 재발급하세요
+
+2. **환경 변수 관리**
+   - `.env.local` 파일은 절대 Git에 커밋하지 마세요 (`.gitignore`에 이미 포함됨)
+   - `.env.example`을 복사하여 `.env.local`을 생성하고 실제 값을 입력하세요
+   - Production 환경에서는 Vercel 환경 변수 또는 Firebase Functions Config로 관리하세요
+
+3. **Git 히스토리 정리 (권장)**
+   ```bash
+   # 이전에 커밋된 민감정보를 Git 히스토리에서 제거
+   git filter-branch --force --index-filter \
+     "git rm --cached --ignore-unmatch lib/env.ts" \
+     --prune-empty --tag-name-filter cat -- --all
+
+   # 또는 BFG Repo-Cleaner 사용 (더 빠름)
+   # https://rtyley.github.io/bfg-repo-cleaner/
+   ```
 
 ## 라이선스
 
@@ -161,8 +196,12 @@ sion-banana/
 
 ## 변경 이력 (스냅샷)
 
-- **2024-XX-XX**: 기준 이미지 override/derived 통합, WorkspacePanel 자동 선택 로직 도입 (생성 직후 바로 표시)
-- **2024-XX-XX**: History/Workspace 캐시 무효화 및 즐겨찾기/삭제 시 선택 유지 로직 정리
-- **2024-XX-XX**: 리믹스/배치 기준 이미지 누락 경고 수정 (`referenceImageState.url` 우선 사용)
+- **2025-01-XX**: 기준 이미지 override/derived 통합, WorkspacePanel 자동 선택 로직 도입 (생성 직후 바로 표시)
+- **2025-01-XX**: History/Workspace 캐시 무효화 및 즐겨찾기/삭제 시 선택 유지 로직 정리
+- **2025-01-XX**: 리믹스/배치 기준 이미지 누락 경고 수정 (`referenceImageState.url` 우선 사용)
+- **2025-02-14**: Realtime Database 기반 채팅 시스템 전환 완료
+- **2025-02-14**: Firestore 이미지 메타데이터 저장 및 `useGeneratedImages` 훅 통합
+- **2025-02-14**: 사용자 플랜/크레딧 시스템 및 관리자 대시보드 구현
+- **2025-09-30**: TypeScript 타입 안정성 개선 (`GeneratedImageFirestorePayload.imageUrl` optional)
 
 필요 시 자세한 흐름은 `components/studio/studio-shell.tsx` 주석과 이 README를 함께 참고하고, 반복되는 버그가 발견되면 이 섹션을 업데이트해 주세요.

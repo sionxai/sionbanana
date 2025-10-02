@@ -61,12 +61,10 @@ import {
   CAMERA_MODE_PROMPT_GUIDELINE
 } from "@/components/studio/camera-config";
 import {
-  LIGHTING_MODE_BASE_PROMPT,
-  LIGHTING_PROMPT_LOOKUP
+  LIGHTING_MODE_BASE_PROMPT
 } from "@/components/studio/lighting-config";
 import {
-  POSE_MODE_BASE_PROMPT,
-  POSE_PROMPT_LOOKUP
+  POSE_MODE_BASE_PROMPT
 } from "@/components/studio/pose-config";
 import {
   REFERENCE_SYNC_EVENT,
@@ -76,6 +74,7 @@ import {
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
 import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
+import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 
 async function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -262,24 +261,6 @@ const LIGHTING_CATEGORY_ORDER: LightingPresetCategory[] = [
   "mood"
 ];
 
-function buildLightingInstruction(selections: LightingSelections): string | null {
-  const lines: string[] = [];
-  for (const category of LIGHTING_CATEGORY_ORDER) {
-    const selected = selections[category];
-    if (!selected?.length) {
-      continue;
-    }
-    const lookup = LIGHTING_PROMPT_LOOKUP[category];
-    selected.forEach(value => {
-      const phrase = lookup[value];
-      if (phrase && !lines.includes(phrase)) {
-        lines.push(phrase);
-      }
-    });
-  }
-  return lines.length ? lines.join(" ") : null;
-}
-
 function cloneLightingSelections(selections: LightingSelections): LightingSelections {
   return LIGHTING_CATEGORY_ORDER.reduce((acc, category) => {
     acc[category] = [...(selections[category] ?? [])];
@@ -291,24 +272,6 @@ const POSE_CATEGORY_ORDER: PosePresetCategory[] = [
   "expression",
   "posture"
 ];
-
-function buildPoseInstruction(selections: PoseSelections): string | null {
-  const lines: string[] = [];
-  for (const category of POSE_CATEGORY_ORDER) {
-    const selected = selections[category];
-    if (!selected?.length) {
-      continue;
-    }
-    const lookup = POSE_PROMPT_LOOKUP[category];
-    selected.forEach(value => {
-      const phrase = lookup[value];
-      if (phrase && !lines.includes(phrase)) {
-        lines.push(phrase);
-      }
-    });
-  }
-  return lines.length ? lines.join(" ") : null;
-}
 
 function clonePoseSelections(selections: PoseSelections): PoseSelections {
   return {
@@ -398,8 +361,9 @@ type ReferenceImageState = {
   source: "override" | "derived";
 };
 
-export function StudioShell() {
+function StudioShellInner() {
   const { user } = useAuth();
+  const { buildLightingInstruction, buildPoseInstruction } = usePresetLibrary();
   const lastUidRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeMode, setActiveMode] = useState<GenerationMode>("create");
@@ -538,7 +502,7 @@ export function StudioShell() {
     }
 
     lastUidRef.current = currentUid;
-  }, [user?.uid]);
+  }, [user?.uid, setReferenceSlots]);
 
 
   const collectReferenceGalleryUrls = () =>
@@ -596,7 +560,7 @@ export function StudioShell() {
       console.warn("Failed to load reference slots", error);
       setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
     }
-  }, []);
+  }, [user?.uid, setReferenceSlots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -699,18 +663,15 @@ export function StudioShell() {
     if (!historyHydrated || typeof window === "undefined") {
       return;
     }
+    // DISABLED: localStorage persistence to avoid quota issues
+    // Firestore is the primary storage, localStorage is no longer used
+    // Just clear it if it exists to free up space
     try {
-      const historySnapshot = historyRecordsAll.slice(0, 50);
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(historySnapshot));
-      if (historySyncSourceRef.current && historySyncSourceRef.current !== "studio") {
-        historySyncSourceRef.current = null;
-      } else {
-        broadcastHistoryUpdate(historySnapshot, "studio");
-      }
+      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
     } catch (error) {
-      console.warn("Failed to persist local history", error);
+      console.warn("Failed to clear localStorage", error);
     }
-  }, [historyHydrated, historyRecordsAll]);
+  }, [historyHydrated]);
 
   useEffect(() => {
     if (!historyRecords.length) {
@@ -990,7 +951,7 @@ export function StudioShell() {
         toast.error("기준 이미지를 저장하는 중 문제가 발생했습니다.");
       }
     },
-    [shouldUseFirestore, user]
+    [user]
   );
 
   useEffect(() => {
@@ -1026,7 +987,7 @@ export function StudioShell() {
 
     window.addEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
-  }, [mergeLocalRecord, persistReferenceEntry, setLocalRecords, shouldUseFirestore, user]);
+  }, [mergeLocalRecord, persistReferenceEntry, selectImage, setLocalRecords, user]);
 
   const handleGenerate = (action: "primary" | "remix") => {
     const execute = async () => {
@@ -1060,14 +1021,14 @@ export function StudioShell() {
         zoomLevel
       );
 
-      const apertureLabel = formatAperture(aperture);
+      const apertureLabel = aperture === APERTURE_DEFAULT ? undefined : formatAperture(aperture);
       const effectiveCameraAngle = normalizedCameraSettings.angle;
       const subjectDirectionSetting = normalizedCameraSettings.subjectDirection;
       const cameraDirectionSetting = normalizedCameraSettings.cameraDirection;
       const zoomSetting = normalizedCameraSettings.zoom;
 
       const cameraPayload: CameraSettingsPayload = {
-        aperture: apertureLabel,
+        ...(apertureLabel ? { aperture: apertureLabel } : {}),
         ...(effectiveCameraAngle ? { angle: effectiveCameraAngle } : {}),
         ...(subjectDirectionSetting ? { subjectDirection: subjectDirectionSetting } : {}),
         ...(cameraDirectionSetting ? { cameraDirection: cameraDirectionSetting } : {}),
@@ -1389,47 +1350,10 @@ export function StudioShell() {
           metadataPayload.referenceGalleryCount = uniqueGalleryReferences.length;
         }
 
-        if (user && shouldUseFirestore) {
-          try {
-            const blob = await dataUrlToBlob(baseImage);
-            const uploadResult = await uploadUserImage(user.uid, id, blob);
-            storedImageUrl = uploadResult.url;
-            storedThumbnailUrl = uploadResult.url;
-            await saveGeneratedImageDoc(user.uid, id, {
-              mode: activeMode,
-              status: "completed",
-              promptMeta: {
-                rawPrompt: rawPromptForRequest,
-                refinedPrompt: promptToSend,
-                negativePrompt: effectiveNegativePrompt,
-                camera: cameraPayload,
-                aspectRatio: aspectRatioValue,
-                referenceGallery: uniqueGalleryReferences,
-                ...(isLightingMode ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
-                ...(isPoseMode ? { pose: clonePoseSelections(poseSelections) } : {})
-              },
-              imageUrl: storedImageUrl,
-              thumbnailUrl: storedThumbnailUrl,
-              originalImageUrl: storedImageUrl,
-              diff: beforeUrl
-                ? {
-                    beforeUrl,
-                    afterUrl: storedImageUrl,
-                    sliderLabelBefore: "기준 이미지",
-                    sliderLabelAfter: "생성 결과"
-                  }
-                : undefined,
-              metadata: metadataPayload,
-              model: targetModel,
-              costCredits: result.costCredits,
-              createdAtIso: now,
-              updatedAtIso: now
-            });
-          } catch (error) {
-            console.error(error);
-            toast.error("이미지 결과를 저장하는 중 오류가 발생했습니다.");
-          }
-        }
+        // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
+        // 클라이언트에서 중복 저장하지 않음. storedImageUrl은 base64 이미지를 사용.
+        storedImageUrl = baseImage;
+        storedThumbnailUrl = baseImage;
 
         const newRecord: GeneratedImageDocument = {
           id,
@@ -1979,46 +1903,10 @@ ${viewInstruction}`;
           metadataPayload.promptCameraNotes = promptCameraNotes;
         }
 
-        if (user && shouldUseFirestore) {
-          try {
-            const blob = await dataUrlToBlob(baseImage);
-            const uploadResult = await uploadUserImage(user.uid, id, blob);
-            storedImageUrl = uploadResult.url;
-            storedThumbnailUrl = uploadResult.url;
-            await saveGeneratedImageDoc(user.uid, id, {
-              mode: activeMode,
-              status: "completed",
-              promptMeta: {
-                rawPrompt: rawPromptForRequest,
-                refinedPrompt: viewPrompt,
-                negativePrompt: negativePromptToSend,
-                camera: cameraPayload,
-                aspectRatio: aspectRatioValue,
-                referenceGallery: uniqueGalleryReferences,
-                ...(isLightingMode ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
-                ...(isPoseMode ? { pose: clonePoseSelections(poseSelections) } : {})
-              },
-              imageUrl: storedImageUrl,
-              thumbnailUrl: storedImageUrl,
-              originalImageUrl: storedImageUrl,
-              diff: beforeUrl
-                ? {
-                    beforeUrl,
-                    afterUrl: storedImageUrl,
-                    sliderLabelBefore: "기준 이미지",
-                    sliderLabelAfter: "생성 결과"
-                  }
-                : undefined,
-              metadata: metadataPayload,
-              model: targetModel,
-              costCredits: result.costCredits,
-              createdAtIso: now,
-              updatedAtIso: now
-            });
-          } catch (error) {
-            console.error("multi-view upload error", view.id, error);
-          }
-        }
+        // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
+        // 클라이언트에서 중복 저장하지 않음. storedImageUrl은 base64 이미지를 사용.
+        storedImageUrl = baseImage;
+        storedThumbnailUrl = baseImage;
 
         const newRecord: GeneratedImageDocument = {
           id,
@@ -2478,6 +2366,69 @@ ${viewInstruction}`;
     toast.success("이미지를 삭제했습니다.");
   };
 
+  const handleDeleteAllRecords = async () => {
+    if (!user) {
+      toast.error("로그인이 필요합니다.");
+      return;
+    }
+
+    const recordsToDelete = historyRecords.filter(r => r.id !== REFERENCE_IMAGE_DOC_ID);
+
+    if (recordsToDelete.length === 0) {
+      toast.error("삭제할 이미지가 없습니다.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `정말로 모든 생성 기록(${recordsToDelete.length}개)을 삭제하시겠습니까?\n이 작업은 취소할 수 없습니다.`
+    );
+
+    if (!confirmed) return;
+
+    console.log(`[DeleteAll] Starting deletion of ${recordsToDelete.length} records`);
+    console.log(`[DeleteAll] User ID: ${user.uid}`);
+    console.log(`[DeleteAll] shouldUseFirestore:`, shouldUseFirestore);
+
+    try {
+      // Delete from Firestore first
+      if (shouldUseFirestore) {
+        console.log(`[DeleteAll] Deleting from Firestore...`);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const record of recordsToDelete) {
+          try {
+            console.log(`[DeleteAll] Deleting Firestore doc: ${record.id}`);
+            await deleteGeneratedImageDoc(user.uid, record.id);
+
+            if (record.imageUrl && !record.imageUrl.startsWith('data:')) {
+              console.log(`[DeleteAll] Deleting Storage image: ${record.id}`);
+              await deleteUserImage(user.uid, record.id);
+            }
+
+            successCount++;
+            console.log(`[DeleteAll] Successfully deleted: ${record.id}`);
+          } catch (error) {
+            failCount++;
+            console.error(`[DeleteAll] Failed to delete record ${record.id}:`, error);
+          }
+        }
+
+        console.log(`[DeleteAll] Deletion complete. Success: ${successCount}, Failed: ${failCount}`);
+      }
+
+      // Clear local state after Firestore deletion
+      setLocalRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
+      selectImage(null);
+
+      toast.success(`${recordsToDelete.length}개의 이미지를 삭제했습니다.`);
+    } catch (error) {
+      console.error("[DeleteAll] Failed to delete all records:", error);
+      toast.error("일부 이미지 삭제에 실패했습니다.");
+    }
+  };
+
   const handlePreviewRecord = (record: GeneratedImageDocument) => {
     setPreviewRecord(record);
   };
@@ -2537,6 +2488,9 @@ ${viewInstruction}`;
       mood: []
     });
     setPoseSelections({ expression: ["default"], posture: ["default"] });
+    setPrompt("");
+    setRefinedPrompt("");
+    setNegativePrompt("");
     setLastPromptDetails(null);
     toast.success("프리셋을 초기화했습니다.");
   };
@@ -2544,9 +2498,16 @@ ${viewInstruction}`;
   const handleLightingSelectionsChange = (category: LightingPresetCategory, values: string[]) => {
     setLightingSelections(prev => {
       const unique = Array.from(new Set(values.filter(Boolean)));
-      return prev[category].length === unique.length && prev[category].every(item => unique.includes(item))
-        ? prev
-        : { ...prev, [category]: unique };
+      const prevValues = (prev as Record<string, string[]>)[category] ?? [];
+
+      if (prevValues.length === unique.length && prevValues.every(item => unique.includes(item))) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [category]: unique
+      } as LightingSelections;
     });
     setLastPromptDetails(null);
   };
@@ -2554,9 +2515,16 @@ ${viewInstruction}`;
   const handlePoseSelectionsChange = (category: PosePresetCategory, values: string[]) => {
     setPoseSelections(prev => {
       const unique = Array.from(new Set(values.filter(Boolean)));
-      return prev[category].length === unique.length && prev[category].every(item => unique.includes(item))
-        ? prev
-        : { ...prev, [category]: unique };
+      const prevValues = (prev as Record<string, string[]>)[category] ?? [];
+
+      if (prevValues.length === unique.length && prevValues.every(item => unique.includes(item))) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [category]: unique
+      } as PoseSelections;
     });
     setLastPromptDetails(null);
   };
@@ -2575,7 +2543,7 @@ ${viewInstruction}`;
   const requestGptPrompt = async (params?: RequestGptPromptArgs) => {
     const fallbackBasePromptFromParams = params?.basePrompt;
     const defaultAngle = cameraAngle === DEFAULT_CAMERA_ANGLE ? undefined : cameraAngle;
-    const apertureLabel = formatAperture(aperture);
+    const apertureLabel = aperture === APERTURE_DEFAULT ? undefined : formatAperture(aperture);
     const aspectRatioValue = aspectRatio === DEFAULT_ASPECT_RATIO ? undefined : aspectRatio;
     const subjectDirectionValue =
       subjectDirection === DEFAULT_SUBJECT_DIRECTION ? undefined : subjectDirection;
@@ -2716,7 +2684,7 @@ ${viewInstruction}`;
     }
   };
 
-  const handleReferenceRemove = () => {
+  const handleReferenceRemove = async () => {
     if (!referenceRecord) {
       toast.info("삭제할 기준 이미지가 없습니다.");
       return;
@@ -2724,19 +2692,46 @@ ${viewInstruction}`;
 
     const referenceId = referenceRecord.id ?? REFERENCE_IMAGE_DOC_ID;
 
-    if (user && shouldUseFirestore) {
-      deleteGeneratedImageDoc(user.uid, referenceId).catch(error => {
-        console.warn("Failed to delete reference document", error);
-      });
-      deleteUserImage(user.uid, referenceId).catch(error => {
-        console.warn("Failed to delete reference image", error);
-      });
-    }
+    try {
+      if (user && shouldUseFirestore) {
+        await deleteGeneratedImageDoc(user.uid, referenceId);
+        await deleteUserImage(user.uid, referenceId).catch(error => {
+          console.warn("Failed to delete reference image from storage", error);
+        });
+      }
 
-    setLocalRecords(prev => prev.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID));
-    broadcastReferenceUpdate(null, "studio");
-    setReferenceImageOverride(null);
-    toast.success("기준 이미지를 삭제했습니다.");
+      // Remove from local records (including any record with isReference metadata)
+      setLocalRecords(prev => prev.filter(record =>
+        record.id !== REFERENCE_IMAGE_DOC_ID &&
+        record.id !== referenceId &&
+        record.metadata?.isReference !== true
+      ));
+
+      // Clear from localStorage
+      try {
+        const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const filtered = parsed.filter((record: any) =>
+            record.id !== REFERENCE_IMAGE_DOC_ID &&
+            record.id !== referenceId &&
+            record.metadata?.isReference !== true
+          );
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+        }
+      } catch (error) {
+        console.warn("Failed to update localStorage", error);
+      }
+
+      // Clear reference state
+      setReferenceImageOverride(null);
+      broadcastReferenceUpdate(null, "studio");
+
+      toast.success("기준 이미지를 삭제했습니다.");
+    } catch (error) {
+      console.error("Failed to remove reference", error);
+      toast.error("기준 이미지 삭제에 실패했습니다.");
+    }
   };
 
   const handleRefinePrompt = async () => {
@@ -3043,6 +3038,7 @@ ${viewInstruction}`;
           onToggleFavorite={handleToggleFavorite}
           onDownload={handleDownloadRecord}
           onDelete={handleDeleteRecord}
+          onDeleteAll={handleDeleteAllRecords}
           comparisonId={comparisonImageId}
           onCompare={handleSetComparison}
           onClearComparison={() => setComparisonImageId(null)}
@@ -3094,6 +3090,14 @@ ${viewInstruction}`;
         </div>
       ) : null}
     </div>
+  );
+}
+
+export function StudioShell() {
+  return (
+    <PresetLibraryProvider>
+      <StudioShellInner />
+    </PresetLibraryProvider>
   );
 }
 

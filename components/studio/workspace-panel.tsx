@@ -7,7 +7,7 @@ import type { PromptDetails } from "@/components/studio/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { POSE_PRESET_GROUPS } from "@/components/studio/pose-config";
+import { usePresetLibrary } from "@/components/studio/preset-library-context";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { DiffSlider } from "@/components/studio/diff-slider";
@@ -81,6 +81,7 @@ export function WorkspacePanel({
   onDismissGenerationStatus,
   onClearComparison
 }: WorkspacePanelProps) {
+  const { poseGroups } = usePresetLibrary();
   const [showPromptDetail, setShowPromptDetail] = useState(false);
   const [imageZoomLevel, setImageZoomLevel] = useState(1.0);
   const comparisonImage = useMemo(() => {
@@ -218,13 +219,13 @@ export function WorkspacePanel({
 
   const poseLabelMap = useMemo(() => {
     const map: Record<string, string> = {};
-    POSE_PRESET_GROUPS.forEach(group => {
+    poseGroups.forEach(group => {
       group.options.forEach(option => {
         map[option.value] = option.label;
       });
     });
     return map;
-  }, []);
+  }, [poseGroups]);
   const poseMeta = (record?.promptMeta?.pose as Record<string, string[]> | undefined) || undefined;
   const expressionLabels = useMemo(() => {
     const values = poseMeta?.expression ?? [];
@@ -272,7 +273,7 @@ export function WorkspacePanel({
           return currentLevel;
       }
     });
-  }, []);
+  }, [setImageZoomLevel]);
 
   // Keyboard shortcuts and mouse wheel support
   useEffect(() => {

@@ -1,0 +1,934 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import type { GenerationMode, GeneratedImageDocument } from "@/lib/types";
+import {
+  APERTURE_DEFAULT,
+  DEFAULT_CAMERA_ANGLE,
+  DEFAULT_CAMERA_DIRECTION,
+  DEFAULT_SUBJECT_DIRECTION,
+  DEFAULT_ZOOM_LEVEL
+} from "@/lib/camera";
+import { DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
+import { callGenerateApi } from "@/hooks/use-generate-image";
+import { useAuth } from "@/components/providers/auth-provider";
+import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
+import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
+import { shouldUseFirestore } from "@/lib/env";
+import { useGeneratedImages } from "@/hooks/use-generated-images";
+import Image from "next/image";
+import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
+import {
+  HISTORY_SYNC_EVENT,
+  broadcastHistoryUpdate,
+  mergeHistoryRecords,
+  type HistorySyncPayload
+} from "@/components/studio/history-sync";
+
+// Import preset configurations
+import { CHARACTER_VIEWS } from "@/components/studio/preset-config";
+
+// Define preset collections for variations
+const CAMERA_PRESETS = [
+  { id: "wide", name: "와이드 앵글", instruction: "Wide angle shot, slightly pulled back, full figure framing" },
+  { id: "medium", name: "미디엄 샷", instruction: "Medium shot, waist up framing, natural perspective" },
+  { id: "close", name: "클로즈업", instruction: "Close-up shot, shoulder and head framing, intimate perspective" },
+  { id: "low", name: "로우 앵글", instruction: "Low angle shot, camera positioned below subject, dramatic upward view" },
+  { id: "high", name: "하이 앵글", instruction: "High angle shot, camera positioned above subject, overhead perspective" }
+];
+
+const LIGHTING_PRESETS = [
+  { id: "golden", name: "골든 아워", instruction: "Golden hour lighting, warm sunset glow, soft shadows" },
+  { id: "dramatic", name: "드라마틱", instruction: "Dramatic lighting, strong contrast, deep shadows" },
+  { id: "soft", name: "소프트", instruction: "Soft diffused lighting, even illumination, minimal shadows" },
+  { id: "neon", name: "네온", instruction: "Neon lighting, vibrant colors, cyberpunk atmosphere" },
+  { id: "natural", name: "자연광", instruction: "Natural daylight, bright and clear, outdoor lighting" }
+];
+
+const POSE_PRESETS = [
+  { id: "confident", name: "자신감", instruction: "Confident pose, strong stance, direct gaze" },
+  { id: "casual", name: "캐주얼", instruction: "Casual relaxed pose, natural body language" },
+  { id: "dynamic", name: "다이나믹", instruction: "Dynamic action pose, movement and energy" },
+  { id: "elegant", name: "우아함", instruction: "Elegant graceful pose, refined posture" },
+  { id: "playful", name: "유쾌함", instruction: "Playful cheerful pose, expressive and fun" }
+];
+
+const EXTERNAL_PRESETS = CHARACTER_VIEWS;
+
+const MAX_VARIATIONS = 30;
+
+interface VariationItem {
+  id: string;
+  index: number;
+  type: "camera" | "lighting" | "pose" | "external";
+  preset: any;
+  status: "pending" | "generating" | "completed" | "error";
+  imageUrl?: string;
+  error?: string;
+}
+
+export function VariationsStudioShell() {
+  const { user } = useAuth();
+  const { records, loading } = useGeneratedImages();
+  const [localHistory, setLocalHistory] = useState<GeneratedImageDocument[]>([]);
+
+  // Base image state
+  const [baseImage, setBaseImage] = useState<string | null>(null);
+  const [baseImageFile, setBaseImageFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Preset selection states - arrays for individual selections
+  const [selectedCameraPresets, setSelectedCameraPresets] = useState<string[]>([]);
+  const [selectedLightingPresets, setSelectedLightingPresets] = useState<string[]>([]);
+  const [selectedPosePresets, setSelectedPosePresets] = useState<string[]>([]);
+  const [selectedExternalPresets, setSelectedExternalPresets] = useState<string[]>([]);
+
+  // Generation state
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [variationItems, setVariationItems] = useState<VariationItem[]>([]);
+
+  // Calculate variation items based on selected presets
+  const calculatedVariations = useMemo(() => {
+    const variations: VariationItem[] = [];
+    let index = 1;
+
+    // Camera presets
+    selectedCameraPresets.forEach(presetId => {
+      if (index > MAX_VARIATIONS) return;
+      const preset = CAMERA_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        variations.push({
+          id: `camera-${presetId}-${Date.now()}`,
+          index,
+          type: "camera",
+          preset,
+          status: "pending"
+        });
+        index++;
+      }
+    });
+
+    // Lighting presets
+    selectedLightingPresets.forEach(presetId => {
+      if (index > MAX_VARIATIONS) return;
+      const preset = LIGHTING_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        variations.push({
+          id: `lighting-${presetId}-${Date.now()}`,
+          index,
+          type: "lighting",
+          preset,
+          status: "pending"
+        });
+        index++;
+      }
+    });
+
+    // Pose presets
+    selectedPosePresets.forEach(presetId => {
+      if (index > MAX_VARIATIONS) return;
+      const preset = POSE_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        variations.push({
+          id: `pose-${presetId}-${Date.now()}`,
+          index,
+          type: "pose",
+          preset,
+          status: "pending"
+        });
+        index++;
+      }
+    });
+
+    // External presets
+    selectedExternalPresets.forEach(presetId => {
+      if (index > MAX_VARIATIONS) return;
+      const preset = EXTERNAL_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        variations.push({
+          id: `external-${presetId}-${Date.now()}`,
+          index,
+          type: "external",
+          preset,
+          status: "pending"
+        });
+        index++;
+      }
+    });
+
+    return variations;
+  }, [selectedCameraPresets, selectedLightingPresets, selectedPosePresets, selectedExternalPresets]);
+
+  useEffect(() => {
+    setVariationItems(calculatedVariations);
+  }, [calculatedVariations]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const loadLocalHistory = () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || "[]");
+        if (Array.isArray(stored)) {
+          setLocalHistory(stored as GeneratedImageDocument[]);
+        }
+      } catch (error) {
+        console.warn("[Variations] Failed to parse local history:", error);
+      }
+    };
+
+    loadLocalHistory();
+
+    const handleHistorySync = (event: Event) => {
+      const detail = (event as CustomEvent<HistorySyncPayload>).detail;
+      if (!detail?.records) {
+        return;
+      }
+      setLocalHistory(prev => mergeHistoryRecords(detail.records as GeneratedImageDocument[], prev));
+    };
+
+    window.addEventListener(HISTORY_SYNC_EVENT, handleHistorySync as EventListener);
+
+    return () => window.removeEventListener(HISTORY_SYNC_EVENT, handleHistorySync as EventListener);
+  }, []);
+
+  const normalizeTimestamp = useCallback((value: any) => {
+    if (!value) return new Date().toISOString();
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      if (!Number.isNaN(parsed)) {
+        return new Date(parsed).toISOString();
+      }
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return new Date(value).toISOString();
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (typeof value === "object" && typeof value.toDate === "function") {
+      try {
+        return value.toDate().toISOString();
+      } catch (error) {
+        console.warn("[Variations] Failed to convert timestamp:", error);
+      }
+    }
+    return new Date().toISOString();
+  }, []);
+
+  const remoteVariationRecords = useMemo(() => {
+    return records
+      .map(record => ({
+        ...record,
+        createdAt: normalizeTimestamp(record.createdAt),
+        updatedAt: normalizeTimestamp(record.updatedAt ?? record.createdAt)
+      }));
+  }, [normalizeTimestamp, records]);
+
+  const localVariationRecords = useMemo(() => {
+    return localHistory
+      .map(record => ({
+        ...record,
+        createdAt: normalizeTimestamp(record.createdAt),
+        updatedAt: normalizeTimestamp(record.updatedAt ?? record.createdAt)
+      }));
+  }, [localHistory, normalizeTimestamp]);
+
+  const recentVariationRecords = useMemo(() => {
+    const merged = mergeHistoryRecords(remoteVariationRecords, localVariationRecords);
+    return merged.slice(0, 12);
+  }, [localVariationRecords, remoteVariationRecords]);
+
+  // Base image upload handler
+  const handleBaseImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('이미지 파일만 업로드할 수 있습니다.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('파일 크기는 10MB 이하여야 합니다.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setBaseImage(result);
+      setBaseImageFile(file);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  // Preset selection handlers
+  const handleCameraPresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    if (value && !selectedCameraPresets.includes(value)) {
+      setSelectedCameraPresets(prev => [...prev, value]);
+    }
+    event.target.value = ""; // Reset select
+  }, [selectedCameraPresets]);
+
+  const handleLightingPresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    if (value && !selectedLightingPresets.includes(value)) {
+      setSelectedLightingPresets(prev => [...prev, value]);
+    }
+    event.target.value = ""; // Reset select
+  }, [selectedLightingPresets]);
+
+  const handlePosePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    if (value && !selectedPosePresets.includes(value)) {
+      setSelectedPosePresets(prev => [...prev, value]);
+    }
+    event.target.value = ""; // Reset select
+  }, [selectedPosePresets]);
+
+  const handleExternalPresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    if (value && !selectedExternalPresets.includes(value)) {
+      setSelectedExternalPresets(prev => [...prev, value]);
+    }
+    event.target.value = ""; // Reset select
+  }, [selectedExternalPresets]);
+
+  // Remove preset handlers
+  const removeCameraPreset = useCallback((presetId: string) => {
+    setSelectedCameraPresets(prev => prev.filter(id => id !== presetId));
+  }, []);
+
+  const removeLightingPreset = useCallback((presetId: string) => {
+    setSelectedLightingPresets(prev => prev.filter(id => id !== presetId));
+  }, []);
+
+  const removePosePreset = useCallback((presetId: string) => {
+    setSelectedPosePresets(prev => prev.filter(id => id !== presetId));
+  }, []);
+
+  const removeExternalPreset = useCallback((presetId: string) => {
+    setSelectedExternalPresets(prev => prev.filter(id => id !== presetId));
+  }, []);
+
+  // Base image handlers
+  const handleRemoveBaseImage = useCallback(() => {
+    setBaseImage(null);
+    setBaseImageFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    toast.success('기준 이미지가 제거되었습니다.');
+  }, []);
+
+  // History action handlers
+  const handleToggleFavorite = useCallback(async (recordId: string) => {
+    const record = recentVariationRecords.find(r => r.id === recordId);
+    if (!record || !user) return;
+
+    const isFavorite = record.metadata?.favorite === true;
+    const updatedMetadata = { ...record.metadata, favorite: !isFavorite };
+
+    if (shouldUseFirestore) {
+      try {
+        await updateGeneratedImageDoc(user.uid, recordId, { metadata: updatedMetadata });
+        toast.success(isFavorite ? '즐겨찾기에서 제거했습니다.' : '즐겨찾기에 추가했습니다.');
+      } catch (error) {
+        console.error('Failed to toggle favorite:', error);
+        toast.error('즐겨찾기 변경에 실패했습니다.');
+      }
+    }
+  }, [recentVariationRecords, user]);
+
+  const handleDeleteRecord = useCallback(async (recordId: string) => {
+    const record = recentVariationRecords.find(r => r.id === recordId);
+    if (!record || !user) return;
+
+    if (shouldUseFirestore) {
+      try {
+        await deleteGeneratedImageDoc(user.uid, recordId);
+        if (record.imageUrl && !record.imageUrl.startsWith('data:')) {
+          await deleteUserImage(user.uid, recordId);
+        }
+        toast.success('이미지가 삭제되었습니다.');
+      } catch (error) {
+        console.error('Failed to delete image:', error);
+        toast.error('이미지 삭제에 실패했습니다.');
+      }
+    } else {
+      setLocalHistory(prev => prev.filter(r => r.id !== recordId));
+      const updated = localHistory.filter(r => r.id !== recordId);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      toast.success('이미지가 삭제되었습니다.');
+    }
+  }, [recentVariationRecords, user, localHistory]);
+
+  // Generation handler with retry logic
+  const handleStartGeneration = useCallback(async () => {
+    if (!baseImage || !baseImageFile || variationItems.length === 0 || !user) {
+      toast.error('기준 이미지와 프리셋을 선택해주세요.');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      const promises = variationItems.map(async (item, index) => {
+        // Stagger requests to avoid overwhelming the API
+        await new Promise(resolve => setTimeout(resolve, index * 1000));
+
+        setVariationItems(prev => prev.map(vi =>
+          vi.id === item.id ? { ...vi, status: "generating" } : vi
+        ));
+
+        let retryCount = 0;
+        const maxRetries = 2;
+        let response: any = null;
+
+        while (retryCount <= maxRetries) {
+          try {
+            response = await callGenerateApi({
+              mode: "remix" as GenerationMode,
+              prompt: item.preset.instruction || item.preset.description || item.preset.name,
+              options: {
+                referenceImage: baseImage,
+                aspectRatio: DEFAULT_ASPECT_RATIO,
+                cameraAngle: DEFAULT_CAMERA_ANGLE,
+                cameraDirection: DEFAULT_CAMERA_DIRECTION,
+                subjectDirection: DEFAULT_SUBJECT_DIRECTION,
+                zoomLevel: DEFAULT_ZOOM_LEVEL,
+                aperture: APERTURE_DEFAULT
+              }
+            });
+            break; // Success, exit retry loop
+          } catch (error) {
+            retryCount++;
+            if (retryCount > maxRetries) {
+              throw error; // Final attempt failed
+            }
+            console.log(`🔄 Retrying ${item.preset.name} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+            await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
+          }
+        }
+
+        try {
+          if (response && response.ok && response.base64Image) {
+            // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
+            // 클라이언트에서 중복 저장하지 않음. base64 이미지를 직접 사용.
+
+            setVariationItems(prev => prev.map(vi =>
+              vi.id === item.id ? {
+                ...vi,
+                status: "completed",
+                imageUrl: response.base64Image
+              } : vi
+            ));
+
+            // Update history (localStorage only)
+            const historyRecord = {
+              id: item.id,
+              imageUrl: response.base64Image,
+              prompt: item.preset.instruction || item.preset.description || item.preset.name,
+              createdAt: new Date().toISOString(),
+              metadata: {
+                batchType: "variations",
+                variationType: item.type,
+                variationIndex: item.index,
+                variationLabel: item.preset.name || item.preset.label
+              }
+            };
+
+            const existingHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+            const newHistory = mergeHistoryRecords(existingHistory, [historyRecord as any]);
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newHistory));
+            broadcastHistoryUpdate(newHistory, "variations");
+          } else {
+            throw new Error(response?.reason || '이미지 생성에 실패했습니다.');
+          }
+        } catch (error) {
+          console.error('Variation generation error:', error);
+          setVariationItems(prev => prev.map(vi =>
+            vi.id === item.id ? {
+              ...vi,
+              status: "error",
+              error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.'
+            } : vi
+          ));
+        }
+      });
+
+      await Promise.all(promises);
+      toast.success('모든 변형 이미지 생성이 완료되었습니다!');
+
+    } catch (error) {
+      console.error('Batch generation error:', error);
+      toast.error('변형 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [baseImage, baseImageFile, variationItems, user]);
+
+  const canGenerate = baseImage && variationItems.length > 0 && !isGenerating;
+
+  return (
+    <div className="flex h-screen bg-background">
+      {/* Left Panel - Controls */}
+      <div className="flex w-96 flex-col border-r bg-muted/30">
+        {/* Header */}
+        <div className="flex h-16 items-center justify-between border-b px-4">
+          <h1 className="text-lg font-semibold">변형 생성</h1>
+          <Badge variant="outline">{variationItems.length}/30</Badge>
+        </div>
+
+        <ScrollArea className="flex-1">
+          <div className="space-y-6 p-4">
+            {/* Base Image Upload */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">기준 이미지</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBaseImageUpload}
+                  className="hidden"
+                  ref={fileInputRef}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1"
+                    size="sm"
+                  >
+                    {baseImage ? '변경' : '업로드'}
+                  </Button>
+                  {baseImage && (
+                    <Button
+                      variant="destructive"
+                      onClick={handleRemoveBaseImage}
+                      size="sm"
+                    >
+                      삭제
+                    </Button>
+                  )}
+                </div>
+                {baseImage && (
+                  <div className="relative aspect-square w-full mx-auto">
+                    <Image
+                      src={baseImage}
+                      alt="Base image"
+                      fill
+                      className="rounded-md object-cover"
+                      sizes="(max-width: 384px) 100vw, 384px"
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Camera Presets Dropdown */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">카메라 프리셋</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="camera-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
+                  <select
+                    id="camera-select"
+                    onChange={handleCameraPresetChange}
+                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                  >
+                    <option value="">카메라 프리셋 선택...</option>
+                    {CAMERA_PRESETS.filter(p => !selectedCameraPresets.includes(p.id)).map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedCameraPresets.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
+                    <div className="space-y-1">
+                      {selectedCameraPresets.map(presetId => {
+                        const preset = CAMERA_PRESETS.find(p => p.id === presetId);
+                        return preset ? (
+                          <div key={presetId} className="flex items-center justify-between bg-muted/50 p-2 rounded text-xs">
+                            <span>{preset.name}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeCameraPreset(presetId)}
+                              className="h-auto p-1 text-xs"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Lighting Presets Dropdown */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">조명 프리셋</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="lighting-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
+                  <select
+                    id="lighting-select"
+                    onChange={handleLightingPresetChange}
+                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                  >
+                    <option value="">조명 프리셋 선택...</option>
+                    {LIGHTING_PRESETS.filter(p => !selectedLightingPresets.includes(p.id)).map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedLightingPresets.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
+                    <div className="space-y-1">
+                      {selectedLightingPresets.map(presetId => {
+                        const preset = LIGHTING_PRESETS.find(p => p.id === presetId);
+                        return preset ? (
+                          <div key={presetId} className="flex items-center justify-between bg-muted/50 p-2 rounded text-xs">
+                            <span>{preset.name}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeLightingPreset(presetId)}
+                              className="h-auto p-1 text-xs"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Pose Presets Dropdown */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">포즈 프리셋</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="pose-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
+                  <select
+                    id="pose-select"
+                    onChange={handlePosePresetChange}
+                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                  >
+                    <option value="">포즈 프리셋 선택...</option>
+                    {POSE_PRESETS.filter(p => !selectedPosePresets.includes(p.id)).map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedPosePresets.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
+                    <div className="space-y-1">
+                      {selectedPosePresets.map(presetId => {
+                        const preset = POSE_PRESETS.find(p => p.id === presetId);
+                        return preset ? (
+                          <div key={presetId} className="flex items-center justify-between bg-muted/50 p-2 rounded text-xs">
+                            <span>{preset.name}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removePosePreset(presetId)}
+                              className="h-auto p-1 text-xs"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* External Presets Dropdown */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">외부 프리셋</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="external-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
+                  <select
+                    id="external-select"
+                    onChange={handleExternalPresetChange}
+                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                  >
+                    <option value="">외부 프리셋 선택...</option>
+                    {EXTERNAL_PRESETS.filter(p => !selectedExternalPresets.includes(p.id)).map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedExternalPresets.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
+                    <div className="space-y-1">
+                      {selectedExternalPresets.map(presetId => {
+                        const preset = EXTERNAL_PRESETS.find(p => p.id === presetId);
+                        return preset ? (
+                          <div key={presetId} className="flex items-center justify-between bg-muted/50 p-2 rounded text-xs">
+                            <span>{preset.label}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeExternalPreset(presetId)}
+                              className="h-auto p-1 text-xs"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Generate Button */}
+            <Button
+              onClick={handleStartGeneration}
+              disabled={!canGenerate}
+              className="w-full"
+              size="lg"
+            >
+              {isGenerating ? '변형 생성 중...' : `${variationItems.length}개 변형 생성`}
+            </Button>
+          </div>
+        </ScrollArea>
+      </div>
+
+      {/* Right Panel - Results Grid */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="flex h-16 items-center justify-between border-b px-6">
+          <h2 className="text-lg font-semibold">변형 결과</h2>
+          <div className="text-sm text-muted-foreground">
+            {variationItems.filter(item => item.status === "completed").length}/{variationItems.length} 완료
+          </div>
+        </div>
+
+        {/* Results Grid */}
+        <ScrollArea className="flex-1">
+          <div className="p-6 space-y-8">
+            {/* Current Variations */}
+            <div>
+              <h3 className="text-sm font-medium mb-4">현재 변형 생성</h3>
+              {variationItems.length === 0 ? (
+                <div className="flex h-32 items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg">
+                  프리셋을 선택하여 변형을 추가하세요
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {variationItems.map((item) => (
+                    <Card key={item.id} className="overflow-hidden">
+                      <CardContent className="p-3">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Badge variant="outline" className="text-xs">
+                              {item.index}번
+                            </Badge>
+                            <Badge
+                              variant={
+                                item.status === "completed" ? "default" :
+                                item.status === "generating" ? "secondary" :
+                                item.status === "error" ? "destructive" : "outline"
+                              }
+                              className="text-xs"
+                            >
+                              {item.status === "pending" ? "대기" :
+                               item.status === "generating" ? "생성중" :
+                               item.status === "completed" ? "완료" : "오류"}
+                            </Badge>
+                          </div>
+
+                          <div className="aspect-square relative bg-muted rounded-md overflow-hidden">
+                            {item.imageUrl ? (
+                              <Image
+                                src={item.imageUrl}
+                                alt={`Variation ${item.index}`}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                                {item.status === "generating" ? (
+                                  <div className="flex flex-col items-center gap-2">
+                                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-xs">생성 중...</span>
+                                  </div>
+                                ) : item.status === "error" ? (
+                                  <div className="flex flex-col items-center gap-2 text-destructive">
+                                    <span className="text-lg">⚠️</span>
+                                    <span className="text-xs">오류 발생</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center gap-2">
+                                    <span className="text-lg">⏳</span>
+                                    <span className="text-xs">대기 중</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="text-xs space-y-1">
+                            <div className="font-medium truncate">{item.preset.name || item.preset.label}</div>
+                            <div className="text-muted-foreground capitalize">{item.type} 프리셋</div>
+                          </div>
+
+                          {item.error && (
+                            <div className="text-xs text-destructive p-2 bg-destructive/10 rounded">
+                              {item.error}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Recent Generated Images */}
+            <div>
+              <h3 className="text-sm font-medium mb-4">최근 생성된 변형</h3>
+              {loading && recentVariationRecords.length === 0 ? (
+                <div className="flex h-32 items-center justify-center">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : recentVariationRecords.length === 0 ? (
+                <div className="flex h-32 items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg">
+                  아직 생성된 변형이 없습니다
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+                  {recentVariationRecords.map((record) => (
+                      <Card key={record.id} className="overflow-hidden group">
+                        <CardContent className="p-2">
+                          <div className="space-y-2">
+                            <div className="aspect-square relative bg-muted rounded-md overflow-hidden">
+                              {record.imageUrl && (
+                                <Image
+                                  src={record.imageUrl}
+                                  alt={record.promptMeta?.refinedPrompt || "Generated variation"}
+                                  fill
+                                  className="object-cover"
+                                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 16.67vw"
+                                />
+                              )}
+                              {/* Hover overlay with actions */}
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full text-xs h-7"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (record.imageUrl) {
+                                      setBaseImage(record.imageUrl);
+                                      const file = new File([], 'reference.png');
+                                      setBaseImageFile(file);
+                                      toast.success('기준 이미지로 설정되었습니다.');
+                                    }
+                                  }}
+                                >
+                                  기준이미지 등록
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={record.metadata?.favorite ? "secondary" : "outline"}
+                                  className="w-full text-xs h-7"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleFavorite(record.id);
+                                  }}
+                                >
+                                  {record.metadata?.favorite ? '★' : '☆'} 즐겨찾기
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="w-full text-xs h-7"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (record.imageUrl) {
+                                      const link = document.createElement('a');
+                                      link.href = record.imageUrl;
+                                      link.download = `variation-${record.id}.png`;
+                                      link.click();
+                                    }
+                                  }}
+                                >
+                                  다운로드
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="w-full text-xs h-7"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (confirm('이 이미지를 삭제하시겠습니까?')) {
+                                      handleDeleteRecord(record.id);
+                                    }
+                                  }}
+                                >
+                                  삭제
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="text-xs space-y-1">
+                              <div className="font-medium truncate">
+                                {(record.metadata as any)?.variationLabel || record.promptMeta?.refinedPrompt || "Variation"}
+                              </div>
+                              <div className="text-muted-foreground text-xs">
+                                {new Date(record.createdAt).toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}

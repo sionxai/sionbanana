@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
-import { sendMessage } from "@/lib/firebase/chat";
+import { ADMIN_UID } from "@/lib/constants";
+import { getAdminAuth, getAdminRealtimeDb } from "@/lib/firebase/admin";
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,8 +36,68 @@ export async function POST(request: NextRequest) {
     const userId = decodedToken.uid;
     const userName = decodedToken.name || decodedToken.email || "사용자";
 
-    // 메시지 전송
-    await sendMessage(chatId, userId, userName, content.trim());
+    const db = getAdminRealtimeDb();
+    const chatRef = db.ref(`chats/${chatId}`);
+    const chatSnapshot = await chatRef.get();
+    const now = Date.now();
+
+    let chatData = chatSnapshot.exists() ? chatSnapshot.val() as any : null;
+
+    if (!chatData) {
+      const participants: Record<string, string> = {
+        [userId]: userName
+      };
+      if (userId !== ADMIN_UID) {
+        participants[ADMIN_UID] = "관리자";
+      }
+
+      chatData = {
+        participants,
+        unreadCount: Object.keys(participants).reduce<Record<string, number>>((acc, id) => {
+          acc[id] = 0;
+          return acc;
+        }, {}),
+        createdAt: now,
+        updatedAt: now,
+        lastMessage: null,
+        lastMessageAt: null
+      };
+
+      await chatRef.set(chatData);
+    }
+
+    const messagesRef = db.ref(`messages/${chatId}`);
+    const newMessageRef = messagesRef.push();
+    const messageId = newMessageRef.key ?? `msg_${now}`;
+
+    await newMessageRef.set({
+      id: messageId,
+      chatId,
+      senderId: userId,
+      senderName: userName,
+      content: content.trim(),
+      timestamp: now,
+      createdAt: now,
+      readBy: {
+        [userId]: now
+      }
+    });
+
+    const participants = chatData.participants ? Object.keys(chatData.participants) : [];
+    const unreadUpdates: Record<string, number> = { ...(chatData.unreadCount ?? {}) };
+    participants
+      .filter((participantId) => participantId !== userId)
+      .forEach((participantId) => {
+        unreadUpdates[participantId] = (unreadUpdates[participantId] ?? 0) + 1;
+      });
+    unreadUpdates[userId] = 0;
+
+    await chatRef.update({
+      lastMessage: content.trim(),
+      lastMessageAt: now,
+      updatedAt: now,
+      unreadCount: unreadUpdates
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

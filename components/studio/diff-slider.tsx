@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 interface DiffSliderProps {
@@ -40,12 +41,14 @@ export function DiffSlider({
         }}
       >
         {afterSrc ? (
-          <img
+          <Image
             key={`after-${afterSrc}`}
             src={afterSrc}
             alt="after"
-            className="absolute inset-0 h-full w-full object-contain"
-            loading={priority ? "eager" : "lazy"}
+            fill
+            className="object-contain"
+            priority={priority}
+            unoptimized={afterSrc.startsWith('data:')}
           />
         ) : (
           <Placeholder label="생성 결과 미리보기" />
@@ -55,12 +58,14 @@ export function DiffSlider({
             className="pointer-events-none absolute inset-0"
             style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}
           >
-            <img
+            <Image
               key={`before-${beforeSrc}`}
               src={beforeSrc}
               alt="before"
-              className="absolute inset-0 h-full w-full object-contain"
-              loading={priority ? "eager" : "lazy"}
+              fill
+              className="object-contain"
+              priority={priority}
+              unoptimized={beforeSrc.startsWith('data:')}
             />
             <div
               className="absolute inset-y-0 w-0.5 bg-white/70"

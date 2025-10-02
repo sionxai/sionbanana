@@ -43,7 +43,7 @@ export interface GeneratedImageFirestorePayload {
   mode: GenerationMode;
   status: "pending" | "completed" | "failed";
   promptMeta: GeneratedImageDocument["promptMeta"];
-  imageUrl: string;
+  imageUrl?: string;
   thumbnailUrl?: string;
   originalImageUrl?: string;
   diff?: GeneratedImageDocument["diff"];

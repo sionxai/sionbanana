@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  subscribeToMessages,
-  sendMessage as sendChatMessage,
-  markChatAsRead
-} from "@/lib/firebase/chat";
+  subscribeToMessagesRTDB,
+  sendMessageRTDB,
+  markChatAsReadRTDB
+} from "@/lib/firebase/realtime-messages";
+import { subscribeToAdminChatRoomsRTDB } from "@/lib/firebase/realtime-chat-sdk";
+import { ADMIN_UID } from "@/lib/constants";
 import type { ChatMessage, ChatRoom } from "@/lib/types";
 
 interface UseChatOptions {
@@ -24,16 +26,38 @@ export function useChat(chatId: string, options: UseChatOptions = {}) {
     setLoading(true);
     setError(null);
 
-    const unsubscribe = subscribeToMessages(chatId, (newMessages) => {
-      setMessages(newMessages);
-      setLoading(false);
+    const unsubscribe = subscribeToMessagesRTDB(
+      chatId,
+      (newMessages) => {
+        const normalizedMessages = newMessages.map((message) => {
+          const timestampNumber = Number(message.timestamp);
+          const timestampIso = Number.isFinite(timestampNumber)
+            ? new Date(timestampNumber).toISOString()
+            : (typeof message.timestamp === "string" && !Number.isNaN(Date.parse(message.timestamp))
+              ? new Date(message.timestamp).toISOString()
+              : new Date().toISOString());
 
-      // 새 메시지 콜백 호출
-      if (options.onNewMessage && newMessages.length > 0) {
-        const latestMessage = newMessages[newMessages.length - 1];
-        options.onNewMessage(latestMessage);
+          return {
+            ...message,
+            timestamp: timestampIso,
+            readBy: message.readBy ?? {}
+          };
+        });
+
+        setMessages(normalizedMessages);
+        setLoading(false);
+
+        if (options.onNewMessage && normalizedMessages.length > 0) {
+          const latestMessage = normalizedMessages[normalizedMessages.length - 1];
+          options.onNewMessage(latestMessage);
+        }
+      },
+      (err) => {
+        console.error("[useChat] subscribeToMessagesRTDB error:", err);
+        setError(err.message);
+        setLoading(false);
       }
-    });
+    );
 
     return () => {
       unsubscribe();
@@ -47,7 +71,7 @@ export function useChat(chatId: string, options: UseChatOptions = {}) {
     content: string
   ) => {
     try {
-      await sendChatMessage(chatId, senderId, senderName, content);
+      await sendMessageRTDB(chatId, senderId, senderName, content);
     } catch (err) {
       console.error("Failed to send message:", err);
       setError("메시지 전송에 실패했습니다.");
@@ -58,7 +82,7 @@ export function useChat(chatId: string, options: UseChatOptions = {}) {
   // 메시지 읽음 처리
   const markAsRead = useCallback(async (userId: string) => {
     try {
-      await markChatAsRead(chatId, userId);
+      await markChatAsReadRTDB(chatId, userId);
     } catch (err) {
       console.error("Failed to mark chat as read:", err);
     }
@@ -89,19 +113,47 @@ export function useAdminChats() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const { subscribeToChatRooms } = require("@/lib/firebase/chat");
-    const { ADMIN_UID } = require("@/lib/constants");
-
     setLoading(true);
     setError(null);
 
-    console.log("[useAdminChats] Starting subscription for admin:", ADMIN_UID);
+    console.log("[useAdminChats] Starting RTDB subscription for admin:", ADMIN_UID);
 
-    const unsubscribe = subscribeToChatRooms(ADMIN_UID, (rooms: ChatRoom[]) => {
-      console.log("[useAdminChats] Received chat rooms:", rooms);
-      setChatRooms(rooms);
-      setLoading(false);
-    });
+    const unsubscribe = subscribeToAdminChatRoomsRTDB(
+      ADMIN_UID,
+      (rooms: any[]) => {
+        const toIso = (value: any) => {
+          const numeric = Number(value);
+          if (Number.isFinite(numeric)) {
+            return new Date(numeric).toISOString();
+          }
+          if (typeof value === "string" && !Number.isNaN(Date.parse(value))) {
+            return new Date(value).toISOString();
+          }
+          return new Date().toISOString();
+        };
+
+        const normalizedRooms = rooms.map((room) => {
+          return {
+            ...room,
+            participants: room.participants ?? [],
+            participantNames: room.participantNames ?? {},
+            unreadCount: room.unreadCount ?? {},
+            lastMessageAt: room.lastMessageAt ? toIso(room.lastMessageAt) : undefined,
+            createdAt: room.createdAt ? toIso(room.createdAt) : new Date().toISOString(),
+            updatedAt: room.updatedAt ? toIso(room.updatedAt) : new Date().toISOString()
+          } as ChatRoom;
+        });
+
+        console.log("[useAdminChats] Received RTDB chat rooms:", normalizedRooms);
+        setChatRooms(normalizedRooms);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[useAdminChats] RTDB subscription error:", err);
+        setError(err.message);
+        setLoading(false);
+      }
+    );
 
     return () => {
       console.log("[useAdminChats] Unsubscribing from chat rooms");

@@ -4,9 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { MessageBubble } from "./MessageBubble";
-import { useChatRTDB } from "@/hooks/use-chat-rtdb";
+import { useChat } from "@/hooks/use-chat";
 import { ADMIN_UID } from "@/lib/constants";
 
 interface ChatInterfaceProps {
@@ -20,7 +20,7 @@ export function ChatInterface({ chatId, currentUserId, currentUserName }: ChatIn
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, loading, sendMessage, markAsRead } = useChatRTDB(chatId);
+  const { messages, loading, sendMessage, markAsRead } = useChat(chatId);
 
   // 메시지 전송
   const handleSendMessage = async () => {
@@ -62,33 +62,28 @@ export function ChatInterface({ chatId, currentUserId, currentUserName }: ChatIn
   }, [messages, currentUserId, markAsRead]);
 
   return (
-    <div className="flex h-screen flex-col pb-20">
-      {/* 채팅 헤더 */}
-      <Card className="rounded-none border-x-0 border-t-0">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">1:1 상담하기</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            관리자와 실시간으로 소통하세요. 궁금한 점을 언제든 문의해주세요.
-          </p>
-        </CardHeader>
-      </Card>
+    <div className="flex h-full flex-col rounded-xl border bg-card shadow-sm">
+      <div className="border-b px-4 py-3">
+        <CardTitle className="text-base">1:1 상담하기</CardTitle>
+        <p className="mt-1 text-sm text-muted-foreground">
+          관리자와 실시간으로 소통하세요. 궁금한 점을 언제든 문의해주세요.
+        </p>
+      </div>
 
-      {/* 메시지 영역 */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 px-4 py-6">
         <div className="space-y-4">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex h-40 items-center justify-center">
               <div className="animate-pulse text-sm text-muted-foreground">
                 메시지를 불러오고 있습니다...
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
+            <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed bg-muted/40 text-center">
               <div className="mb-2 text-lg">👋</div>
               <h3 className="mb-1 font-medium">안녕하세요!</h3>
               <p className="text-sm text-muted-foreground">
-                궁금한 점이나 도움이 필요한 일이 있으시면<br />
-                언제든 메시지를 보내주세요.
+                궁금한 점이나 도움이 필요한 일이 있으시면 언제든 메시지를 보내주세요.
               </p>
             </div>
           ) : (
@@ -105,28 +100,25 @@ export function ChatInterface({ chatId, currentUserId, currentUserName }: ChatIn
         </div>
       </ScrollArea>
 
-      {/* 메시지 입력 영역 */}
-      <Card className="rounded-none border-x-0 border-b-0">
-        <CardContent className="p-4">
-          <div className="flex gap-2">
-            <Input
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="메시지를 입력하세요..."
-              disabled={sending}
-              className="flex-1"
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={!message.trim() || sending}
-              size="sm"
-            >
-              {sending ? "전송 중..." : "전송"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="border-t bg-background px-4 py-3">
+        <div className="flex gap-2">
+          <Input
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="메시지를 입력하세요..."
+            disabled={sending}
+            className="flex-1"
+          />
+          <Button
+            onClick={handleSendMessage}
+            disabled={!message.trim() || sending}
+            size="sm"
+          >
+            {sending ? "전송 중..." : "전송"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

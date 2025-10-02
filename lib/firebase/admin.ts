@@ -1,6 +1,7 @@
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
+import { getDatabase, Database } from "firebase-admin/database";
 import { getStorage, Storage } from "firebase-admin/storage";
 import { getFirestoreDatabaseId, getServiceAccountKey } from "@/lib/env";
 
@@ -15,6 +16,7 @@ let adminApp: App | null = null;
 let adminAuthInstance: Auth | null = null;
 let adminDbInstance: Firestore | null = null;
 let adminStorageInstance: Storage | null = null;
+let adminRealtimeDbInstance: Database | null = null;
 
 function ensureAdminApp(): App {
   if (adminApp) {
@@ -32,6 +34,8 @@ function ensureAdminApp(): App {
     throw new MissingServiceAccountKeyError();
   }
 
+  const databaseURL = process.env.FIREBASE_DATABASE_URL || process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
+
   adminApp = initializeApp({
     credential: cert({
       projectId: serviceAccount.projectId,
@@ -39,7 +43,8 @@ function ensureAdminApp(): App {
       privateKey: serviceAccount.privateKey
     }),
     projectId: serviceAccount.projectId,
-    storageBucket: "sionbanana.firebasestorage.app"
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.projectId}.firebasestorage.app`,
+    ...(databaseURL ? { databaseURL } : {})
   });
 
   return adminApp;
@@ -64,6 +69,13 @@ export function getAdminStorage() {
     adminStorageInstance = getStorage(ensureAdminApp());
   }
   return adminStorageInstance;
+}
+
+export function getAdminRealtimeDb() {
+  if (!adminRealtimeDbInstance) {
+    adminRealtimeDbInstance = getDatabase(ensureAdminApp());
+  }
+  return adminRealtimeDbInstance;
 }
 
 export { MissingServiceAccountKeyError };

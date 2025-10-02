@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,10 +35,10 @@ import { uploadUserImage } from "@/lib/firebase/storage";
 import { saveGeneratedImageDoc } from "@/lib/firebase/firestore";
 import { shouldUseFirestore } from "@/lib/env";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
-import Image from "next/image";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
 import { mergeHistoryRecords, broadcastHistoryUpdate } from "@/components/studio/history-sync";
+import { PresetLibraryProvider } from "@/components/studio/preset-library-context";
 import { deleteUserImage } from "@/lib/firebase/storage";
 import { deleteGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
 
@@ -80,7 +81,7 @@ interface BatchItem {
   errorMessage?: string;
 }
 
-export function BatchStudioShell() {
+function BatchStudioShellInner() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlsRef = useRef<string[]>([]);
@@ -138,12 +139,12 @@ export function BatchStudioShell() {
     }
   }, []);
 
-  // 로컬 기록이 변경될 때 저장
-  useEffect(() => {
-    if (localRecords.length > 0) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localRecords));
-    }
-  }, [localRecords]);
+  // 로컬 기록이 변경될 때 저장 (비활성화: Firestore 사용)
+  // useEffect(() => {
+  //   if (localRecords.length > 0) {
+  //     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localRecords));
+  //   }
+  // }, [localRecords]);
 
   const mergedRecords = useMemo(() => {
     const merged = mergeHistoryRecords(localRecords, records);
@@ -397,6 +398,7 @@ export function BatchStudioShell() {
       console.error('❌ [Batch Storage] 설정 저장 실패:', error);
     }
   }, [
+    isInitialLoad,
     activeMode,
     prompt,
     refinedPrompt,
@@ -872,12 +874,12 @@ export function BatchStudioShell() {
                 updatedAtIso: item.result?.completedAt || new Date().toISOString()
               }));
 
-            // 기존 로컬 기록과 합치기 (중복 제거)
-            setLocalRecords(prev => {
-              const existingIds = prev.map(r => r.id);
-              const newRecords = historyRecords.filter(r => !existingIds.includes(r.id));
-              return [...prev, ...newRecords];
-            });
+            // Firestore 실시간 리스너가 자동으로 UI 업데이트 처리
+            // setLocalRecords(prev => {
+            //   const existingIds = prev.map(r => r.id);
+            //   const newRecords = historyRecords.filter(r => !existingIds.includes(r.id));
+            //   return [...prev, ...newRecords];
+            // });
           } catch (error) {
             if (error instanceof Error && error.name === 'QuotaExceededError') {
               console.error('❌ [Batch Storage] 로컬 스토리지 용량 초과:', error.message);
@@ -945,6 +947,7 @@ export function BatchStudioShell() {
       }
     }, 1000);
   }, [
+    user,
     activeMode,
     aperture,
     aspectRatio,
@@ -1122,11 +1125,13 @@ export function BatchStudioShell() {
                         key={item.id}
                         className="w-60 shrink-0 overflow-hidden rounded-xl border bg-card shadow-sm"
                       >
-                        <div className="aspect-square bg-muted">
-                          <img
+                        <div className="relative aspect-square bg-muted">
+                          <Image
                             src={item.src}
                             alt={item.name}
-                            className="h-full w-full object-cover"
+                            fill
+                            className="object-cover"
+                            unoptimized={item.src.startsWith('data:')}
                           />
                         </div>
                         <div className="space-y-2 p-3">
@@ -1408,6 +1413,14 @@ export function BatchStudioShell() {
         </Card>
       </section>
     </div>
+  );
+}
+
+export function BatchStudioShell() {
+  return (
+    <PresetLibraryProvider>
+      <BatchStudioShellInner />
+    </PresetLibraryProvider>
   );
 }
 

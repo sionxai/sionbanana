@@ -119,6 +119,8 @@ export const firestore = () => {
   }
 };
 
+export const db = firestore;
+
 export const storage = () => {
   try {
     return getStorage(getFirebaseApp());

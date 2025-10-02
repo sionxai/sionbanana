@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ChatInterface } from "@/components/chat/ChatInterface";
+import { AdminChatInterface } from "@/components/chat/AdminChatInterface";
 import { StudioNavigation } from "@/components/studio/studio-navigation";
 import type { ChatRoom } from "@/lib/types";
 import Link from "next/link";
@@ -316,11 +316,15 @@ export default function AdminChatDetailPage() {
 
         {/* 채팅 인터페이스 */}
         <div className="flex-1">
-          <ChatInterface
-            chatId={chatId}
-            currentUserId={ADMIN_UID}
-            currentUserName="관리자"
-          />
+          <div className="h-full px-4 py-6">
+            <AdminChatInterface
+              chatId={chatId}
+              currentUserId={ADMIN_UID}
+              currentUserName="관리자"
+              otherUserName={userName}
+              showHeader={false}
+            />
+          </div>
         </div>
       </div>
       </div>

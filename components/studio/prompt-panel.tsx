@@ -16,6 +16,7 @@ import {
   APERTURE_DEFAULT,
   APERTURE_MAX,
   APERTURE_MIN,
+  APERTURE_NONE,
   DEFAULT_CAMERA_ANGLE,
   DEFAULT_CAMERA_DIRECTION,
   DEFAULT_SUBJECT_DIRECTION,
@@ -24,10 +25,9 @@ import {
 } from "@/lib/camera";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections } from "@/components/studio/types";
-import { LIGHTING_PRESET_GROUPS, LIGHTING_PROMPT_LOOKUP } from "@/components/studio/lighting-config";
-import { POSE_PRESET_GROUPS, POSE_PROMPT_LOOKUP, generateCombinedPosePrompt } from "@/components/studio/pose-config";
 import { generateCombinedCameraPrompt } from "@/components/studio/camera-config";
-import { EXTERNAL_PRESET_GROUPS, type ExternalPresetOption } from "@/components/studio/external-preset-config";
+import { usePresetLibrary } from "@/components/studio/preset-library-context";
+import type { ExternalPresetOption } from "@/components/studio/external-preset-config";
 
 const CAMERA_ANGLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: DEFAULT_CAMERA_ANGLE, label: "기본값" },
@@ -68,7 +68,7 @@ const ZOOM_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "확대", label: "확대" }
 ];
 
-const APERTURE_MARKS = [12, 28, 56, 110, 160, 220];
+const APERTURE_MARKS = [0, 12, 28, 56, 110, 160, 220];
 
 interface PromptPanelProps {
   mode: GenerationMode;
@@ -123,9 +123,9 @@ export function PromptPanel({
   onCameraAngleChange,
   onApertureChange,
   onAspectRatioChange,
-  onSubjectDirectionChange,
-  onCameraDirectionChange,
-  onZoomLevelChange,
+    onSubjectDirectionChange,
+    onCameraDirectionChange,
+    onZoomLevelChange,
   lightingSelections,
   onLightingSelectionsChange,
   poseSelections,
@@ -135,18 +135,30 @@ export function PromptPanel({
   onRefinePrompt,
   generating
 }: PromptPanelProps) {
+  const {
+    externalGroups,
+    lightingGroups,
+    poseGroups,
+    lightingLookup,
+    generatePosePrompt
+  } = usePresetLibrary();
   const apertureLabel = useMemo(() => formatAperture(aperture), [aperture]);
   const apertureValue = useMemo(() => [aperture], [aperture]);
   const handleApertureValueChange = useCallback(
     (value: number[]) => {
-      const next = typeof value[0] === "number" ? value[0] : APERTURE_DEFAULT;
-      if (next !== aperture) {
-        onApertureChange(next);
+      const nextRaw = typeof value[0] === "number" ? value[0] : APERTURE_DEFAULT;
+      const nearest = APERTURE_MARKS.reduce((prev, current) => {
+        const prevDiff = Math.abs(prev - nextRaw);
+        const currentDiff = Math.abs(current - nextRaw);
+        return currentDiff < prevDiff ? current : prev;
+      }, APERTURE_DEFAULT);
+
+      if (nearest !== aperture) {
+        onApertureChange(nearest);
       }
     },
     [aperture, onApertureChange]
   );
-
   const isCameraMode = mode === "camera";
   const isLightingMode = mode === "lighting";
   const isPoseMode = mode === "pose";
@@ -158,7 +170,7 @@ export function PromptPanel({
       onLightingSelectionsChange?.(category, values);
 
       // Update prompt input with selected lighting presets
-      const lookup = LIGHTING_PROMPT_LOOKUP[category];
+      const lookup = lightingLookup[category] ?? {};
       const selectedPrompts = values
         .map(value => lookup[value])
         .filter(Boolean);
@@ -171,7 +183,7 @@ export function PromptPanel({
         onPromptChange("");
       }
     },
-    [onLightingSelectionsChange, onPromptChange]
+    [lightingLookup, onLightingSelectionsChange, onPromptChange]
   );
 
   const handlePoseSelectionsChange = useCallback(
@@ -189,10 +201,10 @@ export function PromptPanel({
       };
 
       // Generate combined prompt
-      const combinedPrompt = generateCombinedPosePrompt(newSelections);
+      const combinedPrompt = generatePosePrompt(newSelections);
       onPromptChange(combinedPrompt);
     },
-    [onPoseSelectionsChange, onPromptChange, poseSelections]
+    [generatePosePrompt, onPoseSelectionsChange, onPromptChange, poseSelections]
   );
 
   const handleExternalPresetApply = useCallback(
@@ -201,6 +213,34 @@ export function PromptPanel({
       onRefinedPromptChange("");
     },
     [onPromptChange, onRefinedPromptChange]
+  );
+
+  const handleCameraAngleChangeInternal = useCallback(
+    (value: string | undefined) => {
+      onCameraAngleChange(value || DEFAULT_CAMERA_ANGLE);
+    },
+    [onCameraAngleChange]
+  );
+
+  const handleSubjectDirectionChangeInternal = useCallback(
+    (value: string | undefined) => {
+      onSubjectDirectionChange(value || DEFAULT_SUBJECT_DIRECTION);
+    },
+    [onSubjectDirectionChange]
+  );
+
+  const handleCameraDirectionChangeInternal = useCallback(
+    (value: string | undefined) => {
+      onCameraDirectionChange(value || DEFAULT_CAMERA_DIRECTION);
+    },
+    [onCameraDirectionChange]
+  );
+
+  const handleZoomLevelChangeInternal = useCallback(
+    (value: string | undefined) => {
+      onZoomLevelChange(value || DEFAULT_ZOOM_LEVEL);
+    },
+    [onZoomLevelChange]
   );
 
   const handleClearPrompt = useCallback(() => {
@@ -320,13 +360,13 @@ export function PromptPanel({
   );
 
   const lightingControlsCard =
-    isLightingMode && LIGHTING_PRESET_GROUPS.length ? (
+    isLightingMode && lightingGroups.length ? (
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="text-base">조명 및 배색 프리셋</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {LIGHTING_PRESET_GROUPS.map(group => {
+          {lightingGroups.map(group => {
             const selected = lightingSelections?.[group.key] ?? [];
             return (
               <div key={group.key} className="flex flex-col gap-2 md:flex-row md:items-start md:gap-4">
@@ -360,13 +400,13 @@ export function PromptPanel({
     ) : null;
 
   const poseControlsCard =
-    isPoseMode && POSE_PRESET_GROUPS.length ? (
+    isPoseMode && poseGroups.length ? (
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="text-base">포즈 · 감정 프리셋</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {POSE_PRESET_GROUPS.map(group => {
+          {poseGroups.map(group => {
             const selected = poseSelections?.[group.key] ?? [];
             return (
               <div key={group.key} className="flex flex-col gap-2 md:flex-row md:items-start md:gap-4">
@@ -410,7 +450,7 @@ export function PromptPanel({
                 <ToggleGroup
                   type="single"
                   value={subjectDirection}
-                  onValueChange={value => onSubjectDirectionChange(value || DEFAULT_SUBJECT_DIRECTION)}
+                  onValueChange={handleSubjectDirectionChangeInternal}
                   className="flex flex-wrap gap-2"
                 >
                   {SUBJECT_DIRECTION_OPTIONS.map(option => (
@@ -425,7 +465,7 @@ export function PromptPanel({
                 <ToggleGroup
                   type="single"
                   value={cameraDirection}
-                  onValueChange={value => onCameraDirectionChange(value || DEFAULT_CAMERA_DIRECTION)}
+                  onValueChange={handleCameraDirectionChangeInternal}
                   className="flex flex-wrap gap-2"
                 >
                   {CAMERA_DIRECTION_OPTIONS.map(option => (
@@ -440,7 +480,7 @@ export function PromptPanel({
                 <ToggleGroup
                   type="single"
                   value={zoomLevel}
-                  onValueChange={value => onZoomLevelChange(value || DEFAULT_ZOOM_LEVEL)}
+                  onValueChange={handleZoomLevelChangeInternal}
                   className="flex flex-wrap gap-2"
                 >
                   {ZOOM_OPTIONS.map(option => (
@@ -457,7 +497,7 @@ export function PromptPanel({
             <ToggleGroup
               type="single"
               value={cameraAngle}
-              onValueChange={value => onCameraAngleChange(value || DEFAULT_CAMERA_ANGLE)}
+              onValueChange={handleCameraAngleChangeInternal}
               className="flex flex-wrap gap-2"
             >
               {CAMERA_ANGLE_OPTIONS.map(option => (
@@ -489,10 +529,10 @@ export function PromptPanel({
                 variant="outline"
                 size="sm"
                 className="border-dashed px-2 py-1 text-[11px]"
-                onClick={() => onApertureChange(APERTURE_DEFAULT)}
-                disabled={generating || aperture === APERTURE_DEFAULT}
+                onClick={() => onApertureChange(APERTURE_NONE)}
+                disabled={generating || aperture === APERTURE_NONE}
               >
-                기본값 {formatAperture(APERTURE_DEFAULT)}
+                기본값
               </Button>
             </div>
           </div>
@@ -527,7 +567,7 @@ export function PromptPanel({
     ) : null;
 
   const externalPresetCard =
-    isExternalMode && EXTERNAL_PRESET_GROUPS.length ? (
+    isExternalMode && externalGroups.length ? (
       <Card className="flex h-full flex-col">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">외부 프리셋</CardTitle>
@@ -538,7 +578,7 @@ export function PromptPanel({
         <CardContent className="flex-1 overflow-hidden p-0">
           <ScrollArea className="h-[520px]">
             <div className="space-y-5 px-4 pb-4">
-              {EXTERNAL_PRESET_GROUPS.map(group => (
+              {externalGroups.map(group => (
                 <div key={group.id} className="space-y-2">
                   <div>
                     <p className="text-xs font-semibold text-muted-foreground">{group.title}</p>
@@ -587,7 +627,12 @@ export function PromptPanel({
             variant="outline"
             size="sm"
             className="px-3"
-            onClick={onResetPresets}
+            onClick={() => {
+              onResetPresets();
+              onPromptChange("");
+              onRefinedPromptChange("");
+              onNegativePromptChange("");
+            }}
             disabled={generating}
           >
             프리셋 리셋

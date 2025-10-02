@@ -185,7 +185,15 @@ export default function AdminPage() {
   return (
     <AuthGate>
       <div className="space-y-6 p-6">
-        <h1 className="text-2xl font-bold">관리자 콘솔</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">관리자 콘솔</h1>
+          <a
+            href="/admin/presets"
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            프리셋 관리 →
+          </a>
+        </div>
 
         {/* 대기 중인 플랜 신청 목록 */}
         <PendingRequestsList onRequestProcessed={load} />

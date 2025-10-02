@@ -1,9 +1,21 @@
-// REST API 기반 채팅 관리 훅
+// 관리자 채팅 목록을 Realtime Database로 구독하는 훅
 "use client";
 
-import { useState, useEffect } from "react";
-import { getAdminChatRoomsViaRest } from "@/lib/firebase/rest-api";
+import { useEffect, useState } from "react";
+import { subscribeToAdminChatRoomsRTDB } from "@/lib/firebase/realtime-chat-sdk";
+import { ADMIN_UID } from "@/lib/constants";
 import type { ChatRoom } from "@/lib/types";
+
+const toIsoString = (value: any) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return new Date(numeric).toISOString();
+  }
+  if (typeof value === "string" && !Number.isNaN(Date.parse(value))) {
+    return new Date(value).toISOString();
+  }
+  return new Date().toISOString();
+};
 
 export function useAdminChatsRest() {
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
@@ -11,42 +23,34 @@ export function useAdminChatsRest() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadChatRooms = async () => {
-      const { ADMIN_UID } = await import("@/lib/constants");
+    setLoading(true);
+    setError(null);
 
-      setLoading(true);
-      setError(null);
+    const unsubscribe = subscribeToAdminChatRoomsRTDB(
+      ADMIN_UID,
+      (rooms: any[]) => {
+        const normalizedRooms: ChatRoom[] = rooms.map((room) => ({
+          ...room,
+          participants: room.participants ?? [],
+          participantNames: room.participantNames ?? {},
+          unreadCount: room.unreadCount ?? {},
+          lastMessageAt: room.lastMessageAt ? toIsoString(room.lastMessageAt) : undefined,
+          createdAt: room.createdAt ? toIsoString(room.createdAt) : new Date().toISOString(),
+          updatedAt: room.updatedAt ? toIsoString(room.updatedAt) : new Date().toISOString()
+        }));
 
-      try {
-        console.log("[useAdminChatsRest] Loading admin chat rooms via REST API for:", ADMIN_UID);
-
-        // localStorage 디버깅 정보
-        const recentChatIds = localStorage.getItem('recentChatIds');
-        console.log("[useAdminChatsRest] 🔍 LocalStorage debug:", {
-          recentChatIds: recentChatIds,
-          parsed: recentChatIds ? JSON.parse(recentChatIds) : null,
-          localStorage: { ...localStorage }
-        });
-
-        if (!recentChatIds || recentChatIds === '[]') {
-          console.log("[useAdminChatsRest] ⚠️ No chat IDs found in localStorage - no user chats created yet");
-        } else {
-          console.log("[useAdminChatsRest] ✅ Found chat IDs in localStorage, proceeding with REST API calls");
-        }
-
-        const rooms = await getAdminChatRoomsViaRest(ADMIN_UID);
-        console.log("[useAdminChatsRest] Received chat rooms:", rooms);
-
-        setChatRooms(rooms);
-      } catch (err: any) {
-        console.error("[useAdminChatsRest] Error loading chat rooms:", err);
+        setChatRooms(normalizedRooms);
+        setLoading(false);
+      },
+      (err) => {
         setError(err.message);
-      } finally {
         setLoading(false);
       }
-    };
+    );
 
-    loadChatRooms();
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   return {
