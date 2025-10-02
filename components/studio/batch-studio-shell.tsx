@@ -55,10 +55,7 @@ const BATCH_MODES: Array<{
   { id: "lighting", label: "조명 및 배색", description: "조명과 컬러그레이딩 프리셋 적용" },
   { id: "pose", label: "포즈", description: "표정과 자세 프리셋 적용" },
   { id: "external", label: "외부 프리셋", description: "예시 기반 프롬프트 컬렉션" },
-  { id: "crop", label: "크롭", description: "이미지 구도 및 비율 변경" },
-  { id: "upscale", label: "업스케일", description: "고해상도로 업스케일" },
   { id: "sketch", label: "스케치", description: "스케치를 이미지로 변환" },
-  { id: "prompt-adapt", label: "T2I", description: "타 툴용 프롬프트 변환" },
   {
     id: "presets",
     label: "프리셋",

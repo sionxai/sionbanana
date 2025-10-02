@@ -8,6 +8,7 @@ import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
+import { SketchCanvas } from "@/components/studio/sketch-canvas";
 import { DragHandle } from "@/components/studio/drag-handle";
 import { useResizable } from "@/hooks/use-resizable";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
@@ -320,10 +321,7 @@ const MODES: Array<{
   { id: "lighting", label: "조명 및 배색", description: "조명과 컬러그레이딩 프리셋 적용" },
   { id: "pose", label: "포즈", description: "표정과 자세 프리셋 적용" },
   { id: "external", label: "외부 프리셋", description: "예시 기반 프롬프트 컬렉션" },
-  { id: "crop", label: "크롭", description: "이미지 구도 및 비율 변경" },
-  { id: "upscale", label: "업스케일", description: "고해상도로 업스케일" },
   { id: "sketch", label: "스케치", description: "스케치를 이미지로 변환" },
-  { id: "prompt-adapt", label: "T2I", description: "타 툴용 프롬프트 변환" },
   {
     id: "presets",
     label: "프리셋",
@@ -349,7 +347,7 @@ type RequestGptPromptArgs = {
 
 type CameraSettingsPayload = {
   angle?: string;
-  aperture: string;
+  aperture?: string;
   subjectDirection?: string;
   cameraDirection?: string;
   zoom?: string;
@@ -1487,7 +1485,50 @@ function StudioShellInner() {
     }
   };
 
+  const handleSketchSave = async (dataUrl: string) => {
+    try {
+      // 빈 참조 슬롯 찾기
+      let targetSlot = referenceSlots.find(slot => !slot.imageUrl);
 
+      // 빈 슬롯이 없으면 새로 추가
+      if (!targetSlot) {
+        if (referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT) {
+          toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
+          return;
+        }
+        const newSlot = createReferenceSlot();
+        setReferenceSlots(prev => [...prev, newSlot]);
+        targetSlot = newSlot;
+      }
+
+      let storedUrl = dataUrl;
+
+      if (user && shouldUseFirestore) {
+        try {
+          const blob = await dataUrlToBlob(dataUrl);
+          const uploadResult = await uploadUserImage(user.uid, `reference-slot-${targetSlot.id}`, blob);
+          storedUrl = uploadResult.url;
+        } catch (error) {
+          console.error(error);
+          toast.error("스케치를 저장하는 중 오류가 발생했습니다.");
+          return;
+        }
+      }
+
+      // 참조 슬롯에 스케치 추가
+      setReferenceSlots(prev =>
+        prev.map(item =>
+          item.id === targetSlot!.id
+            ? { ...item, imageUrl: storedUrl, updatedAt: new Date().toISOString() }
+            : item
+        )
+      );
+      toast.success("스케치를 참조 이미지로 추가했습니다.");
+    } catch (error) {
+      console.error(error);
+      toast.error("스케치 저장에 실패했습니다.");
+    }
+  };
 
   const handleReferenceSlotAdd = () => {
     setReferenceSlots(prev => {
@@ -2865,38 +2906,46 @@ ${viewInstruction}`;
           >
             ←
           </button>
-          <PromptPanel
-            mode={activeMode}
-            prompt={prompt}
-            refinedPrompt={refinedPrompt}
-            negativePrompt={negativePrompt}
-            cameraAngle={cameraAngle}
-            aperture={aperture}
-            aspectRatio={aspectRatio}
-            subjectDirection={subjectDirection}
-            cameraDirection={cameraDirection}
-            zoomLevel={zoomLevel}
-            useGpt={useGptPrompt}
-            onToggleGpt={() => setUseGptPrompt(prev => !prev)}
-            gptLoading={gptLoading}
-            onPromptChange={handlePromptChange}
-            onRefinedPromptChange={handleRefinedPromptChange}
-            onNegativePromptChange={handleNegativePromptChange}
-            onCameraAngleChange={handleCameraAngleChange}
-            onApertureChange={handleApertureChange}
-            onAspectRatioChange={handleAspectRatioChange}
-            onSubjectDirectionChange={handleSubjectDirectionChange}
-            onCameraDirectionChange={handleCameraDirectionChange}
-            onZoomLevelChange={handleZoomLevelChange}
-            lightingSelections={lightingSelections}
-            onLightingSelectionsChange={handleLightingSelectionsChange}
-            poseSelections={poseSelections}
-            onPoseSelectionsChange={handlePoseSelectionsChange}
-            onResetPresets={handleResetPresets}
-            onGenerate={handleGenerate}
-            onRefinePrompt={handleRefinePrompt}
-            generating={isGenerating || characterBatchPending || view360BatchPending}
-          />
+          {activeMode === "sketch" ? (
+            <SketchCanvas
+              onSaveSketch={handleSketchSave}
+              width={512}
+              height={512}
+            />
+          ) : (
+            <PromptPanel
+              mode={activeMode}
+              prompt={prompt}
+              refinedPrompt={refinedPrompt}
+              negativePrompt={negativePrompt}
+              cameraAngle={cameraAngle}
+              aperture={aperture}
+              aspectRatio={aspectRatio}
+              subjectDirection={subjectDirection}
+              cameraDirection={cameraDirection}
+              zoomLevel={zoomLevel}
+              useGpt={useGptPrompt}
+              onToggleGpt={() => setUseGptPrompt(prev => !prev)}
+              gptLoading={gptLoading}
+              onPromptChange={handlePromptChange}
+              onRefinedPromptChange={handleRefinedPromptChange}
+              onNegativePromptChange={handleNegativePromptChange}
+              onCameraAngleChange={handleCameraAngleChange}
+              onApertureChange={handleApertureChange}
+              onAspectRatioChange={handleAspectRatioChange}
+              onSubjectDirectionChange={handleSubjectDirectionChange}
+              onCameraDirectionChange={handleCameraDirectionChange}
+              onZoomLevelChange={handleZoomLevelChange}
+              lightingSelections={lightingSelections}
+              onLightingSelectionsChange={handleLightingSelectionsChange}
+              poseSelections={poseSelections}
+              onPoseSelectionsChange={handlePoseSelectionsChange}
+              onResetPresets={handleResetPresets}
+              onGenerate={handleGenerate}
+              onRefinePrompt={handleRefinePrompt}
+              generating={isGenerating || characterBatchPending || view360BatchPending}
+            />
+          )}
         </div>
 
         {/* Left Panel Expand Button (when collapsed) */}
