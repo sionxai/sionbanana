@@ -30,7 +30,20 @@ import { resolveLocalizedText } from "@/lib/presets/localized";
 export type LightingPromptLookup = Record<string, Record<string, string>>;
 export type PosePromptLookup = Record<string, Record<string, string>>;
 
+export interface CameraPresetOption {
+  id: string;
+  name: string;
+  instruction: string;
+}
+
+export interface CameraPresetGroup {
+  id: string;
+  title: string;
+  options: CameraPresetOption[];
+}
+
 interface PresetLibraryData {
+  cameraGroups: CameraPresetGroup[];
   externalGroups: ExternalPresetGroup[];
   lightingGroups: LightingPresetGroup[];
   poseGroups: PosePresetGroup[];
@@ -86,8 +99,26 @@ function clonePoseGroups(groups: PosePresetGroup[]): PosePresetGroup[] {
   }));
 }
 
+const FALLBACK_CAMERA_GROUPS: CameraPresetGroup[] = [
+  {
+    id: "default",
+    title: "카메라 프리셋",
+    options: [
+      { id: "wide", name: "와이드 앵글", instruction: "Wide angle shot, slightly pulled back, full figure framing" },
+      { id: "medium", name: "미디엄 샷", instruction: "Medium shot, waist up framing, natural perspective" },
+      { id: "close", name: "클로즈업", instruction: "Close-up shot, shoulder and head framing, intimate perspective" },
+      { id: "low", name: "로우 앵글", instruction: "Low angle shot, camera positioned below subject, dramatic upward view" },
+      { id: "high", name: "하이 앵글", instruction: "High angle shot, camera positioned above subject, overhead perspective" }
+    ]
+  }
+];
+
 function createFallbackState(): PresetLibraryData {
   return {
+    cameraGroups: FALLBACK_CAMERA_GROUPS.map(group => ({
+      ...group,
+      options: group.options.map(option => ({ ...option }))
+    })),
     externalGroups: cloneExternalGroups(EXTERNAL_PRESET_GROUPS),
     lightingGroups: cloneLightingGroups(LIGHTING_PRESET_GROUPS),
     poseGroups: clonePoseGroups(POSE_PRESET_GROUPS)
@@ -137,6 +168,98 @@ function resolvePrompt(value: unknown): string {
     }
   }
   return String(value ?? "");
+}
+
+function buildCameraGroupsFromPresets(
+  presets: Preset[],
+  fallbackGroups: CameraPresetGroup[]
+): { groups: CameraPresetGroup[]; hasRemote: boolean } {
+  if (!presets.length) {
+    return {
+      groups: fallbackGroups.map(group => ({
+        ...group,
+        options: group.options.map(option => ({ ...option }))
+      })),
+      hasRemote: false
+    };
+  }
+
+  const fallbackMap = new Map<string, CameraPresetGroup>();
+  fallbackGroups.forEach(group => fallbackMap.set(group.id, group));
+
+  const remoteMap = new Map<string, { group: CameraPresetGroup; orders: number[] }>();
+
+  presets
+    .filter(preset => preset.active !== false)
+    .forEach(preset => {
+      const groupId = preset.groupId || "default";
+      const fallback = fallbackMap.get(groupId);
+      if (!remoteMap.has(groupId)) {
+        const groupTitle =
+          resolveLabel(preset.groupLabel, "ko") ||
+          resolveLabel(preset.groupLabel, "en") ||
+          fallback?.title ||
+          "카메라 프리셋";
+        remoteMap.set(groupId, {
+          group: {
+            id: groupId,
+            title: groupTitle,
+            options: []
+          },
+          orders: []
+        });
+      }
+
+      const container = remoteMap.get(groupId)!;
+      const optionId = extractValue(preset, "cam-");
+
+      const name = resolveLabel(preset.labelKo, "ko") || resolveLabel(preset.label, "ko") || resolveLabel(preset.label, "en");
+      const instruction = resolvePrompt(preset.prompt);
+
+      const option: CameraPresetOption = {
+        id: optionId,
+        name: name || optionId,
+        instruction
+      };
+
+      if (!container.group.options.some(existing => existing.id === option.id)) {
+        container.group.options.push(option);
+        container.orders.push(typeof preset.order === "number" ? preset.order : Number.MAX_SAFE_INTEGER);
+      }
+    });
+
+  // Sort options per group
+  remoteMap.forEach(({ group, orders }) => {
+    group.options = group.options
+      .map((option, index) => ({ option, order: orders[index] ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.order - b.order)
+      .map(({ option }) => option);
+  });
+
+  const result: CameraPresetGroup[] = [];
+
+  fallbackGroups.forEach(fallback => {
+    const remote = remoteMap.get(fallback.id);
+    if (remote) {
+      result.push(remote.group);
+      remoteMap.delete(fallback.id);
+    } else {
+      result.push({
+        ...fallback,
+        options: fallback.options.map(option => ({ ...option }))
+      });
+    }
+  });
+
+  // Append any new groups that did not exist in fallback
+  const leftover = Array.from(remoteMap.values())
+    .map(entry => entry.group)
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  return {
+    groups: [...result, ...leftover],
+    hasRemote: remoteMap.size > 0 || presets.length > 0
+  };
 }
 
 function buildExternalGroupsFromPresets(
@@ -547,6 +670,11 @@ export function PresetLibraryProvider({ children }: { children: ReactNode }) {
         const activePresets = presets.filter(preset => preset.active !== false);
 
         const {
+          groups: cameraGroups,
+          hasRemote: hasCameraRemote
+        } = buildCameraGroupsFromPresets(activePresets.filter(p => p.category === "camera"), FALLBACK_CAMERA_GROUPS);
+
+        const {
           groups: externalGroups,
           hasRemote: hasExternalRemote
         } = buildExternalGroupsFromPresets(activePresets.filter(p => p.category === "external"), EXTERNAL_PRESET_GROUPS);
@@ -561,9 +689,10 @@ export function PresetLibraryProvider({ children }: { children: ReactNode }) {
           hasRemote: hasPoseRemote
         } = buildPoseGroupsFromPresets(activePresets.filter(p => p.category === "pose"), POSE_PRESET_GROUPS);
 
-        const hasRemote = hasExternalRemote || hasLightingRemote || hasPoseRemote;
+        const hasRemote = hasCameraRemote || hasExternalRemote || hasLightingRemote || hasPoseRemote;
 
         setData({
+          cameraGroups,
           externalGroups,
           lightingGroups,
           poseGroups
@@ -602,6 +731,7 @@ export function PresetLibraryProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PresetLibraryValue>(
     () => ({
+      cameraGroups: data.cameraGroups,
       externalGroups: data.externalGroups,
       lightingGroups: data.lightingGroups,
       poseGroups: data.poseGroups,
@@ -616,6 +746,7 @@ export function PresetLibraryProvider({ children }: { children: ReactNode }) {
       error
     }),
     [
+      data.cameraGroups,
       data.externalGroups,
       data.lightingGroups,
       data.poseGroups,

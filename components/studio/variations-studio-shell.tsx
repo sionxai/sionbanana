@@ -30,36 +30,7 @@ import {
   mergeHistoryRecords,
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
-
-// Import preset configurations
-import { CHARACTER_VIEWS } from "@/components/studio/preset-config";
-
-// Define preset collections for variations
-const CAMERA_PRESETS = [
-  { id: "wide", name: "와이드 앵글", instruction: "Wide angle shot, slightly pulled back, full figure framing" },
-  { id: "medium", name: "미디엄 샷", instruction: "Medium shot, waist up framing, natural perspective" },
-  { id: "close", name: "클로즈업", instruction: "Close-up shot, shoulder and head framing, intimate perspective" },
-  { id: "low", name: "로우 앵글", instruction: "Low angle shot, camera positioned below subject, dramatic upward view" },
-  { id: "high", name: "하이 앵글", instruction: "High angle shot, camera positioned above subject, overhead perspective" }
-];
-
-const LIGHTING_PRESETS = [
-  { id: "golden", name: "골든 아워", instruction: "Golden hour lighting, warm sunset glow, soft shadows" },
-  { id: "dramatic", name: "드라마틱", instruction: "Dramatic lighting, strong contrast, deep shadows" },
-  { id: "soft", name: "소프트", instruction: "Soft diffused lighting, even illumination, minimal shadows" },
-  { id: "neon", name: "네온", instruction: "Neon lighting, vibrant colors, cyberpunk atmosphere" },
-  { id: "natural", name: "자연광", instruction: "Natural daylight, bright and clear, outdoor lighting" }
-];
-
-const POSE_PRESETS = [
-  { id: "confident", name: "자신감", instruction: "Confident pose, strong stance, direct gaze" },
-  { id: "casual", name: "캐주얼", instruction: "Casual relaxed pose, natural body language" },
-  { id: "dynamic", name: "다이나믹", instruction: "Dynamic action pose, movement and energy" },
-  { id: "elegant", name: "우아함", instruction: "Elegant graceful pose, refined posture" },
-  { id: "playful", name: "유쾌함", instruction: "Playful cheerful pose, expressive and fun" }
-];
-
-const EXTERNAL_PRESETS = CHARACTER_VIEWS;
+import { usePresetLibrary } from "@/components/studio/preset-library-context";
 
 const MAX_VARIATIONS = 30;
 
@@ -77,6 +48,19 @@ export function VariationsStudioShell() {
   const { user } = useAuth();
   const { records, loading } = useGeneratedImages();
   const [localHistory, setLocalHistory] = useState<GeneratedImageDocument[]>([]);
+
+  // Load presets from Firestore
+  const { cameraGroups, lightingGroups, poseGroups, externalGroups } = usePresetLibrary();
+
+  // Flatten groups into arrays for backward compatibility
+  const CAMERA_PRESETS = cameraGroups.flatMap(group => group.options);
+  const LIGHTING_PRESETS = lightingGroups.flatMap(group =>
+    group.options.map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+  );
+  const POSE_PRESETS = poseGroups.flatMap(group =>
+    group.options.filter(opt => opt.value !== "default").map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+  );
+  const EXTERNAL_PRESETS = externalGroups.flatMap(group => group.options);
 
   // Base image state
   const [baseImage, setBaseImage] = useState<string | null>(null);
