@@ -137,6 +137,44 @@ sion-banana/
   public/samples/           # UI용 샘플 이미지
 ```
 
+## Firebase Storage CORS 설정
+
+⚠️ **중요: CORS 에러가 발생하면 아래 절차를 따라주세요**
+
+### 방법 1: Firebase Console (권장)
+1. [Firebase Console](https://console.firebase.google.com/) → 프로젝트 선택
+2. Storage → Rules 탭에서 CORS 설정 확인
+3. Storage → Files 탭에서 버킷 이름 확인 (`sionbanana.firebasestorage.app`)
+
+### 방법 2: Google Cloud Console
+1. [Google Cloud Console](https://console.cloud.google.com/) → Storage → Browser
+2. 버킷 선택 (`sionbanana.firebasestorage.app`) → Configuration → CORS
+3. **Edit CORS** 버튼 클릭하여 아래 JSON 추가:
+
+```json
+[
+  {
+    "origin": ["https://sionbanana.vercel.app", "http://localhost:3000"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "Authorization", "Content-Length", "X-Requested-With"]
+  }
+]
+```
+
+### 방법 3: gsutil CLI (로컬에서)
+```bash
+# Google Cloud SDK 설치 필요
+gsutil cors set cors.json gs://sionbanana.firebasestorage.app
+```
+
+### Storage 버킷 URL
+- **실제 버킷**: `sionbanana.firebasestorage.app`
+- **Admin SDK & Client SDK**: 동일한 버킷 사용
+- 환경변수: `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=sionbanana.firebasestorage.app`
+
+---
+
 ## 안전한 API 키 관리
 
 ⚠️ **보안 중요 사항**

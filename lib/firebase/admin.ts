@@ -36,6 +36,11 @@ function ensureAdminApp(): App {
 
   const databaseURL = process.env.FIREBASE_DATABASE_URL || process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
 
+  // Storage bucket: 환경변수 우선, 없으면 projectId.firebasestorage.app 사용
+  const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.projectId}.firebasestorage.app`;
+
+  console.log('[Admin SDK] Initializing with storage bucket:', storageBucket);
+
   adminApp = initializeApp({
     credential: cert({
       projectId: serviceAccount.projectId,
@@ -43,7 +48,7 @@ function ensureAdminApp(): App {
       privateKey: serviceAccount.privateKey
     }),
     projectId: serviceAccount.projectId,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.projectId}.firebasestorage.app`,
+    storageBucket,
     ...(databaseURL ? { databaseURL } : {})
   });
 

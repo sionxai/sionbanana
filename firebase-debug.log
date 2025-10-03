@@ -42,3 +42,42 @@
     at async deploy (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js:120:5)
 [error] 
 [error] Error: An unexpected error has occurred.
+[debug] [2025-10-03T03:33:37.943Z] ----------------------------------------------------------------------
+[debug] [2025-10-03T03:33:37.944Z] Command:       /opt/homebrew/Cellar/node/24.8.0/bin/node /opt/homebrew/bin/firebase projects:list
+[debug] [2025-10-03T03:33:37.944Z] CLI Version:   14.17.0
+[debug] [2025-10-03T03:33:37.945Z] Platform:      darwin
+[debug] [2025-10-03T03:33:37.945Z] Node Version:  v24.8.0
+[debug] [2025-10-03T03:33:37.945Z] Time:          Fri Oct 03 2025 12:33:37 GMT+0900 (Korean Standard Time)
+[debug] [2025-10-03T03:33:37.945Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-10-03T03:33:38.005Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-10-03T03:33:38.005Z] > authorizing via signed-in user (nshcarlue@gmail.com)
+[debug] [2025-10-03T03:33:38.006Z] Checked if tokens are valid: false, expires at: 1759390325428
+[debug] [2025-10-03T03:33:38.006Z] Checked if tokens are valid: false, expires at: 1759390325428
+[debug] [2025-10-03T03:33:38.006Z] > refreshing access token with scopes: []
+[debug] [2025-10-03T03:33:38.007Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-10-03T03:33:38.007Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-10-03T03:33:38.318Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2025-10-03T03:33:38.318Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-10-03T03:33:38.334Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2025-10-03T03:33:39.015Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2025-10-03T03:33:39.015Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] ┌──────────────────────┬──────────────────────┬────────────────┬──────────────────────┐
+│ Project Display Name │ Project ID           │ Project Number │ Resource Location ID │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ gacha                │ gacha-870fa          │ 464289315548   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ iwantherapy          │ iwantherapy-ed2b9    │ 967684680047   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ Lotto                │ lotto-e8ede          │ 869009808834   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ scool                │ scool-62209          │ 458417652955   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ selfhood             │ selfhood-8eec7       │ 444121536287   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ sionbanana           │ sionbanana (current) │ 309643440962   │ [Not specified]      │
+├──────────────────────┼──────────────────────┼────────────────┼──────────────────────┤
+│ umark                │ umark-f849d          │ 140615866559   │ [Not specified]      │
+└──────────────────────┴──────────────────────┴────────────────┴──────────────────────┘
+[info] 
+[info] 7 project(s) total.
