@@ -57,11 +57,11 @@ function sanitizeValue(value: string | undefined) {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-const cleanRawClientEnv = Object.fromEntries(
-  Object.entries(rawClientEnv)
-    .map(([key, value]) => [key, sanitizeValue(value)])
-    .filter(([, value]): value is string => typeof value === "string" && value.length > 0)
-);
+const cleanRawClientEnvEntries = Object.entries(rawClientEnv)
+  .map(([key, value]) => [key, sanitizeValue(value)] as const)
+  .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0);
+
+const cleanRawClientEnv = Object.fromEntries(cleanRawClientEnvEntries);
 
 // Debug environment variables
 console.log('[ENV] Environment Variables Debug:', {
