@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { firestore } from "@/lib/firebase/client";
@@ -14,6 +14,7 @@ export function useFirestoreImages({ limitResults = 50, onNewRecord }: UseFirest
   const { user } = useAuth();
   const [records, setRecords] = useState<GeneratedImageDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const processedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!shouldUseFirestore) {
@@ -82,9 +83,14 @@ export function useFirestoreImages({ limitResults = 50, onNewRecord }: UseFirest
           setRecords(items);
           setLoading(false);
 
-          // Trigger callback for new records
+          // Trigger callback only for NEW records (not already processed)
           if (onNewRecord && items.length > 0) {
-            items.forEach(item => onNewRecord(item));
+            items.forEach(item => {
+              if (!processedIdsRef.current.has(item.id)) {
+                processedIdsRef.current.add(item.id);
+                onNewRecord(item);
+              }
+            });
           }
         },
         (error) => {
