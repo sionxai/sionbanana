@@ -49,8 +49,18 @@ const defaultClientEnv = {
 };
 
 // Only use environment variables if they exist and are not empty
+function sanitizeValue(value: string | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 const cleanRawClientEnv = Object.fromEntries(
-  Object.entries(rawClientEnv).filter(([key, value]) => value && value.trim() !== '')
+  Object.entries(rawClientEnv)
+    .map(([key, value]) => [key, sanitizeValue(value)])
+    .filter(([, value]): value is string => typeof value === "string" && value.length > 0)
 );
 
 // Debug environment variables

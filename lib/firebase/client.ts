@@ -8,6 +8,27 @@ import { clientEnv } from "@/lib/env";
 // 환경변수 export (디버깅용)
 export { clientEnv };
 
+function reportMissingClientEnvVars(): string[] {
+  const requiredKeys = [
+    "NEXT_PUBLIC_FIREBASE_API_KEY",
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID"
+  ] as const;
+
+  const missing = requiredKeys.filter(key => !clientEnv[key] || clientEnv[key].trim().length === 0);
+
+  if (missing.length) {
+    console.error("[Firebase] Missing client env variables", {
+      missing,
+      hasApiKey: Boolean(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
+      hasProjectId: Boolean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+      nodeEnv: process.env.NODE_ENV,
+      vercel: process.env.VERCEL
+    });
+  }
+
+  return missing;
+}
+
 let app: FirebaseApp | undefined;
 let isForceOfflineModeEnabled = false;
 
@@ -20,6 +41,7 @@ export function getFirebaseApp(): FirebaseApp {
       // Firebase 설정이 유효하지 않으면 에러를 던짐
       const apiKey = clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY;
       const projectId = clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+      const missingEnvVars = reportMissingClientEnvVars();
 
       console.log('Firebase Config Debug:', {
         apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : 'undefined',
@@ -33,7 +55,11 @@ export function getFirebaseApp(): FirebaseApp {
       });
 
       if (!apiKey || !projectId) {
-        throw new Error(`Firebase 환경변수가 설정되지 않았습니다. API_KEY: ${!!apiKey}, PROJECT_ID: ${!!projectId}`);
+        const hint = missingEnvVars.length
+          ? `누락: ${missingEnvVars.join(", ")}`
+          : `API_KEY: ${!!apiKey}, PROJECT_ID: ${!!projectId}`;
+        const resolution = "`.env.local` 값을 확인하고 Next.js 개발 서버를 다시 시작하세요.";
+        throw new Error(`Firebase 환경변수가 설정되지 않았습니다. ${hint}. ${resolution}`);
       }
 
       if (apiKey === "demo" || projectId === "demo-project") {
