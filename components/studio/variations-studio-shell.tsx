@@ -522,25 +522,27 @@ export function VariationsStudioShell() {
               </CardContent>
             </Card>
 
-            {/* Camera Presets Dropdown */}
+            {/* Camera Presets - Grouped Dropdowns */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">카메라 프리셋</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div>
-                  <Label htmlFor="camera-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
-                  <select
-                    id="camera-select"
-                    onChange={handleCameraPresetChange}
-                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
-                  >
-                    <option value="">카메라 프리셋 선택...</option>
-                    {CAMERA_PRESETS.filter(p => !selectedCameraPresets.includes(p.id)).map(preset => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {cameraGroups.map(group => (
+                  <div key={group.id}>
+                    <Label htmlFor={`camera-${group.id}`} className="text-xs text-muted-foreground">{group.title}</Label>
+                    <select
+                      id={`camera-${group.id}`}
+                      onChange={handleCameraPresetChange}
+                      className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                    >
+                      <option value="">{group.title} 선택...</option>
+                      {group.options.filter(p => !selectedCameraPresets.includes(p.id)).map(preset => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
                 {selectedCameraPresets.length > 0 && (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
@@ -567,25 +569,27 @@ export function VariationsStudioShell() {
               </CardContent>
             </Card>
 
-            {/* Lighting Presets Dropdown */}
+            {/* Lighting Presets - Grouped Dropdowns */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">조명 프리셋</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div>
-                  <Label htmlFor="lighting-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
-                  <select
-                    id="lighting-select"
-                    onChange={handleLightingPresetChange}
-                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
-                  >
-                    <option value="">조명 프리셋 선택...</option>
-                    {LIGHTING_PRESETS.filter(p => !selectedLightingPresets.includes(p.id)).map(preset => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {lightingGroups.map(group => (
+                  <div key={group.key}>
+                    <Label htmlFor={`lighting-${group.key}`} className="text-xs text-muted-foreground">{group.title}</Label>
+                    <select
+                      id={`lighting-${group.key}`}
+                      onChange={handleLightingPresetChange}
+                      className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                    >
+                      <option value="">{group.title} 선택...</option>
+                      {group.options.filter(p => !selectedLightingPresets.includes(p.value)).map(preset => (
+                        <option key={preset.value} value={preset.value}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
                 {selectedLightingPresets.length > 0 && (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
@@ -612,25 +616,27 @@ export function VariationsStudioShell() {
               </CardContent>
             </Card>
 
-            {/* Pose Presets Dropdown */}
+            {/* Pose Presets - Grouped Dropdowns */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">포즈 프리셋</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div>
-                  <Label htmlFor="pose-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
-                  <select
-                    id="pose-select"
-                    onChange={handlePosePresetChange}
-                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
-                  >
-                    <option value="">포즈 프리셋 선택...</option>
-                    {POSE_PRESETS.filter(p => !selectedPosePresets.includes(p.id)).map(preset => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {poseGroups.map(group => (
+                  <div key={group.key}>
+                    <Label htmlFor={`pose-${group.key}`} className="text-xs text-muted-foreground">{group.title}</Label>
+                    <select
+                      id={`pose-${group.key}`}
+                      onChange={handlePosePresetChange}
+                      className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                    >
+                      <option value="">{group.title} 선택...</option>
+                      {group.options.filter(p => p.value !== "default" && !selectedPosePresets.includes(p.value)).map(preset => (
+                        <option key={preset.value} value={preset.value}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
                 {selectedPosePresets.length > 0 && (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
@@ -657,25 +663,27 @@ export function VariationsStudioShell() {
               </CardContent>
             </Card>
 
-            {/* External Presets Dropdown */}
+            {/* External Presets - Grouped Dropdowns */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">외부 프리셋</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div>
-                  <Label htmlFor="external-select" className="text-xs text-muted-foreground">프리셋 선택</Label>
-                  <select
-                    id="external-select"
-                    onChange={handleExternalPresetChange}
-                    className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
-                  >
-                    <option value="">외부 프리셋 선택...</option>
-                    {EXTERNAL_PRESETS.filter(p => !selectedExternalPresets.includes(p.id)).map(preset => (
-                      <option key={preset.id} value={preset.id}>{preset.label}</option>
-                    ))}
-                  </select>
-                </div>
+                {externalGroups.map(group => (
+                  <div key={group.id}>
+                    <Label htmlFor={`external-${group.id}`} className="text-xs text-muted-foreground">{group.title}</Label>
+                    <select
+                      id={`external-${group.id}`}
+                      onChange={handleExternalPresetChange}
+                      className="w-full mt-1 p-2 border border-input bg-background rounded-md text-sm"
+                    >
+                      <option value="">{group.title} 선택...</option>
+                      {group.options.filter(p => !selectedExternalPresets.includes(p.id)).map(preset => (
+                        <option key={preset.id} value={preset.id}>{preset.labelKo || preset.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
                 {selectedExternalPresets.length > 0 && (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">선택된 프리셋</Label>
@@ -684,7 +692,7 @@ export function VariationsStudioShell() {
                         const preset = EXTERNAL_PRESETS.find(p => p.id === presetId);
                         return preset ? (
                           <div key={presetId} className="flex items-center justify-between bg-muted/50 p-2 rounded text-xs">
-                            <span>{preset.label}</span>
+                            <span>{preset.labelKo || preset.label}</span>
                             <Button
                               variant="ghost"
                               size="sm"
