@@ -9,6 +9,7 @@ const navItems = [
   { href: "/studio/variations", label: "변형 생성" },
   { href: "/studio/batch", label: "배치 생성" },
   { href: "/studio/presets", label: "프리셋" },
+  { href: "/studio/history", label: "생성기록" },
   { href: "/chat", label: "1:1 상담하기" }
 ];
 
