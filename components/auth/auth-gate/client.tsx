@@ -43,7 +43,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
             </Link>
             <Separator orientation="vertical" className="mx-2 hidden h-6 lg:block" />
             <Badge variant="secondary" className="hidden lg:inline-flex">
-              알파 버전
+              1.47v
             </Badge>
           </div>
           <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4 relative overflow-visible">
