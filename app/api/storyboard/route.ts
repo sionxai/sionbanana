@@ -487,9 +487,12 @@ export async function POST(request: NextRequest) {
     const maxCharacters = body.maxCharacters ?? 500;
     const soraMode = body.soraMode ?? true;
     const requestedStyleId = body.style ?? DEFAULT_STORYBOARD_STYLE_ID;
-    let style: StoryboardStyle | undefined = await getStoryboardStyleByIdAdmin(requestedStyleId);
+    let style: StoryboardStyle | null = await getStoryboardStyleByIdAdmin(requestedStyleId);
     if (!style) {
-      style = FALLBACK_STORYBOARD_STYLES.find(item => item.id === requestedStyleId) ?? FALLBACK_STORYBOARD_STYLES[0];
+      style =
+        FALLBACK_STORYBOARD_STYLES.find(item => item.id === requestedStyleId) ??
+        FALLBACK_STORYBOARD_STYLES[0] ??
+        null;
     }
 
     if (!style) {

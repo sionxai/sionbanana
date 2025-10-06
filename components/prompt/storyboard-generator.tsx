@@ -180,7 +180,14 @@ export function StoryboardGenerator() {
       });
 
       const data = (await response.json()) as StoryboardResponse;
-      if (!response.ok || !data.ok) {
+
+      if (!response.ok) {
+        const reason = !data.ok ? data.reason : undefined;
+        setError(reason ?? "스토리보드를 생성하지 못했습니다.");
+        return;
+      }
+
+      if (!data.ok) {
         setError(data.reason ?? "스토리보드를 생성하지 못했습니다.");
         return;
       }

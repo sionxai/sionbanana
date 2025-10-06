@@ -171,7 +171,7 @@ export function VariationsStudioShell() {
 
     const appendVariation = (
       type: VariationType,
-      preset: { id: string; name?: string; label?: string; instruction?: string; description?: string; [key: string]: unknown }
+      preset: { id: string; name?: string; label?: string; instruction?: string; description?: string }
     ) => {
       if (index > MAX_VARIATIONS) {
         return;
