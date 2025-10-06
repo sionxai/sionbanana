@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AspectRatioPreset, GenerationMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import { FALLBACK_STORYBOARD_STYLES } from "@/data/storyboard-styles";
+import type { StoryboardStyle } from "@/lib/storyboard/types";
 import {
   APERTURE_DEFAULT,
   APERTURE_MAX,
@@ -162,7 +164,46 @@ export function PromptPanel({
   const isCameraMode = mode === "camera";
   const isLightingMode = mode === "lighting";
   const isPoseMode = mode === "pose";
+  const isStyleMode = mode === "style";
   const isExternalMode = mode === "external";
+
+  const [stylePresets, setStylePresets] = useState<StoryboardStyle[]>(FALLBACK_STORYBOARD_STYLES);
+  const [styleLoading, setStyleLoading] = useState(false);
+  const [styleError, setStyleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStyles() {
+      try {
+        setStyleLoading(true);
+        setStyleError(null);
+        const response = await fetch("/api/storyboard/styles");
+        if (!response.ok) {
+          throw new Error("failed");
+        }
+        const data = (await response.json().catch(() => ({}))) as { styles?: StoryboardStyle[] } | undefined;
+        const styles = Array.isArray(data?.styles) ? data?.styles ?? [] : [];
+        if (!cancelled) {
+          setStylePresets(styles.length ? styles : FALLBACK_STORYBOARD_STYLES);
+        }
+      } catch (error) {
+        console.warn("[PromptPanel] failed to load storyboard styles", error);
+        if (!cancelled) {
+          setStyleError("스타일 정보를 불러오지 못했습니다. 기본 프리셋을 표시합니다.");
+          setStylePresets(FALLBACK_STORYBOARD_STYLES);
+        }
+      } finally {
+        if (!cancelled) {
+          setStyleLoading(false);
+        }
+      }
+    }
+
+    loadStyles();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const cameraCardTitle = isCameraMode ? "카메라 프롬프트" : "카메라 프리셋";
 
   const handleLightingSelectionsChange = useCallback(
@@ -211,6 +252,20 @@ export function PromptPanel({
     (option: ExternalPresetOption) => {
       onPromptChange(option.prompt);
       onRefinedPromptChange("");
+    },
+    [onPromptChange, onRefinedPromptChange]
+  );
+
+  const handleStylePresetApply = useCallback(
+    (style: StoryboardStyle) => {
+      const promptText = style.prompt?.trim();
+      if (!promptText) {
+        toast.error("해당 스타일에는 적용할 프롬프트가 없습니다.");
+        return;
+      }
+      onPromptChange(promptText);
+      onRefinedPromptChange("");
+      toast.success(`${style.label} 스타일 프리셋을 적용했습니다.`);
     },
     [onPromptChange, onRefinedPromptChange]
   );
@@ -619,6 +674,84 @@ export function PromptPanel({
       </Card>
     ) : null;
 
+  const stylePresetCard = isStyleMode ? (
+    <Card className="flex h-full flex-col">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">영상 스타일 프리셋</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          카드를 선택하면 해당 스타일 프롬프트가 입력란에 적용됩니다.
+        </p>
+      </CardHeader>
+      <CardContent className="flex-1 overflow-hidden p-0">
+        <ScrollArea className="h-[520px]">
+          <div className="space-y-4 px-4 pb-4">
+            {styleLoading ? (
+              <div className="rounded-lg border border-dashed border-border/60 bg-muted/30 py-6 text-center text-xs text-muted-foreground">
+                스타일 정보를 불러오는 중입니다...
+              </div>
+            ) : null}
+            {stylePresets.length ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {stylePresets.map(style => (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => handleStylePresetApply(style)}
+                    className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-background text-left transition hover:border-primary/50 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                  >
+                    <div className="relative h-36 w-full overflow-hidden">
+                      {style.referenceImageUrl ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={style.referenceImageUrl}
+                            alt={style.label}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                        </>
+                      ) : (
+                        <div
+                          className={`h-full w-full bg-gradient-to-br transition-transform duration-300 group-hover:scale-105 ${style.previewGradient ?? "from-slate-700 via-slate-900 to-black"}`}
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 p-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">{style.label}</p>
+                        {style.description ? (
+                          <p className="text-xs text-muted-foreground line-clamp-2">{style.description}</p>
+                        ) : null}
+                        {style.grading ? (
+                          <p className="text-[11px] text-muted-foreground/80 line-clamp-1">{style.grading}</p>
+                        ) : null}
+                      </div>
+                      {style.prompt ? (
+                        <div className="rounded-md bg-muted/50 p-2 text-[11px] leading-relaxed text-muted-foreground line-clamp-3">
+                          {style.prompt}
+                        </div>
+                      ) : (
+                        <div className="rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground/70">
+                          프롬프트 정보가 없습니다.
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/60 bg-muted/30 py-6 text-center text-xs text-muted-foreground">
+                사용할 수 있는 스타일 프리셋이 없습니다.
+              </div>
+            )}
+            {styleError ? (
+              <p className="text-[11px] text-destructive">{styleError}</p>
+            ) : null}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  ) : null;
+
   return (
     <div className="flex h-full flex-col gap-4">
       {onResetPresets ? (
@@ -653,6 +786,12 @@ export function PromptPanel({
         <>
           {poseControlsCard}
           {promptCard}
+        </>
+      ) : isStyleMode ? (
+        <>
+          {stylePresetCard}
+          {promptCard}
+          {cameraControlsCard}
         </>
       ) : isExternalMode ? (
         <>

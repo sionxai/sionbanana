@@ -38,6 +38,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
                 width={56}
                 height={56}
                 className="object-contain"
+                priority
               />
               <span className="text-[9px] text-muted-foreground text-center leading-none">AI 이미지 생성 워크플로우</span>
             </Link>
@@ -45,6 +46,17 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
             <Badge variant="secondary" className="hidden lg:inline-flex">
               1.47v
             </Badge>
+            <Link href="/prompt" className="text-xs text-muted-foreground transition hover:text-foreground lg:hidden">
+              프롬프트 생성
+            </Link>
+            <nav className="hidden items-center gap-3 text-sm font-medium text-muted-foreground lg:flex">
+              <Link href="/studio" className="transition hover:text-foreground">
+                스튜디오
+              </Link>
+              <Link href="/prompt" className="transition hover:text-foreground">
+                프롬프트 생성
+              </Link>
+            </nav>
           </div>
           <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4 relative overflow-visible">
             <UserMenu />
@@ -67,6 +79,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
               width={80}
               height={80}
               className="object-contain"
+              priority
             />
             <div className="text-center">
               <CardTitle className="text-2xl font-semibold mb-0.5">시온 바나나</CardTitle>

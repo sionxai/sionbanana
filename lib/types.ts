@@ -8,6 +8,7 @@ export type GenerationMode =
   | "prompt-adapt"
   | "lighting"
   | "pose"
+  | "style"
   | "external"
   | "upscale"
   | "sketch";

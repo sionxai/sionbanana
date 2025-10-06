@@ -31,36 +31,123 @@ import {
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
 import { usePresetLibrary } from "@/components/studio/preset-library-context";
+import { FALLBACK_STORYBOARD_STYLES } from "@/data/storyboard-styles";
+import type { StoryboardStyle } from "@/lib/storyboard/types";
+import { cn } from "@/lib/utils";
 
 const MAX_VARIATIONS = 30;
+
+type VariationType = "camera" | "lighting" | "pose" | "external" | "style";
 
 interface VariationItem {
   id: string;
   index: number;
-  type: "camera" | "lighting" | "pose" | "external";
+  type: VariationType;
   preset: any;
   status: "pending" | "generating" | "completed" | "error";
   imageUrl?: string;
   error?: string;
 }
 
+const VARIATION_TYPE_LABEL: Record<VariationType, string> = {
+  camera: "카메라",
+  lighting: "조명",
+  pose: "포즈",
+  external: "외부",
+  style: "스타일"
+};
+
 export function VariationsStudioShell() {
   const { user } = useAuth();
   const { records, loading } = useGeneratedImages();
   const [localHistory, setLocalHistory] = useState<GeneratedImageDocument[]>([]);
+  const [stylePresets, setStylePresets] = useState<StoryboardStyle[]>(FALLBACK_STORYBOARD_STYLES);
+  const [styleLoading, setStyleLoading] = useState(false);
+  const [styleError, setStyleError] = useState<string | null>(null);
+  const [selectedStylePresets, setSelectedStylePresets] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStyles() {
+      try {
+        setStyleLoading(true);
+        setStyleError(null);
+        const response = await fetch("/api/storyboard/styles");
+        if (!response.ok) {
+          throw new Error("failed");
+        }
+        const data = (await response.json().catch(() => ({}))) as { styles?: StoryboardStyle[] } | undefined;
+        const styles = Array.isArray(data?.styles) ? data?.styles ?? [] : [];
+        if (!cancelled) {
+          setStylePresets(styles.length ? styles : FALLBACK_STORYBOARD_STYLES);
+        }
+      } catch (error) {
+        console.warn("[VariationsStudio] failed to load storyboard styles", error);
+        if (!cancelled) {
+          setStyleError("스타일 정보를 불러오지 못했습니다. 기본 프리셋을 사용합니다.");
+          setStylePresets(FALLBACK_STORYBOARD_STYLES);
+        }
+      } finally {
+        if (!cancelled) {
+          setStyleLoading(false);
+        }
+      }
+    }
+
+    loadStyles();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load presets from Firestore
   const { cameraGroups, lightingGroups, poseGroups, externalGroups } = usePresetLibrary();
 
   // Flatten groups into arrays for backward compatibility
-  const CAMERA_PRESETS = cameraGroups.flatMap(group => group.options);
-  const LIGHTING_PRESETS = lightingGroups.flatMap(group =>
-    group.options.map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+  const CAMERA_PRESETS = useMemo(
+    () => cameraGroups.flatMap(group => group.options),
+    [cameraGroups]
   );
-  const POSE_PRESETS = poseGroups.flatMap(group =>
-    group.options.filter(opt => opt.value !== "default").map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+
+  const LIGHTING_PRESETS = useMemo(
+    () =>
+      lightingGroups.flatMap(group =>
+        group.options.map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+      ),
+    [lightingGroups]
   );
-  const EXTERNAL_PRESETS = externalGroups.flatMap(group => group.options);
+
+  const POSE_PRESETS = useMemo(
+    () =>
+      poseGroups.flatMap(group =>
+        group.options
+          .filter(opt => opt.value !== "default")
+          .map(opt => ({ id: opt.value, name: opt.label, instruction: opt.prompt }))
+      ),
+    [poseGroups]
+  );
+
+  const EXTERNAL_PRESETS = useMemo(
+    () => externalGroups.flatMap(group => group.options),
+    [externalGroups]
+  );
+
+  const STYLE_PRESETS = useMemo(() =>
+    stylePresets.map(style => ({
+      id: style.id,
+      name: style.label,
+      instruction: style.prompt?.trim() ?? "",
+      description: style.description,
+      label: style.label,
+      previewImage: style.referenceImageUrl,
+      previewGradient: style.previewGradient,
+      raw: style
+    })),
+  [stylePresets]);
+
+  useEffect(() => {
+    setSelectedStylePresets(prev => prev.filter(id => STYLE_PRESETS.some(p => p.id === id && !!p.instruction)));
+  }, [STYLE_PRESETS]);
 
   // Base image state
   const [baseImage, setBaseImage] = useState<string | null>(null);
@@ -82,75 +169,96 @@ export function VariationsStudioShell() {
     const variations: VariationItem[] = [];
     let index = 1;
 
-    // Camera presets
+    const appendVariation = (
+      type: VariationType,
+      preset: { id: string; name?: string; label?: string; instruction?: string; description?: string; [key: string]: unknown }
+    ) => {
+      if (index > MAX_VARIATIONS) {
+        return;
+      }
+      const variationId = `${type}-${preset.id}`;
+      variations.push({
+        id: variationId,
+        index,
+        type,
+        preset,
+        status: "pending"
+      });
+      index += 1;
+    };
+
     selectedCameraPresets.forEach(presetId => {
-      if (index > MAX_VARIATIONS) return;
       const preset = CAMERA_PRESETS.find(p => p.id === presetId);
       if (preset) {
-        variations.push({
-          id: `camera-${presetId}-${Date.now()}`,
-          index,
-          type: "camera",
-          preset,
-          status: "pending"
-        });
-        index++;
+        appendVariation("camera", preset);
       }
     });
 
-    // Lighting presets
     selectedLightingPresets.forEach(presetId => {
-      if (index > MAX_VARIATIONS) return;
       const preset = LIGHTING_PRESETS.find(p => p.id === presetId);
       if (preset) {
-        variations.push({
-          id: `lighting-${presetId}-${Date.now()}`,
-          index,
-          type: "lighting",
-          preset,
-          status: "pending"
-        });
-        index++;
+        appendVariation("lighting", preset);
       }
     });
 
-    // Pose presets
     selectedPosePresets.forEach(presetId => {
-      if (index > MAX_VARIATIONS) return;
       const preset = POSE_PRESETS.find(p => p.id === presetId);
       if (preset) {
-        variations.push({
-          id: `pose-${presetId}-${Date.now()}`,
-          index,
-          type: "pose",
-          preset,
-          status: "pending"
-        });
-        index++;
+        appendVariation("pose", preset);
       }
     });
 
-    // External presets
+    selectedStylePresets.forEach(presetId => {
+      const preset = STYLE_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        appendVariation("style", preset);
+      }
+    });
+
     selectedExternalPresets.forEach(presetId => {
-      if (index > MAX_VARIATIONS) return;
       const preset = EXTERNAL_PRESETS.find(p => p.id === presetId);
       if (preset) {
-        variations.push({
-          id: `external-${presetId}-${Date.now()}`,
-          index,
-          type: "external",
-          preset,
-          status: "pending"
-        });
-        index++;
+        appendVariation("external", preset);
       }
     });
 
     return variations;
-  }, [selectedCameraPresets, selectedLightingPresets, selectedPosePresets, selectedExternalPresets]);
+  }, [
+    selectedCameraPresets,
+    selectedLightingPresets,
+    selectedPosePresets,
+    selectedStylePresets,
+    selectedExternalPresets,
+    CAMERA_PRESETS,
+    LIGHTING_PRESETS,
+    POSE_PRESETS,
+    STYLE_PRESETS,
+    EXTERNAL_PRESETS
+  ]);
 
   useEffect(() => {
-    setVariationItems(calculatedVariations);
+    setVariationItems(prev => {
+      if (prev === calculatedVariations) {
+        return prev;
+      }
+      const previousMap = new Map(prev.map(item => [item.id, item]));
+      const merged = calculatedVariations.map(item => {
+        const existing = previousMap.get(item.id);
+        if (!existing) {
+          return item;
+        }
+        return {
+          ...item,
+          status: existing.status,
+          imageUrl: existing.imageUrl,
+          error: existing.error
+        };
+      });
+      if (merged.length === prev.length && merged.every((item, index) => item.id === prev[index].id && item.status === prev[index].status && item.imageUrl === prev[index].imageUrl && item.error === prev[index].error)) {
+        return prev;
+      }
+      return merged;
+    });
   }, [calculatedVariations]);
 
   useEffect(() => {
@@ -288,6 +396,23 @@ export function VariationsStudioShell() {
     event.target.value = ""; // Reset select
   }, [selectedExternalPresets]);
 
+  const toggleStylePreset = useCallback((styleId: string) => {
+    setSelectedStylePresets(prev => {
+      if (prev.includes(styleId)) {
+        return prev.filter(id => id !== styleId);
+      }
+      const target = STYLE_PRESETS.find(preset => preset.id === styleId);
+      if (!target) {
+        return prev;
+      }
+      if (!target.instruction) {
+        toast.error("프롬프트가 없는 스타일은 사용할 수 없습니다.");
+        return prev;
+      }
+      return [...prev, styleId];
+    });
+  }, [STYLE_PRESETS]);
+
   // Remove preset handlers
   const removeCameraPreset = useCallback((presetId: string) => {
     setSelectedCameraPresets(prev => prev.filter(id => id !== presetId));
@@ -303,6 +428,10 @@ export function VariationsStudioShell() {
 
   const removeExternalPreset = useCallback((presetId: string) => {
     setSelectedExternalPresets(prev => prev.filter(id => id !== presetId));
+  }, []);
+
+  const removeStylePreset = useCallback((presetId: string) => {
+    setSelectedStylePresets(prev => prev.filter(id => id !== presetId));
   }, []);
 
   // Base image handlers
@@ -375,6 +504,22 @@ export function VariationsStudioShell() {
           vi.id === item.id ? { ...vi, status: "generating" } : vi
         ));
 
+        const presetName = item.preset.name || item.preset.label || item.preset.id || "스타일";
+        const presetPrompt = item.preset.instruction || item.preset.description || item.preset.name;
+
+        if (!presetPrompt || typeof presetPrompt !== "string" || !presetPrompt.trim()) {
+          setVariationItems(prev => prev.map(vi =>
+            vi.id === item.id
+              ? {
+                  ...vi,
+                  status: "error",
+                  error: "선택한 프리셋에 사용할 수 있는 프롬프트가 없습니다."
+                }
+              : vi
+          ));
+          return;
+        }
+
         let retryCount = 0;
         const maxRetries = 2;
         let response: any = null;
@@ -383,7 +528,7 @@ export function VariationsStudioShell() {
           try {
             response = await callGenerateApi({
               mode: "remix" as GenerationMode,
-              prompt: item.preset.instruction || item.preset.description || item.preset.name,
+              prompt: presetPrompt,
               options: {
                 referenceImage: baseImage,
                 aspectRatio: DEFAULT_ASPECT_RATIO,
@@ -400,7 +545,7 @@ export function VariationsStudioShell() {
             if (retryCount > maxRetries) {
               throw error; // Final attempt failed
             }
-            console.log(`🔄 Retrying ${item.preset.name} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+            console.log(`🔄 Retrying ${presetName} (attempt ${retryCount + 1}/${maxRetries + 1})`);
             await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
           }
         }
@@ -422,13 +567,13 @@ export function VariationsStudioShell() {
             const historyRecord = {
               id: item.id,
               imageUrl: response.base64Image,
-              prompt: item.preset.instruction || item.preset.description || item.preset.name,
+              prompt: presetPrompt,
               createdAt: new Date().toISOString(),
               metadata: {
                 batchType: "variations",
                 variationType: item.type,
                 variationIndex: item.index,
-                variationLabel: item.preset.name || item.preset.label
+                variationLabel: presetName
               }
             };
 
@@ -663,6 +808,104 @@ export function VariationsStudioShell() {
               </CardContent>
             </Card>
 
+            {/* Style Presets */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">스타일 프리셋</CardTitle>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  영상 프리셋을 활용해 스타일 가이드를 변형으로 생성합니다. 카드를 클릭하여 선택/해제할 수 있습니다.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {styleLoading ? (
+                  <div className="rounded-md border border-dashed border-border/60 bg-muted/40 py-4 text-center text-xs text-muted-foreground">
+                    스타일 정보를 불러오는 중입니다...
+                  </div>
+                ) : null}
+                {styleError ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+                    {styleError}
+                  </div>
+                ) : null}
+                <div className="grid gap-2">
+                  {STYLE_PRESETS.map(style => {
+                    const isSelected = selectedStylePresets.includes(style.id);
+                    return (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => toggleStylePreset(style.id)}
+                        className={cn(
+                          "group flex items-center gap-3 rounded-lg border p-3 text-left transition",
+                          "hover:border-primary/60 hover:shadow-sm",
+                          isSelected ? "border-primary bg-primary/5" : "border-border/60 bg-background"
+                        )}
+                      >
+                        <div className="relative h-14 w-20 flex-shrink-0 overflow-hidden rounded-md">
+                          {style.previewImage ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={style.previewImage}
+                              alt={style.name}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <div
+                              className={cn(
+                                "h-full w-full transition-transform duration-300 group-hover:scale-105",
+                                style.previewGradient ?? "from-slate-700 via-slate-900 to-black",
+                                "bg-gradient-to-br"
+                              )}
+                            />
+                          )}
+                          {isSelected ? (
+                            <Badge className="absolute right-1 top-1 text-[10px]" variant="default">
+                              선택
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-foreground truncate">{style.name}</span>
+                          </div>
+                          {style.description ? (
+                            <p className="text-[11px] text-muted-foreground line-clamp-2">{style.description}</p>
+                          ) : null}
+                          {!style.instruction ? (
+                            <p className="text-[10px] text-muted-foreground/70">프롬프트 정보가 없어 적용할 수 없습니다.</p>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedStylePresets.length > 0 ? (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">선택된 스타일</Label>
+                    <div className="space-y-1">
+                      {selectedStylePresets.map(presetId => {
+                        const preset = STYLE_PRESETS.find(p => p.id === presetId);
+                        if (!preset) return null;
+                        return (
+                          <div key={presetId} className="flex items-center justify-between rounded bg-muted/50 px-3 py-2 text-xs">
+                            <span className="truncate">{preset.name}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeStylePreset(presetId)}
+                              className="h-auto p-1 text-xs"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
             {/* External Presets - Grouped Dropdowns */}
             <Card>
               <CardHeader className="pb-3">
@@ -799,8 +1042,10 @@ export function VariationsStudioShell() {
                           </div>
 
                           <div className="text-xs space-y-1">
-                            <div className="font-medium truncate">{item.preset.name || item.preset.label}</div>
-                            <div className="text-muted-foreground capitalize">{item.type} 프리셋</div>
+                            <div className="font-medium truncate">{item.preset.name || item.preset.label || item.preset.id}</div>
+                            <div className="text-muted-foreground">
+                              {VARIATION_TYPE_LABEL[item.type]} 프리셋
+                            </div>
                           </div>
 
                           {item.error && (

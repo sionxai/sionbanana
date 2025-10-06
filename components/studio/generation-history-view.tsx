@@ -1,15 +1,60 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
-import type { GeneratedImageDocument } from "@/lib/types";
+import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useAuth } from "@/components/providers/auth-provider";
+import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
+import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
+import { shouldUseFirestore } from "@/lib/env";
+import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
+import { deleteUserImage } from "@/lib/firebase/storage";
+import { toast } from "sonner";
 
 const HISTORY_LIMIT = 120;
+
+type ModeFilterValue = "all" | GenerationMode;
+type TimeframeValue = "all" | "1d" | "7d" | "30d" | "90d";
+
+const MODE_LABEL: Record<GenerationMode, string> = {
+  create: "이미지 생성",
+  remix: "이미지 리믹스",
+  camera: "카메라 앵글",
+  crop: "크롭",
+  "prompt-adapt": "프롬프트 변환",
+  lighting: "조명",
+  pose: "포즈",
+  style: "스타일 프리셋",
+  external: "외부 프리셋",
+  upscale: "업스케일",
+  sketch: "스케치 변환"
+};
+
+const MODE_FILTER_OPTIONS: { value: ModeFilterValue; label: string }[] = [
+  { value: "all", label: "전체" },
+  ...Object.entries(MODE_LABEL).map(([value, label]) => ({ value: value as GenerationMode, label }))
+];
+
+const TIMEFRAME_DURATIONS: Record<Exclude<TimeframeValue, "all">, number> = {
+  "1d": 1 * 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000
+};
+
+const TIMEFRAME_OPTIONS: { value: TimeframeValue; label: string }[] = [
+  { value: "all", label: "전체 기간" },
+  { value: "1d", label: "최근 1일" },
+  { value: "7d", label: "최근 7일" },
+  { value: "30d", label: "최근 30일" },
+  { value: "90d", label: "최근 90일" }
+];
 
 type FirestoreTimestampLike = {
   seconds: number;
@@ -155,14 +200,185 @@ function GalleryCard({ record, onSelect }: { record: GeneratedImageDocument; onS
 
 export function GenerationHistoryView() {
   const { records, loading } = useGeneratedImages({ limitResults: HISTORY_LIMIT });
+  const { user } = useAuth();
   const [selectedRecord, setSelectedRecord] = useState<GeneratedImageDocument | null>(null);
+  const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
+  const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
+  const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+
+  useEffect(() => {
+    setLocalRecords(records ?? []);
+  }, [records]);
 
   const historyItems = useMemo(() => {
-    if (!records?.length) {
+    if (!localRecords.length) {
       return [];
     }
-    return [...records].sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
-  }, [records]);
+    return [...localRecords].sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
+  }, [localRecords]);
+
+  const filteredItems = useMemo(() => {
+    let items = historyItems;
+
+    if (modeFilter !== "all") {
+      items = items.filter(record => record.mode === modeFilter);
+    }
+
+    if (timeframeFilter !== "all") {
+      const threshold = Date.now() - TIMEFRAME_DURATIONS[timeframeFilter];
+      items = items.filter(record => dateValueToEpoch(record.createdAt) >= threshold);
+    }
+
+    return items;
+  }, [historyItems, modeFilter, timeframeFilter]);
+
+  useEffect(() => {
+    if (!selectedRecord) {
+      return;
+    }
+    const stillVisible = filteredItems.some(record => record.id === selectedRecord.id);
+    if (!stillVisible) {
+      setSelectedRecord(null);
+    }
+  }, [filteredItems, selectedRecord]);
+
+  const handleDownloadRecord = (record: GeneratedImageDocument) => {
+    const url = record.imageUrl ?? record.originalImageUrl ?? record.thumbnailUrl;
+    if (!url) {
+      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (url.startsWith("data:")) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${record.id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes("?") ? "&" : "?"}alt=media`;
+    const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(`${record.id}.png`)}`;
+    window.location.assign(downloadUrl);
+  };
+
+  const updateRecordInState = (recordId: string, updater: (record: GeneratedImageDocument) => GeneratedImageDocument) => {
+    setLocalRecords(prev => prev.map(item => (item.id === recordId ? updater(item) : item)));
+    setSelectedRecord(prev => (prev && prev.id === recordId ? updater(prev) : prev));
+  };
+
+  const handleToggleFavorite = async (record: GeneratedImageDocument) => {
+    const nextFavorite = record.metadata?.favorite !== true;
+    const updatedRecord = {
+      ...record,
+      metadata: { ...(record.metadata ?? {}), favorite: nextFavorite }
+    } as GeneratedImageDocument;
+
+    updateRecordInState(record.id, () => updatedRecord);
+
+    if (user && shouldUseFirestore) {
+      try {
+        await updateGeneratedImageDoc(user.uid, record.id, {
+          metadata: { ...(record.metadata ?? {}), favorite: nextFavorite }
+        });
+      } catch (error) {
+        console.warn("[History] Failed to toggle favorite", error);
+        updateRecordInState(record.id, () => record);
+        toast.error("즐겨찾기 상태를 저장하지 못했습니다.");
+        return;
+      }
+    }
+
+    toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
+  };
+
+  const handleDeleteRecord = async (record: GeneratedImageDocument) => {
+    if (!user) {
+      toast.error("로그인이 필요합니다.");
+      return;
+    }
+
+    const confirmed = window.confirm("이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다.");
+    if (!confirmed) {
+      return;
+    }
+
+    setLocalRecords(prev => prev.filter(item => item.id !== record.id));
+    setSelectedRecord(prev => (prev && prev.id === record.id ? null : prev));
+
+    if (shouldUseFirestore) {
+      try {
+        await deleteGeneratedImageDoc(user.uid, record.id);
+      } catch (error) {
+        console.warn("[History] Failed to delete Firestore document", error);
+        toast.error("기록을 삭제하지 못했습니다.");
+        return;
+      }
+    }
+
+    try {
+      if (record.imageUrl && !record.imageUrl.startsWith("data:")) {
+        await deleteUserImage(user.uid, record.id);
+      }
+    } catch (error) {
+      console.warn("[History] Failed to delete storage image", error);
+    }
+
+    toast.success("이미지를 삭제했습니다.");
+  };
+
+  const handleSetReference = async (record: GeneratedImageDocument) => {
+    const imageUrl = record.imageUrl ?? record.originalImageUrl ?? null;
+    if (!imageUrl) {
+      toast.error("기준 이미지를 불러올 수 없습니다.");
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const createdAtIso = toDate(record.createdAt)?.toISOString() ?? nowIso;
+    const referenceRecord: GeneratedImageDocument = {
+      ...record,
+      id: REFERENCE_IMAGE_DOC_ID,
+      originalImageUrl: record.originalImageUrl ?? imageUrl,
+      thumbnailUrl: record.thumbnailUrl ?? imageUrl,
+      diff: undefined,
+      metadata: { ...(record.metadata ?? {}), isReference: true, referenceSourceId: record.id },
+      createdAt: createdAtIso,
+      updatedAt: nowIso
+    };
+
+    broadcastReferenceUpdate(referenceRecord, "history");
+
+    if (user && shouldUseFirestore) {
+      try {
+        await saveGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID, {
+          mode: record.mode,
+          status: record.status,
+          promptMeta: record.promptMeta,
+          imageUrl,
+          thumbnailUrl: record.thumbnailUrl ?? imageUrl,
+          originalImageUrl: record.originalImageUrl ?? imageUrl,
+          metadata: { ...(record.metadata ?? {}), isReference: true, referenceSourceId: record.id },
+          model: record.model,
+          costCredits: record.costCredits,
+          createdAtIso,
+          updatedAtIso: nowIso
+        });
+      } catch (error) {
+        console.error("[History] Failed to persist reference", error);
+        toast.error("기준 이미지를 저장하지 못했습니다.");
+        return;
+      }
+    }
+
+    toast.success("기준 이미지로 설정했습니다.");
+  };
 
   const primaryPrompt = selectedRecord?.promptMeta?.refinedPrompt || selectedRecord?.promptMeta?.rawPrompt;
   const rawPromptOnly =
@@ -180,6 +396,58 @@ export function GenerationHistoryView() {
           최근에 만든 이미지들을 한눈에 살펴보고, 사용한 프롬프트와 세부 정보를 확인하세요.
         </p>
       </header>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/60 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">필터</span>
+          <span className="text-xs text-muted-foreground">
+            총 {historyItems.length}개 중 {filteredItems.length}개 표시
+          </span>
+        </div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">생성 모드</span>
+            <ToggleGroup
+              type="single"
+              value={modeFilter}
+              onValueChange={value => setModeFilter((value as ModeFilterValue) || "all")}
+              className="flex flex-wrap gap-2"
+              aria-label="생성 모드 필터"
+            >
+              {MODE_FILTER_OPTIONS.map(option => {
+                const isDisabled = option.value !== "all" && !historyItems.some(record => record.mode === option.value);
+                return (
+                  <ToggleGroupItem
+                    key={option.value}
+                    value={option.value}
+                    disabled={isDisabled}
+                    className="disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {option.label}
+                  </ToggleGroupItem>
+                );
+              })}
+            </ToggleGroup>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">기간</span>
+            <ToggleGroup
+              type="single"
+              value={timeframeFilter}
+              onValueChange={value => setTimeframeFilter((value as TimeframeValue) || "all")}
+              className="flex flex-wrap gap-2"
+              aria-label="기간 필터"
+            >
+              {TIMEFRAME_OPTIONS.map(option => (
+                <ToggleGroupItem key={option.value} value={option.value}>
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        </div>
+      </div>
 
       {loading ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
@@ -199,9 +467,16 @@ export function GenerationHistoryView() {
         </div>
       ) : null}
 
-      {historyItems.length > 0 ? (
+      {!loading && historyItems.length > 0 && filteredItems.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/60 bg-muted/20 py-20 text-center">
+          <p className="text-base font-medium text-foreground">선택한 조건에 맞는 기록이 없습니다.</p>
+          <p className="text-sm text-muted-foreground">필터를 조정하거나 기간을 넓혀보세요.</p>
+        </div>
+      ) : null}
+
+      {filteredItems.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {historyItems.map(record => (
+          {filteredItems.map(record => (
             <GalleryCard key={record.id} record={record} onSelect={setSelectedRecord} />
           ))}
         </div>
@@ -301,6 +576,33 @@ export function GenerationHistoryView() {
                     </div>
                   </div>
                 ) : null}
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button size="sm" variant="outline" onClick={() => handleSetReference(selectedRecord)}>
+                    기준이미지
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDownloadRecord(selectedRecord)}
+                  >
+                    다운로드
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleDeleteRecord(selectedRecord)}
+                  >
+                    삭제
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={selectedRecord.metadata?.favorite ? "secondary" : "outline"}
+                    onClick={() => handleToggleFavorite(selectedRecord)}
+                  >
+                    {selectedRecord.metadata?.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

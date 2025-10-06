@@ -54,6 +54,7 @@ const modeLabelMap: Record<GenerationMode, string> = {
   "prompt-adapt": "프롬프트 변환",
   lighting: "조명",
   pose: "포즈",
+  style: "스타일 프리셋",
   upscale: "업스케일",
   sketch: "스케치 변환"
 };

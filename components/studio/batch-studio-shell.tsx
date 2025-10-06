@@ -54,6 +54,7 @@ const BATCH_MODES: Array<{
   { id: "camera", label: "카메라", description: "화각 및 렌즈 스타일 변경" },
   { id: "lighting", label: "조명 및 배색", description: "조명과 컬러그레이딩 프리셋 적용" },
   { id: "pose", label: "포즈", description: "표정과 자세 프리셋 적용" },
+  { id: "style", label: "스타일", description: "영상 프리셋 기반 스타일 가이드" },
   { id: "external", label: "외부 프리셋", description: "예시 기반 프롬프트 컬렉션" },
   { id: "sketch", label: "스케치", description: "스케치를 이미지로 변환" },
   {
