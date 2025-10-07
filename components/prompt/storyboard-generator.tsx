@@ -86,6 +86,81 @@ export function StoryboardGenerator() {
   const [language, setLanguage] = useState<"ko" | "en">("ko");
   const [charCount, setCharCount] = useState<number>(500);
   const [soraEnabled, setSoraEnabled] = useState(true);
+  const [soraTemplateMode, setSoraTemplateMode] = useState<"concise" | "detailed">("detailed");
+  const [animeHeader, setAnimeHeader] = useState(false);
+
+  // Sora detailed options: 'auto' | 'none' | samples
+  const FORMAT_LOOK_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "soft anamorphic bloom, subtle halation", label: "soft anamorphic bloom, subtle halation" },
+    { value: "high-contrast macro, fine grain", label: "high-contrast macro, fine grain" },
+    { value: "neutral film emulation, gentle contrast", label: "neutral film emulation, gentle contrast" },
+    { value: "handheld docu, high ISO texture", label: "handheld docu, high ISO texture" },
+    { value: "dreamy soft focus, mild glow", label: "dreamy soft focus, mild glow" }
+  ] as const;
+  const LENSES_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "32/50mm set, Pro-Mist 1/4", label: "32/50mm set, Pro-Mist 1/4" },
+    { value: "35/85mm, Hollywood Black Magic 1/8", label: "35/85mm, Hollywood Black Magic 1/8" },
+    { value: "50mm only, no filter", label: "50mm only, no filter" },
+    { value: "24/35mm wide + CPL", label: "24/35mm wide + CPL" },
+    { value: "70–200mm telephoto, no filter", label: "70–200mm telephoto, no filter" }
+  ] as const;
+  const GRADE_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "warm highs, cool mids, rich blacks", label: "warm highs, cool mids, rich blacks" },
+    { value: "cool mids, warm rim; clean whites", label: "cool mids, warm rim; clean whites" },
+    { value: "pastel palette, lifted blacks", label: "pastel palette, lifted blacks" },
+    { value: "deep teal–orange, cinematic contrast", label: "deep teal–orange, cinematic contrast" },
+    { value: "neutral, film-like roll-off", label: "neutral, film-like roll-off" }
+  ] as const;
+  const LIGHTING_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "single hard spotlight + soft fill", label: "single hard spotlight + soft fill" },
+    { value: "backlight + volumetric fog", label: "backlight + volumetric fog" },
+    { value: "soft key + practicals; low haze", label: "soft key + practicals; low haze" },
+    { value: "overcast softbox look", label: "overcast softbox look" },
+    { value: "hard noon sun; deep shadows", label: "hard noon sun; deep shadows" }
+  ] as const;
+  const LOCATION_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "charcoal slate tabletop; avoid logos/labels", label: "charcoal slate tabletop; avoid logos/labels" },
+    { value: "neon alley; mid-wide framing", label: "neon alley; mid-wide framing" },
+    { value: "office desk; inserts/close-ups", label: "office desk; inserts/close-ups" },
+    { value: "sunset beach; wide→medium", label: "sunset beach; wide→medium" },
+    { value: "kitchen counter; macro CUs", label: "kitchen counter; macro CUs" }
+  ] as const;
+  const WARDROBE_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "hero product only; clean surfaces", label: "hero product only; clean surfaces" },
+    { value: "brand-neutral props; no labels", label: "brand-neutral props; no labels" },
+    { value: "casual outfit; no logos", label: "casual outfit; no logos" },
+    { value: "period-accurate props only", label: "period-accurate props only" },
+    { value: "minimal props", label: "minimal props" }
+  ] as const;
+  const SOUND_OPTIONS = [
+    { value: "auto", label: "자동" },
+    { value: "none", label: "없음" },
+    { value: "diegetic sear crackle, knife whisper; no VO/music", label: "diegetic sear crackle, knife whisper; no VO/music" },
+    { value: "soft breeze, fabric rustle; low BGM", label: "soft breeze, fabric rustle; low BGM" },
+    { value: "city hum, distant traffic; no SFX", label: "city hum, distant traffic; no SFX" },
+    { value: "room tone + footsteps; subtle VO", label: "room tone + footsteps; subtle VO" },
+    { value: "rain patter, glass ping; ambient pad", label: "rain patter, glass ping; ambient pad" }
+  ] as const;
+
+  const [formatLook, setFormatLook] = useState<string>("auto");
+  const [lensesFiltration, setLensesFiltration] = useState<string>("auto");
+  const [gradePalette, setGradePalette] = useState<string>("auto");
+  const [lightingAtmosphere, setLightingAtmosphere] = useState<string>("auto");
+  const [locationFraming, setLocationFraming] = useState<string>("auto");
+  const [wardrobePropsExtras, setWardrobePropsExtras] = useState<string>("auto");
+  const [sound, setSound] = useState<string>("auto");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GeneratorResult | null>(null);
@@ -175,7 +250,18 @@ export function StoryboardGenerator() {
           outputMode: outputFormat,
           language,
           maxCharacters: charCount,
-          soraMode: soraEnabled
+          soraMode: soraEnabled,
+          soraTemplateMode,
+          animeHeader,
+          soraOptions: {
+            formatLook,
+            lensesFiltration,
+            gradePalette,
+            lightingAtmosphere,
+            locationFraming,
+            wardrobePropsExtras,
+            sound
+          }
         })
       });
 
@@ -476,6 +562,113 @@ export function StoryboardGenerator() {
                 <p className="text-xs text-muted-foreground">소라2 지향 출력 (기본 ON)</p>
               </div>
               <Switch checked={soraEnabled} onCheckedChange={setSoraEnabled} aria-label="소라2 모드" />
+            </div>
+
+            <div className="space-y-4">
+              <Label className="text-sm font-semibold">템플릿 모드</Label>
+              <ToggleGroup
+                type="single"
+                value={soraTemplateMode}
+                onValueChange={value => setSoraTemplateMode((value as typeof soraTemplateMode) || soraTemplateMode)}
+                className="flex gap-2"
+                aria-label="Sora 템플릿 모드"
+              >
+                <ToggleGroupItem value="concise" className="flex-1 font-medium">간결형</ToggleGroupItem>
+                <ToggleGroupItem value="detailed" className="flex-1 font-medium">디테일형</ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-card/50 px-5 py-4 shadow-sm">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-foreground">애니메이션 헤더 고정</p>
+                <p className="text-xs text-muted-foreground">anime cel-shade 고정 한 줄(기본 OFF)</p>
+              </div>
+              <Switch checked={animeHeader} onCheckedChange={setAnimeHeader} aria-label="애니메이션 헤더" />
+            </div>
+
+            {/* Sora 상세 옵션 */}
+            <div className="space-y-2 md:col-span-2">
+              <Label className="text-sm font-semibold">Sora 상세 옵션</Label>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-xs">Format & Look</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={formatLook}
+                    onChange={e => setFormatLook(e.target.value)}
+                  >
+                    {FORMAT_LOOK_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Lenses & Filtration</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={lensesFiltration}
+                    onChange={e => setLensesFiltration(e.target.value)}
+                  >
+                    {LENSES_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Grade/Palette</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={gradePalette}
+                    onChange={e => setGradePalette(e.target.value)}
+                  >
+                    {GRADE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Lighting & Atmosphere</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={lightingAtmosphere}
+                    onChange={e => setLightingAtmosphere(e.target.value)}
+                  >
+                    {LIGHTING_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Location & Framing</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={locationFraming}
+                    onChange={e => setLocationFraming(e.target.value)}
+                  >
+                    {LOCATION_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Wardrobe/Props/Extras</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={wardrobePropsExtras}
+                    onChange={e => setWardrobePropsExtras(e.target.value)}
+                  >
+                    {WARDROBE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Sound</Label>
+                  <select className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm"
+                    value={sound}
+                    onChange={e => setSound(e.target.value)}
+                  >
+                    {SOUND_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">각 항목은 '자동' 또는 '없음'을 선택할 수 있고, 제시된 예시를 사용할 수 있습니다.</p>
             </div>
 
             <div className="space-y-3">

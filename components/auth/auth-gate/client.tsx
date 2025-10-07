@@ -44,7 +44,7 @@ function AuthGateClient({ children }: { children: React.ReactNode }) {
             </Link>
             <Separator orientation="vertical" className="mx-2 hidden h-6 lg:block" />
             <Badge variant="secondary" className="hidden lg:inline-flex">
-              1.47v
+              1.53v
             </Badge>
             <Link href="/prompt" className="text-xs text-muted-foreground transition hover:text-foreground lg:hidden">
               프롬프트 생성

@@ -10,6 +10,7 @@
 - Firebase (Authentication, Firestore, Realtime Database, Storage)
 - React Query (서버 상태 관리), Zustand (클라이언트 상태 관리)
 - Google Gemini 2.0 Flash API (이미지 생성)
+- OpenAI Chat Completions (스토리보드 텍스트 생성, `gpt-4o-mini`)
 
 ## 시작하기
 
@@ -17,6 +18,7 @@
 > - Node.js 18 이상, npm 또는 pnpm 설치
 > - Firebase 프로젝트 (Authentication + Firestore + Storage 활성화)
 > - Google Gemini API 키 (이미지 생성 권한)
+> - OpenAI API 키 (스토리보드 텍스트 생성)
 
 ```bash
 npm install
@@ -39,10 +41,14 @@ NEXT_PUBLIC_FIREBASE_APP_ID=
 NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=
 FIREBASE_SERVICE_ACCOUNT_KEY={"project_id":"","client_email":"","private_key":""}
 GEMINI_API_KEY=
+OPENAI_API_KEY=
+FIRESTORE_DATABASE_ID=(default)
 ```
 
 - `FIREBASE_SERVICE_ACCOUNT_KEY` 는 서버 액션/Route Handler 에서 관리자 권한이 필요할 때 사용합니다. JSON 전체를 문자열로 넣고 `\n` 을 실제 줄바꿈으로 자동 변환합니다.
 - `GEMINI_API_KEY` 가 비어 있으면 `/api/generate` 가 샘플 이미지를 반환합니다.
+- `OPENAI_API_KEY` 가 설정되어 있어야 `/api/storyboard` 에서 스토리보드를 생성할 수 있습니다.
+- `FIRESTORE_DATABASE_ID` 를 커스텀 인스턴스로 쓰는 경우에만 변경하세요. 기본값은 `(default)` 입니다.
 
 ## 현재 구현 된 기능
 
@@ -58,6 +64,52 @@ GEMINI_API_KEY=
 - [x] **반응형 디자인**: 모바일과 데스크톱 환경에서 모두 최적화된 UI/UX
 - [x] **사용자 플랜/크레딧 시스템**: Guest/Basic/Pro 플랜별 월간 이미지 생성 할당량 관리
 - [x] **관리자 대시보드**: 사용자 검색, 플랜 변경, 임시 패스 발급, 채팅 관리
+- [x] **스토리보드 생성**: OpenAI API를 통한 자연어/JSON 스토리보드 생성 (`/prompt`, `/api/storyboard`)
+- [x] **영상 스타일 프리셋 관리(관리자)**: Firestore 기반 스토리보드 스타일 CRUD (`/admin`, `/api/admin/storyboard-styles`)
+
+## 스토리보드 생성
+
+### 사용 경로
+
+- 페이지: `/prompt` — StoryboardGenerator UI
+- API: `/api/storyboard` — OpenAI Chat Completions를 호출하여 자연어(`natural`) 또는 JSON(`json`) 형식 스토리보드를 생성합니다
+- 스타일 목록 API: `/api/storyboard/styles` — Firestore의 활성 스타일 조회, 실패 시 내부 기본값(fallback) 사용
+
+### 요청 페이로드 (요약)
+
+```json
+{
+  "idea": "카페에서 벌어지는 짧은 감정극",
+  "durationSec": 15,
+  "sceneCount": 4,
+  "style": "default",
+  "dialogueMode": "none",
+  "audioPreferences": { "bgm": "auto", "sfx": "auto", "voice": "auto" },
+  "outputMode": "json", // 또는 "natural"
+  "language": "ko",
+  "maxCharacters": 500,
+  "soraMode": true
+}
+```
+
+응답은 `format`이 `json` 인 경우 구조화된 스토리보드(JSON)와 오디오 정보, `natural` 인 경우 자연어 스토리보드 텍스트와 오디오 정보를 포함합니다. 오류 시 `{ ok: false, reason }` 형태입니다.
+
+### 스타일 프리셋
+
+- 기본값은 `data/storyboard-styles.ts` 내 `FALLBACK_STORYBOARD_STYLES` 를 사용합니다.
+- 운영 환경에서는 Firestore 컬렉션 `storyboardStyles` 를 사용합니다. Admin SDK 초기화 및 권한이 필요합니다.
+- 타입은 `lib/storyboard/types.ts` 를 참고하세요.
+
+### 관리자 스타일 관리
+
+- UI: 관리자 대시보드 내 “영상 스타일 관리”
+- API: `/api/admin/storyboard-styles`(+ `/:styleId`) — 인증된 관리자 요청만 허용
+- 구현: `lib/storyboard/firestore-admin.ts` — 정렬/타임스탬프 처리 포함
+
+### 주의사항
+
+- `OPENAI_API_KEY` 가 없으면 `/api/storyboard` 는 500/502 오류를 반환합니다.
+- 스타일 조회 실패 시 Fallback 스타일로 자동 대체되며, 비어 있으면 오류를 발생시킵니다.
 
 ## 외부 프리셋 컬렉션
 
@@ -106,10 +158,14 @@ sion-banana/
   app/
     api/
       generate/route.ts     # Gemini 이미지 생성 API + Storage 업로드
+      storyboard/route.ts   # OpenAI 기반 스토리보드 생성 API
+      storyboard/styles/    # 스토리보드 스타일 목록 API
       chat/send/route.ts    # 관리자 채팅 전송 API
       admin/                # 관리자 전용 API (플랜 변경, 사용자 조회 등)
+        storyboard-styles/  # 스토리보드 스타일 CRUD API
       user/                 # 사용자 API (상태 조회, 플랜 전환 등)
     studio/                 # 스튜디오 페이지 (단일/다수/변형/프리셋)
+    prompt/                 # 스토리보드 생성 페이지
     chat/                   # 사용자 채팅 페이지
     admin/                  # 관리자 대시보드
     billing/                # 플랜 요청 페이지
@@ -127,6 +183,7 @@ sion-banana/
     use-chat.ts             # 채팅 실시간 구독 (RTDB)
   lib/
     env.ts                  # 환경 변수 파싱
+    storyboard/             # 스토리보드 타입/Firestore Admin 유틸
     firebase/
       client.ts             # Firebase 클라이언트 초기화
       admin.ts              # Firebase Admin SDK
@@ -135,7 +192,14 @@ sion-banana/
     types.ts                # TypeScript 타입 정의
     constants.ts            # 플랜, 관리자 UID 등 상수
   public/samples/           # UI용 샘플 이미지
+  data/storyboard-styles.ts # 기본(내장) 스타일 프리셋
 ```
+
+## 배포/운영 노트
+
+- Vercel 배포 시 Admin API 일부는 헤더 접근으로 인해 Next.js가 “Dynamic server usage” 메시지를 출력할 수 있습니다. 이는 의도된 동작이며 정적 프리렌더 대상이 아닙니다.
+- 클라이언트 환경 변수는 빌드 시 로그로 일부 키 정보(마스킹)와 함께 디버깅 용도로 출력됩니다. 민감정보는 노출되지 않도록 `.env` 관리에 유의하세요.
+- 리포 루트의 `AGENTS.md`를 항상 준수하세요. 특히 코드 수정 전에는 반드시 “3줄 요약 + 구체 계획(체크리스트) + 사용자 확인” 절차를 거친 뒤 변경합니다.
 
 ## Firebase Storage CORS 설정
 
