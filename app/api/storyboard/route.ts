@@ -1039,10 +1039,11 @@ export async function POST(request: NextRequest) {
       }
 
       const data = await response.json();
-      let text: string | undefined = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) {
+      const initialText = data?.choices?.[0]?.message?.content?.trim();
+      if (!initialText) {
         return NextResponse.json({ ok: false, reason: "OpenAI 응답이 비어 있습니다." }, { status: 502 });
       }
+      let text = initialText;
 
       // Post-validate and clean for Sora detailed/concise templates
       if (soraMode) {
