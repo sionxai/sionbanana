@@ -668,7 +668,7 @@ export function StoryboardGenerator() {
                   </select>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">각 항목은 '자동' 또는 '없음'을 선택할 수 있고, 제시된 예시를 사용할 수 있습니다.</p>
+              <p className="text-xs text-muted-foreground">각 항목은 &#39;자동&#39; 또는 &#39;없음&#39;을 선택할 수 있고, 제시된 예시를 사용할 수 있습니다.</p>
             </div>
 
             <div className="space-y-3">

@@ -18,6 +18,7 @@ const generationModes = [
   "prompt-adapt",
   "lighting",
   "pose",
+  "style",
   "upscale",
   "sketch",
   "external"
