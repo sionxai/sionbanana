@@ -603,7 +603,8 @@ function buildSoraPrompt({
   dialogueMode,
   audioPrefs,
   language,
-  maxCharacters
+  maxCharacters,
+  characterNotes
 }: {
   durationSec: number;
   style: StoryboardStyle;
@@ -612,6 +613,7 @@ function buildSoraPrompt({
   audioPrefs: AudioPreferenceSelection;
   language: "ko" | "en";
   maxCharacters: number;
+  characterNotes?: string;
 }) {
   const isEnglish = language === "en";
   const segment = durationSec / 3;
@@ -619,6 +621,7 @@ function buildSoraPrompt({
   const secondEnd = formatNumber(segment * 2);
   const finalEnd = formatNumber(durationSec);
   const stylePrompt = style.prompt?.trim();
+  const trimmedCharacters = characterNotes?.trim();
   const projectInfo = [
     isEnglish ? `- Theme: ${idea.trim()}` : `- 테마: ${idea.trim()}`,
     isEnglish ? `- Visual style: ${style.label}` : `- 영상 스타일: ${style.label}`,
