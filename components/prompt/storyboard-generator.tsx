@@ -29,12 +29,14 @@ type StoryboardResponse =
       format: "json";
       storyboard: Record<string, unknown>;
       audio?: StoryboardAudioInfo;
+      characters?: string | null;
     }
   | {
       ok: true;
       format: "natural";
       storyboardText: string;
       audio?: StoryboardAudioInfo;
+      characters?: string | null;
     }
   | {
       ok: false;
@@ -43,8 +45,8 @@ type StoryboardResponse =
     };
 
 type GeneratorResult =
-  | { format: "json"; storyboard: Record<string, unknown>; audio: StoryboardAudioInfo }
-  | { format: "natural"; text: string; audio: StoryboardAudioInfo };
+  | { format: "json"; storyboard: Record<string, unknown>; audio: StoryboardAudioInfo; characters: string | null }
+  | { format: "natural"; text: string; audio: StoryboardAudioInfo; characters: string | null };
 
 const DURATION_OPTIONS = [5, 10, 15];
 const MIN_SCENES = 1;
@@ -78,6 +80,7 @@ export function StoryboardGenerator() {
   const [stylesLoading, setStylesLoading] = useState(true);
   const [styleKey, setStyleKey] = useState<string>(DEFAULT_STORYBOARD_STYLE_ID);
   const [idea, setIdea] = useState<string>("");
+  const [characterNotes, setCharacterNotes] = useState<string>("");
   const [dialogueMode, setDialogueMode] = useState<"auto" | "none">("none");
   const [bgmMode, setBgmMode] = useState<"auto" | "none">("auto");
   const [sfxMode, setSfxMode] = useState<"auto" | "none">("auto");
@@ -223,8 +226,23 @@ export function StoryboardGenerator() {
   };
 
   const handleGenerate = async () => {
-    if (!idea.trim()) {
-      setError("아이디어를 입력해주세요.");
+    const trimmedIdea = idea.trim();
+    const trimmedCharacters = characterNotes.trim();
+
+    if (trimmedIdea.length < 5) {
+      setError("아이디어를 5자 이상 입력해주세요.");
+      return;
+    }
+    if (trimmedIdea.length > 1000) {
+      setError("아이디어는 최대 1000자까지 입력할 수 있습니다.");
+      return;
+    }
+    if (trimmedCharacters.length > 0 && trimmedCharacters.length < 5) {
+      setError("등장인물 묘사는 최소 5자 이상 입력해주세요.");
+      return;
+    }
+    if (trimmedCharacters.length > 600) {
+      setError("등장인물 묘사는 최대 600자까지 입력할 수 있습니다.");
       return;
     }
 
@@ -233,36 +251,42 @@ export function StoryboardGenerator() {
     setResult(null);
 
     try {
+      const payload: Record<string, unknown> = {
+        durationSec: duration,
+        sceneCount,
+        style: styleKey,
+        idea: trimmedIdea,
+        dialogueMode,
+        audioPreferences: {
+          bgm: bgmMode,
+          sfx: sfxMode,
+          voice: voiceMode
+        },
+        outputMode: outputFormat,
+        language,
+        maxCharacters: charCount,
+        soraMode: soraEnabled,
+        soraTemplateMode,
+        animeHeader,
+        soraOptions: {
+          formatLook,
+          lensesFiltration,
+          gradePalette,
+          lightingAtmosphere,
+          locationFraming,
+          wardrobePropsExtras,
+          sound
+        }
+      };
+
+      if (trimmedCharacters.length >= 5) {
+        payload.characterNotes = trimmedCharacters;
+      }
+
       const response = await fetch("/api/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          durationSec: duration,
-          sceneCount,
-          style: styleKey,
-          idea: idea.trim(),
-          dialogueMode,
-          audioPreferences: {
-            bgm: bgmMode,
-            sfx: sfxMode,
-            voice: voiceMode
-          },
-          outputMode: outputFormat,
-          language,
-          maxCharacters: charCount,
-          soraMode: soraEnabled,
-          soraTemplateMode,
-          animeHeader,
-          soraOptions: {
-            formatLook,
-            lensesFiltration,
-            gradePalette,
-            lightingAtmosphere,
-            locationFraming,
-            wardrobePropsExtras,
-            sound
-          }
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = (await response.json()) as StoryboardResponse;
@@ -280,10 +304,30 @@ export function StoryboardGenerator() {
 
       if (data.format === "json" && "storyboard" in data) {
         const audio = normalizeAudio(data.audio ?? (data.storyboard as Record<string, unknown>)?.audio);
-        setResult({ format: "json", storyboard: data.storyboard, audio });
+        const storyboardRecord = data.storyboard as Record<string, unknown>;
+        const rawCharacters =
+          typeof data.characters === "string"
+            ? data.characters
+            : typeof storyboardRecord["characters"] === "string"
+              ? (storyboardRecord["characters"] as string)
+              : undefined;
+        const characters =
+          rawCharacters && rawCharacters.trim().length
+            ? rawCharacters.trim()
+            : trimmedCharacters.length >= 5
+              ? trimmedCharacters
+              : null;
+        setResult({ format: "json", storyboard: data.storyboard, audio, characters });
       } else if (data.format === "natural" && "storyboardText" in data) {
         const audio = normalizeAudio(data.audio);
-        setResult({ format: "natural", text: data.storyboardText, audio });
+        const rawCharacters = typeof data.characters === "string" ? data.characters : undefined;
+        const characters =
+          rawCharacters && rawCharacters.trim().length
+            ? rawCharacters.trim()
+            : trimmedCharacters.length >= 5
+              ? trimmedCharacters
+              : null;
+        setResult({ format: "natural", text: data.storyboardText, audio, characters });
       } else {
         setError("응답 형식을 해석하지 못했습니다.");
       }
@@ -303,7 +347,10 @@ export function StoryboardGenerator() {
       if (result.format === "json") {
         await navigator.clipboard.writeText(JSON.stringify(result.storyboard, null, 2));
       } else {
-        await navigator.clipboard.writeText(result.text);
+        const textToCopy = result.characters
+          ? `등장인물 특징\n${result.characters}\n\n${result.text}`
+          : result.text;
+        await navigator.clipboard.writeText(textToCopy);
       }
     } catch (err) {
       console.warn("Failed to copy storyboard", err);
@@ -314,9 +361,10 @@ export function StoryboardGenerator() {
     if (!result) {
       return "";
     }
-    return result.format === "json"
-      ? JSON.stringify(result.storyboard, null, 2)
-      : result.text;
+    if (result.format === "json") {
+      return JSON.stringify(result.storyboard, null, 2);
+    }
+    return result.characters ? `${result.characters}\n\n${result.text}` : result.text;
   }, [result]);
 
   return (
@@ -469,8 +517,32 @@ export function StoryboardGenerator() {
                 onChange={event => setIdea(event.target.value)}
                 placeholder="예: 미래 도시에서 형사가 비를 맞으며 범인을 추격한다."
                 rows={5}
+                maxLength={1000}
                 className="resize-none text-base"
               />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>5~1000자 이내로 핵심 상황과 목표를 요약해주세요.</span>
+                <span>{idea.trim().length}/1000자</span>
+              </div>
+            </div>
+
+            <div className="space-y-4 md:col-span-2">
+              <Label className="text-sm font-semibold" htmlFor="character-notes">
+                등장인물 묘사 (선택)
+              </Label>
+              <Textarea
+                id="character-notes"
+                value={characterNotes}
+                onChange={event => setCharacterNotes(event.target.value)}
+                placeholder="예: 비밀을 간직한 소녀 '하나' (은발, 은색 눈, 데이터 해커), 그녀를 지키는 경호원 '라온' (사이버netic 팔, 과묵한 말투)."
+                rows={4}
+                maxLength={600}
+                className="resize-none text-base"
+              />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>주요 인물과 외형·성격 특징을 5~600자 안에서 정리해주세요.</span>
+                <span>{characterNotes.trim().length}/600자</span>
+              </div>
             </div>
           </section>
 
@@ -759,6 +831,15 @@ export function StoryboardGenerator() {
                   </div>
                 </ScrollArea>
               )}
+
+              {result.characters ? (
+                <div className="rounded-xl border border-border/50 bg-gradient-to-br from-primary/5 to-primary/10 p-5 shadow-sm">
+                  <p className="mb-2 text-sm font-semibold text-foreground">등장인물 특징</p>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                    {result.characters}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="rounded-xl border border-border/50 bg-gradient-to-br from-muted/30 to-muted/10 p-5 shadow-sm">
                 <p className="text-sm font-semibold text-foreground mb-3">오디오 설정</p>

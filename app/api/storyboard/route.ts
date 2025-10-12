@@ -28,7 +28,8 @@ const requestSchema = z.object({
   durationSec: z.number().int().min(5).max(120),
   sceneCount: z.number().int().min(1).max(12),
   style: z.string().optional(),
-  idea: z.string().min(5).max(500),
+  idea: z.string().min(5).max(1000),
+  characterNotes: z.string().min(5).max(600).optional(),
   dialogueMode: generationModeSchema.optional(),
   audioPreferences: z
     .object({
@@ -266,6 +267,7 @@ function buildJsonPrompt({
   sceneCount,
   style,
   idea,
+  characterNotes,
   dialogueMode,
   sfxMode,
   language,
@@ -275,6 +277,7 @@ function buildJsonPrompt({
   sceneCount: number;
   style: StoryboardStyle;
   idea: string;
+  characterNotes?: string;
   dialogueMode: "auto" | "none";
   sfxMode: "auto" | "none";
   language: "ko" | "en";
@@ -285,12 +288,52 @@ function buildJsonPrompt({
   const baseDescription = stylePrompt || style.description || style.grading || style.label;
   const englishGuidance = `${baseDescription}. Use cinematic language.`;
   const koreanGuidance = `${baseDescription} 분위기를 유지하고 영화적인 묘사로 작성해.`;
+  const trimmedCharacters = characterNotes?.trim();
+  const characterLine = trimmedCharacters
+    ? isEnglish
+      ? `- Key characters & traits: ${trimmedCharacters}`
+      : `- 주요 등장인물과 특징: ${trimmedCharacters}`
+    : null;
 
   if (isEnglish) {
-    return `You are a professional storyboard writer. Produce structured JSON for AI video generation.\n\nInput details:\n- Theme: ${idea.trim()}\n- Visual style: ${style.label}\n- Scene count: ${sceneCount}\n- Total duration: ${durationSec} seconds\n- Style guidance: ${englishGuidance}\n\nRequirements:\n- Return exactly ${sceneCount} scenes.\n- Each scene must include the fields visual, dialogue, sfx, and transition.\n- Dialogue field must ${dialogueMode === "auto" ? "contain a short in-character sentence." : "always be an empty string (\"\")."}\n- SFX field must ${sfxMode === "auto" ? "contain an array of specific English sound effect phrases (at least one)." : "be an empty array []."}\n- Transition should clearly describe how the story moves to the next scene.\n- Keep the wording concise so the entire JSON stays within roughly ${maxCharacters} characters.\n\nOutput format (strictly follow this structure):\n{\n  "scenes": [\n    { "visual": "...", "dialogue": "...", "sfx": ["..."], "transition": "..." }\n  ]\n}\n\nRespond in English only.`;
+    const inputDetails = [
+      `- Theme: ${idea.trim()}`,
+      `- Visual style: ${style.label}`,
+      `- Scene count: ${sceneCount}`,
+      `- Total duration: ${durationSec} seconds`,
+      `- Style guidance: ${englishGuidance}`,
+      characterLine
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return `You are a professional storyboard writer. Produce structured JSON for AI video generation.\n\nInput details:\n${inputDetails}\n\nRequirements:\n- Return exactly ${sceneCount} scenes.\n- Each scene must include the fields visual, dialogue, sfx, and transition.\n- Dialogue field must ${
+      dialogueMode === "auto"
+        ? "contain a short in-character sentence that reflects the listed character traits."
+        : "always be an empty string (\"\") even when describing the characters."
+    }\n- SFX field must ${
+      sfxMode === "auto" ? "contain an array of specific English sound effect phrases (at least one)." : "be an empty array []."
+    }\n- Visual descriptions must clearly reference the key character traits so the audience can recognize them instantly.\n- Transition should clearly describe how the story moves to the next scene.\n- Keep the wording concise so the entire JSON stays within roughly ${maxCharacters} characters.\n\nOutput format (strictly follow this structure):\n{\n  "scenes": [\n    { "visual": \"...\", \"dialogue\": \"...\", \"sfx\": [\"...\"], \"transition\": \"...\" }\n  ]\n}\n\nRespond in English only.`;
   }
 
-  return `너는 전문 스토리보드 작가야. 다음 조건에 맞춰 AI 영상 생성을 위한 상세한 씬(Scene)별 스크립트를 JSON으로 작성해줘.\n\n- 전체 테마: ${idea.trim()}\n- 영상 스타일: ${style.label}\n- 총 씬 개수: ${sceneCount}\n- 총 길이: ${durationSec}초\n- 스타일 지침: ${koreanGuidance}\n\n출력 조건:\n- 응답은 반드시 ${sceneCount}개의 씬만 포함해야 해.\n- 각 씬은 visual, dialogue, sfx, transition 4가지 항목을 포함해야 해.\n- dialogue ${dialogueMode === "auto" ? "항목에는 장면에 어울리는 짧은 대사를 1문장 내외로 작성해." : "항목은 모두 빈 문자열(\"\")로 두고 어떠한 대사도 작성하지 마."}\n- sfx ${sfxMode === "auto" ? "항목은 구체적인 효과음을 1개 이상 포함하도록 해." : "항목은 빈 배열([])로 두고 어떤 효과음도 포함하지 마."}\n- transition에는 다음 장면으로 넘어가는 구체적인 연출을 적어.\n- 전체 JSON 분량이 약 ${maxCharacters}자를 넘지 않도록 간결하게 작성해.\n\n출력 형식(꼭 지켜줘):\n{\n  "scenes": [\n    { "visual": "...", "dialogue": "...", "sfx": ["..."], "transition": "..." }\n  ]\n}\n\n한국어로 작성해.`;
+  const inputDetails = [
+    `- 전체 테마: ${idea.trim()}`,
+    `- 영상 스타일: ${style.label}`,
+    `- 총 씬 개수: ${sceneCount}`,
+    `- 총 길이: ${durationSec}초`,
+    `- 스타일 지침: ${koreanGuidance}`,
+    characterLine
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `너는 전문 스토리보드 작가야. 다음 조건에 맞춰 AI 영상 생성을 위한 상세한 씬(Scene)별 스크립트를 JSON으로 작성해줘.\n\n${inputDetails}\n\n출력 조건:\n- 응답은 반드시 ${sceneCount}개의 씬만 포함해야 해.\n- 각 씬은 visual, dialogue, sfx, transition 4가지 항목을 포함해야 해.\n- visual 항목에는 등장인물의 특징이 명확히 드러나도록 묘사를 포함해.\n- dialogue ${
+      dialogueMode === "auto"
+        ? "항목에는 장면에 어울리는 짧은 대사를 1문장 내외로 작성하되 등장인물 특징을 반영해."
+        : "항목은 모두 빈 문자열(\"\")로 두고 어떠한 대사도 작성하지 마."
+    }\n- sfx ${
+      sfxMode === "auto" ? "항목은 구체적인 효과음을 1개 이상 포함하도록 해." : "항목은 빈 배열([])로 두고 어떤 효과음도 포함하지 마."
+    }\n- transition에는 다음 장면으로 넘어가는 구체적인 연출을 적어.\n- 전체 JSON 분량이 약 ${maxCharacters}자를 넘지 않도록 간결하게 작성해.\n\n출력 형식(꼭 지켜줘):\n{\n  "scenes": [\n    { "visual": \"...\", \"dialogue\": \"...\", \"sfx\": [\"...\"], \"transition\": \"...\" }\n  ]\n}\n\n한국어로 작성해.`;
 }
 
 type SoraOptions = {
@@ -308,6 +351,7 @@ function buildSoraPromptV2({
   sceneCount,
   style,
   idea,
+  characterNotes,
   dialogueMode,
   audioPrefs,
   language,
@@ -320,6 +364,7 @@ function buildSoraPromptV2({
   sceneCount: number;
   style: StoryboardStyle;
   idea: string;
+  characterNotes?: string;
   dialogueMode: "auto" | "none";
   audioPrefs: AudioPreferenceSelection;
   language: "ko" | "en";
@@ -332,6 +377,7 @@ function buildSoraPromptV2({
   const stylePrompt = style.prompt?.trim();
   const finalDuration = durationSec;
   const formatSec = (v: number) => v.toFixed(2);
+  const trimmedCharacters = characterNotes?.trim();
 
   const projectInfo = [
     isEnglish ? `- Theme: ${idea.trim()}` : `- 테마: ${idea.trim()}`,
@@ -342,6 +388,9 @@ function buildSoraPromptV2({
   ];
   if (stylePrompt) {
     projectInfo.push(isEnglish ? `- Style prompt reference: ${stylePrompt}` : `- 스타일 프롬프트 참고: ${stylePrompt}`);
+  }
+  if (trimmedCharacters) {
+    projectInfo.push(isEnglish ? `- Key characters & traits: ${trimmedCharacters}` : `- 주요 등장인물/특징: ${trimmedCharacters}`);
   }
 
   const opt = soraOptions || {};
@@ -656,13 +705,19 @@ function buildSoraPrompt({
     ? "- Physics & Continuity should describe motion timing (e.g., wind → fabric delay) and consistency notes."
     : "- Physics & Continuity에는 움직임 간 시간차와 일관성 유지 팁을 적어.";
 
-  const guidelines = [replaceGuideline, dialogueGuideline, voiceGuideline, bgmGuideline, sfxGuideline, physicsGuideline, charLimitGuideline, languageGuideline]
+  const characterGuideline = trimmedCharacters
+    ? isEnglish
+      ? `- Every section should reinforce the listed character traits so the viewer can instantly recognize them.`
+      : `- 모든 섹션에서 등장인물 특징이 분명 드러나도록 묘사해.`
+    : null;
+
+  const guidelines = [replaceGuideline, dialogueGuideline, voiceGuideline, bgmGuideline, sfxGuideline, physicsGuideline, characterGuideline, charLimitGuideline, languageGuideline]
     .filter(Boolean)
     .join("\n");
 
   const intro = isEnglish
-    ? "You are a cinematic prompt writer preparing material for Sora 2. Fill the following template with vivid, precise language."
-    : "너는 Sora 2용 시네마틱 프롬프트를 작성하는 전문가야. 아래 템플릿을 생생한 묘사로 채워줘.";
+    ? "You are a cinematic prompt writer preparing material for Sora 2. Fill the following template with vivid, precise language that keeps the described characters front-and-center."
+    : "너는 Sora 2용 시네마틱 프롬프트를 작성하는 전문가야. 등장인물의 특징이 선명하게 드러나도록 아래 템플릿을 생생하게 채워줘.";
 
   const infoHeading = isEnglish ? "Project brief:" : "프로젝트 개요:";
   const guidelineHeading = isEnglish ? "Guidelines:" : "작성 지침:";
@@ -675,6 +730,7 @@ function buildNaturalPrompt({
   sceneCount,
   style,
   idea,
+  characterNotes,
   dialogueMode,
   audioPrefs,
   language,
@@ -688,6 +744,7 @@ function buildNaturalPrompt({
   sceneCount: number;
   style: StoryboardStyle;
   idea: string;
+  characterNotes?: string;
   dialogueMode: "auto" | "none";
   audioPrefs: AudioPreferenceSelection;
   language: "ko" | "en";
@@ -703,6 +760,7 @@ function buildNaturalPrompt({
       sceneCount,
       style,
       idea,
+      characterNotes,
       dialogueMode,
       audioPrefs,
       language,
@@ -727,6 +785,12 @@ function buildNaturalPrompt({
   const languagePrompt = isEnglish
     ? "You are an expert storyboard writer who writes in fluent English."
     : "너는 한국어로 작문하는 전문 스토리보드 작가야.";
+  const trimmedCharacters = characterNotes?.trim();
+  const characterLine = trimmedCharacters
+    ? isEnglish
+      ? `- Characters: ${trimmedCharacters}`
+      : `- 주요 등장인물: ${trimmedCharacters}`
+    : "";
   const dialogueInstruction = dialogueMode === "auto"
     ? (isEnglish
         ? "- For the Dialogue line, include a concise in-character sentence when appropriate."
@@ -785,6 +849,11 @@ function buildNaturalPrompt({
       ? `- Incorporate this style guidance: ${style.prompt}`
       : `- 다음 스타일 프롬프트를 참고해 묘사해: ${style.prompt}`
     : "";
+  const characterGuideline = trimmedCharacters
+    ? isEnglish
+      ? `- Highlight the listed character traits in every Visual and Dialogue line.`
+      : `- Visual과 Dialogue마다 위 등장인물 특징이 드러나도록 강조해.`
+    : "";
 
   const inputHeading = isEnglish ? "Input details:" : "입력 정보:";
   const outputHeading = isEnglish ? "Output format:" : "출력 형식:";
@@ -798,7 +867,7 @@ function buildNaturalPrompt({
 ${inputHeading}
 - ${isEnglish ? "Theme" : "전체 테마"}: ${idea.trim()}
 - ${isEnglish ? "Visual style" : "영상 스타일"}: ${style.label}
-- ${isEnglish ? "Scene count" : "총 씬 개수"}: ${sceneCount}
+${characterLine ? `${characterLine}\n` : ""}- ${isEnglish ? "Scene count" : "총 씬 개수"}: ${sceneCount}
 - ${isEnglish ? "Total duration" : "총 길이"}: ${isEnglish ? `${durationSec} seconds` : `${durationSec}초`}
 - ${isEnglish ? "Mood & grading" : "스타일 색감과 분위기"}: ${style.grading}
 - ${isEnglish ? "Timeline per scene" : "씬별 시간 범위"}:
@@ -823,6 +892,7 @@ ${voiceInstruction}
 ${dialogueInstruction}
 ${sfxInstruction}
 ${visualInstruction}
+${characterGuideline}
 ${transitionInstruction}
 ${sfxExamples}
 ${sceneLabelInstruction}
@@ -980,6 +1050,7 @@ export async function POST(request: NextRequest) {
       sfx: body.audioPreferences?.sfx ?? "auto",
       voice: body.audioPreferences?.voice ?? "auto"
     };
+    const characterSummary = body.characterNotes?.trim();
 
     const baseBgm = style.bgm?.trim() || null;
     const baseVo = style.voTone?.trim() || null;
@@ -1007,6 +1078,7 @@ export async function POST(request: NextRequest) {
             sceneCount: body.sceneCount,
             style,
             idea: body.idea,
+            characterNotes: body.characterNotes,
             dialogueMode,
             audioPrefs,
             language,
@@ -1134,7 +1206,7 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json(
-        { ok: true, format: "natural", storyboardText: text, audio: storyboardAudio },
+        { ok: true, format: "natural", storyboardText: text, audio: storyboardAudio, characters: characterSummary },
         { status: 200 }
       );
     }
@@ -1152,6 +1224,7 @@ export async function POST(request: NextRequest) {
           sceneCount: body.sceneCount,
           style,
           idea: body.idea,
+          characterNotes: body.characterNotes,
           dialogueMode,
           sfxMode: audioPrefs.sfx,
           language,
@@ -1215,10 +1288,14 @@ export async function POST(request: NextRequest) {
         grading: style.grading
       },
       audio: storyboardAudio,
-      scenes
+      scenes,
+      ...(characterSummary ? { characters: characterSummary } : {})
     };
 
-    return NextResponse.json({ ok: true, format: "json", storyboard, audio: storyboardAudio }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, format: "json", storyboard, audio: storyboardAudio, characters: characterSummary },
+      { status: 200 }
+    );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues }, { status: 400 });
