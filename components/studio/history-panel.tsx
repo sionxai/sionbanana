@@ -354,7 +354,8 @@ export function HistoryPanel({
                 />
               ) : (
                 <EmptyState
-                  label={
+                  label="기준이미지 삽입"
+                  helper={
                     onSetReference
                       ? "이미지를 업로드하거나 목록에서 드래그하세요"
                       : "참조 이미지를 업로드하세요"
@@ -553,10 +554,11 @@ export function HistoryPanel({
   );
 }
 
-function EmptyState({ label }: { label: string }) {
+function EmptyState({ label, helper }: { label: string; helper?: string }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-muted/30 text-[11px] text-muted-foreground">
-      {label}
+    <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-muted/30 px-2 text-center text-muted-foreground">
+      <span className="text-[11px] font-semibold text-foreground/80">{label}</span>
+      {helper ? <span className="text-[10px] leading-tight text-muted-foreground/80">{helper}</span> : null}
     </div>
   );
 }

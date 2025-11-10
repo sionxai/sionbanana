@@ -156,27 +156,70 @@ function PromptBlock({
   );
 }
 
-function GalleryCard({ record, onSelect }: { record: GeneratedImageDocument; onSelect: (record: GeneratedImageDocument) => void }) {
+function GalleryCard({
+  record,
+  selected,
+  onSelect,
+  onToggleSelect
+}: {
+  record: GeneratedImageDocument;
+  selected: boolean;
+  onSelect: (record: GeneratedImageDocument) => void;
+  onToggleSelect: (recordId: string) => void;
+}) {
   const previewUrl = record.thumbnailUrl ?? record.imageUrl ?? record.originalImageUrl;
   const promptPreview = record.promptMeta?.refinedPrompt ?? record.promptMeta?.rawPrompt ?? "";
 
+  const handleCardClick = () => {
+    onSelect(record);
+  };
+
+  const handleKeyActivate = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(record);
+    }
+  };
+
+  const handleCheckboxToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    onToggleSelect(record.id);
+  };
+
+  const handleCheckboxClick = (event: React.MouseEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+  };
+
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(record)}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={handleKeyActivate}
       className={cn(
-        "group relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-card text-left shadow-sm transition",
-        "hover:border-primary/50 hover:shadow-lg"
+        "group relative flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-border/60 bg-card text-left shadow-sm transition focus:outline-none",
+        "hover:border-primary/50 hover:shadow-lg focus-visible:ring-2 focus-visible:ring-primary/60",
+        selected ? "border-primary/70 ring-2 ring-primary/50" : ""
       )}
     >
-      <div className="relative aspect-square w-full bg-muted">
+      <div className="relative aspect-[9/16] w-full bg-muted">
+        <div className="pointer-events-none absolute left-3 top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-background/90 shadow">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={handleCheckboxToggle}
+            onClick={handleCheckboxClick}
+            className="pointer-events-auto h-4 w-4 accent-primary"
+            aria-label="이미지 선택"
+          />
+        </div>
         {previewUrl ? (
           <Image
             src={previewUrl}
             alt={promptPreview || "생성 이미지"}
             fill
             sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-            className="object-cover transition will-change-transform group-hover:scale-[1.02]"
+            className="object-contain object-center transition duration-300"
             priority={false}
           />
         ) : (
@@ -194,7 +237,7 @@ function GalleryCard({ record, onSelect }: { record: GeneratedImageDocument; onS
           {record.mode}
         </Badge>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -205,6 +248,8 @@ export function GenerationHistoryView() {
   const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
   const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
 
   useEffect(() => {
     setLocalRecords(records ?? []);
@@ -242,30 +287,143 @@ export function GenerationHistoryView() {
     }
   }, [filteredItems, selectedRecord]);
 
-  const handleDownloadRecord = (record: GeneratedImageDocument) => {
-    const url = record.imageUrl ?? record.originalImageUrl ?? record.thumbnailUrl;
-    if (!url) {
+  useEffect(() => {
+    if (selectedRecord) {
+      setImageFitMode("contain");
+    }
+  }, [selectedRecord]);
+
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (!prev.length) {
+        return prev;
+      }
+      const availableIds = new Set(historyItems.map(record => record.id));
+      const filtered = prev.filter(id => availableIds.has(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [historyItems]);
+
+  const handleSelectRecord = (record: GeneratedImageDocument) => {
+    setSelectedRecord(record);
+  };
+
+  const handleToggleRecordSelection = (recordId: string) => {
+    setSelectedIds(prev =>
+      prev.includes(recordId)
+        ? prev.filter(id => id !== recordId)
+        : [...prev, recordId]
+    );
+  };
+
+  const visibleIds = useMemo(() => filteredItems.map(record => record.id), [filteredItems]);
+  const recordMap = useMemo(() => {
+    const map = new Map<string, GeneratedImageDocument>();
+    historyItems.forEach(item => map.set(item.id, item));
+    return map;
+  }, [historyItems]);
+  const hasSelection = selectedIds.length > 0;
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+
+  const handleSelectAllVisible = () => {
+    if (!visibleIds.length) {
+      return;
+    }
+    setSelectedIds(prev => {
+      if (visibleIds.every(id => prev.includes(id))) {
+        return prev.filter(id => !visibleIds.includes(id));
+      }
+      const merged = new Set([...prev, ...visibleIds]);
+      return Array.from(merged);
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds([]);
+  };
+
+  const handleDownloadSelected = () => {
+    if (!selectedIds.length) {
+      toast.error("다운로드할 이미지를 선택해주세요.");
+      return;
+    }
+
+    const targets: DownloadTarget[] = [];
+    selectedIds.forEach(id => {
+      const record = recordMap.get(id);
+      if (!record) {
+        return;
+      }
+      const target = buildDownloadTarget(record);
+      if (target) {
+        targets.push(target);
+      }
+    });
+
+    if (!targets.length) {
       toast.error("다운로드할 이미지를 찾을 수 없습니다.");
       return;
     }
 
+    targets.forEach((target, index) => {
+      startDownload(target, index * 200);
+    });
+
+    toast.success(`${targets.length}개의 이미지 다운로드를 시작했습니다.`);
+  };
+
+  type DownloadTarget = {
+    href: string;
+    filename: string;
+  };
+
+  const buildDownloadTarget = (record: GeneratedImageDocument): DownloadTarget | null => {
+    const url = record.imageUrl ?? record.originalImageUrl ?? record.thumbnailUrl;
+    if (!url) {
+      return null;
+    }
+
+    const filename = `${record.id}.png`;
+
+    if (url.startsWith("data:")) {
+      return { href: url, filename };
+    }
+
+    const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes("?") ? "&" : "?"}alt=media`;
+    const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(filename)}`;
+    return { href: downloadUrl, filename };
+  };
+
+  const startDownload = (target: DownloadTarget, delayMs = 0) => {
     if (typeof window === "undefined") {
       return;
     }
 
-    if (url.startsWith("data:")) {
+    const trigger = () => {
       const link = document.createElement("a");
-      link.href = url;
-      link.download = `${record.id}.png`;
+      link.href = target.href;
+      link.download = target.filename;
+      link.rel = "noopener";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+    };
+
+    if (delayMs > 0) {
+      window.setTimeout(trigger, delayMs);
+    } else {
+      trigger();
+    }
+  };
+
+  const handleDownloadRecord = (record: GeneratedImageDocument) => {
+    const target = buildDownloadTarget(record);
+    if (!target) {
+      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
       return;
     }
 
-    const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes("?") ? "&" : "?"}alt=media`;
-    const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(`${record.id}.png`)}`;
-    window.location.assign(downloadUrl);
+    startDownload(target);
   };
 
   const updateRecordInState = (recordId: string, updater: (record: GeneratedImageDocument) => GeneratedImageDocument) => {
@@ -387,6 +545,12 @@ export function GenerationHistoryView() {
       ? selectedRecord.promptMeta.rawPrompt
       : undefined;
   const negativePrompt = selectedRecord?.promptMeta?.negativePrompt;
+  const modalImageUrl = selectedRecord
+    ? selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? selectedRecord.originalImageUrl ?? ""
+    : "";
+  const originalImageUrl = selectedRecord
+    ? selectedRecord.originalImageUrl ?? selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? ""
+    : "";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 pb-28">
@@ -449,6 +613,40 @@ export function GenerationHistoryView() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/60 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">선택</span>
+          <span className="text-xs text-muted-foreground">
+            선택 {selectedIds.length}개 / 표시 {filteredItems.length}개
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSelectAllVisible}
+            disabled={!filteredItems.length}
+          >
+            {allVisibleSelected ? "선택 해제" : "전체 선택"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleClearSelection}
+            disabled={!hasSelection}
+          >
+            선택 초기화
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleDownloadSelected}
+            disabled={!hasSelection}
+          >
+            일괄 다운로드
+          </Button>
+        </div>
+      </div>
+
       {loading ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }).map((_, index) => (
@@ -476,9 +674,18 @@ export function GenerationHistoryView() {
 
       {filteredItems.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {filteredItems.map(record => (
-            <GalleryCard key={record.id} record={record} onSelect={setSelectedRecord} />
-          ))}
+          {filteredItems.map(record => {
+            const isSelected = selectedIds.includes(record.id);
+            return (
+              <GalleryCard
+                key={record.id}
+                record={record}
+                selected={isSelected}
+                onSelect={handleSelectRecord}
+                onToggleSelect={handleToggleRecordSelection}
+              />
+            );
+          })}
         </div>
       ) : null}
 
@@ -500,16 +707,49 @@ export function GenerationHistoryView() {
             </button>
 
             <div className="grid gap-6 p-6 lg:grid-cols-[1.2fr_1fr]">
-              <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-border/60 bg-muted">
-                {selectedRecord.imageUrl || selectedRecord.thumbnailUrl || selectedRecord.originalImageUrl ? (
-                  <Image
-                    src={selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? selectedRecord.originalImageUrl ?? ""}
-                    alt={primaryPrompt ?? "생성 이미지"}
-                    fill
-                    sizes="(max-width: 768px) 100vw, 50vw"
-                    className="object-contain"
-                    priority
-                  />
+              <div className="relative aspect-[9/16] w-full max-h-[80vh] overflow-hidden rounded-2xl border border-border/60 bg-muted">
+                {modalImageUrl ? (
+                  <>
+                    <div className="absolute left-4 top-4 z-20 rounded-full bg-black/40 px-2 py-1 backdrop-blur">
+                      <ToggleGroup
+                        type="single"
+                        value={imageFitMode}
+                        onValueChange={value => setImageFitMode((value as "contain" | "cover") || "contain")}
+                        className="flex gap-1"
+                        aria-label="이미지 표시 방식"
+                      >
+                        <ToggleGroupItem
+                          value="contain"
+                          className={cn(
+                            "h-7 rounded-full px-3 text-xs text-white transition",
+                            "data-[state=on]:bg-white data-[state=on]:text-black"
+                          )}
+                        >
+                          전체
+                        </ToggleGroupItem>
+                        <ToggleGroupItem
+                          value="cover"
+                          className={cn(
+                            "h-7 rounded-full px-3 text-xs text-white transition",
+                            "data-[state=on]:bg-white data-[state=on]:text-black"
+                          )}
+                        >
+                          채우기
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
+                    <Image
+                      src={modalImageUrl}
+                      alt={primaryPrompt ?? "생성 이미지"}
+                      fill
+                      sizes="(max-width: 768px) 100vw, 50vw"
+                      className={cn(
+                        imageFitMode === "cover" ? "object-cover" : "object-contain",
+                        "transition-all duration-300"
+                      )}
+                      priority
+                    />
+                  </>
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
                     이미지 미리보기를 불러오지 못했습니다.
@@ -578,6 +818,13 @@ export function GenerationHistoryView() {
                 ) : null}
 
                 <div className="flex flex-wrap gap-2 pt-2">
+                  {originalImageUrl ? (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={originalImageUrl} target="_blank" rel="noreferrer">
+                        원본 보기
+                      </a>
+                    </Button>
+                  ) : null}
                   <Button size="sm" variant="outline" onClick={() => handleSetReference(selectedRecord)}>
                     기준이미지
                   </Button>

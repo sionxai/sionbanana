@@ -388,7 +388,8 @@ function StudioShellInner() {
     expression: ["default"],
     posture: ["default"]
   });
-  const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
+const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
+const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
@@ -457,9 +458,11 @@ function StudioShellInner() {
       if (auto && id && record) {
         pendingSelectedImageIdRef.current = id;
         setSelectedRecordOverride(record);
+        setAutoSelectEnabled(true);
       } else {
         pendingSelectedImageIdRef.current = null;
         setSelectedRecordOverride(auto ? record : null);
+        setAutoSelectEnabled(prev => (auto ? prev : Boolean(id)));
       }
       setSelectedImageIdState(id);
     },
@@ -491,7 +494,7 @@ function StudioShellInner() {
         window.localStorage.removeItem(REFERENCE_SYNC_STORAGE_KEY);
       } catch {}
       setLocalRecords([]);
-      selectImage(null);
+      selectImage(null, { auto: true });
       broadcastReferenceUpdate(null, "studio");
     }
 
@@ -675,7 +678,11 @@ function StudioShellInner() {
   useEffect(() => {
     if (!historyRecords.length) {
       pendingSelectedImageIdRef.current = null;
-      selectImage(null);
+      selectImage(null, { auto: true });
+      return;
+    }
+
+    if (!autoSelectEnabled) {
       return;
     }
 
@@ -683,16 +690,16 @@ function StudioShellInner() {
     if (pendingId) {
       if (historyRecords.some(record => record.id === pendingId)) {
         pendingSelectedImageIdRef.current = null;
-        selectImage(pendingId);
+        selectImage(pendingId, { auto: true });
       }
       return;
     }
 
     if (!selectedImageId || !historyRecords.some(record => record.id === selectedImageId)) {
       pendingSelectedImageIdRef.current = null;
-      selectImage(historyRecords[0].id);
+      selectImage(historyRecords[0].id, { auto: true });
     }
-  }, [historyRecords, selectedImageId, selectImage]);
+  }, [autoSelectEnabled, historyRecords, selectedImageId, selectImage]);
 
   useEffect(() => {
     if (!selectedRecordOverride) {
@@ -714,7 +721,7 @@ function StudioShellInner() {
     }
   }, [mergedRecords, freshlyGeneratedRecord]);
 
-  const selectedRecord: GeneratedImageDocument | null = useMemo(() => {
+  const baseSelectedRecord: GeneratedImageDocument | null = useMemo(() => {
     // First priority: freshly generated record when generation just completed
     if (freshlyGeneratedRecord && selectedImageId === freshlyGeneratedRecord.id) {
       return freshlyGeneratedRecord;
@@ -730,6 +737,7 @@ function StudioShellInner() {
     }
     return null;
   }, [historyRecords, selectedImageId, selectedRecordOverride, freshlyGeneratedRecord]);
+  const selectedRecord = autoSelectEnabled ? baseSelectedRecord : null;
 
   const comparisonRecord = useMemo(() => {
     if (!comparisonImageId) {
@@ -791,18 +799,11 @@ function StudioShellInner() {
   }, [derivedReferenceImageUrl]);
 
   const referenceImageUrl = useMemo(() => {
-    if (referenceImageState.url) {
-      return referenceImageState.url;
-    }
-    if (selectedRecord?.imageUrl || selectedRecord?.originalImageUrl) {
-      return selectedRecord.imageUrl ?? selectedRecord.originalImageUrl ?? null;
-    }
-    if (historyRecords.length) {
-      const first = historyRecords[0];
-      return first.imageUrl ?? first.originalImageUrl ?? null;
-    }
-    return null;
-  }, [historyRecords, referenceImageState.url, selectedRecord]);
+    // 기준 이미지는 사용자가 명시적으로 선택/업로드한 항목만 노출한다.
+    // 과거에는 히스토리 첫 이미지나 현재 선택 이미지를 자동으로 보여줘서
+    // 슬롯이 비었는데도 임의 이미지가 남아 있는 문제가 있었다.
+    return referenceImageState.url ?? null;
+  }, [referenceImageState.url]);
 
   const hasReference = Boolean(referenceImageUrl);
   const showGenerationSuccess = showSuccessFor(currentRequestId);
@@ -2768,6 +2769,13 @@ ${viewInstruction}`;
       // Clear reference state
       setReferenceImageOverride(null);
       broadcastReferenceUpdate(null, "studio");
+      setSelectedRecordOverride(null);
+      setFreshlyGeneratedRecord(null);
+      setNewRecordToProcess(null);
+      pendingSelectedImageIdRef.current = null;
+      lastAutoSelectedIdRef.current = null;
+      setComparisonImageId(null);
+      selectImage(null);
 
       toast.success("기준 이미지를 삭제했습니다.");
     } catch (error) {

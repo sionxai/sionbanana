@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AspectRatioPreset, GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import type { PromptDetails } from "@/components/studio/types";
@@ -21,6 +22,8 @@ import {
   getDirectionalLabel
 } from "@/lib/camera";
 import { getAspectRatioLabel } from "@/lib/aspect";
+
+const REFERENCE_PLACEHOLDER_IMAGE = "/img/logo/logo.png";
 
 interface WorkspacePanelProps {
   mode: GenerationMode;
@@ -359,6 +362,7 @@ export function WorkspacePanel({
   };
 
   const hasAfterImage = Boolean(afterImage);
+  const showReferencePlaceholder = !referenceImageUrl;
   const successBannerVisible = showGenerationSuccess && (!successRecordId || record?.id === successRecordId);
   const statusBadge = record
     ? record.status === "completed"
@@ -384,7 +388,15 @@ export function WorkspacePanel({
             <span>{record?.model ?? "Gemini Nano Banana"}</span>
           </div>
         </div>
-        {hasAfterImage ? (
+        {showReferencePlaceholder ? (
+          <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/20 p-6 text-center">
+            <div className="relative h-32 w-32">
+              <Image src={REFERENCE_PLACEHOLDER_IMAGE} alt="기준 이미지 플레이스홀더" fill sizes="128px" className="object-contain" priority={false} />
+            </div>
+            <p className="mt-4 text-sm font-semibold text-muted-foreground">기준 이미지를 등록해주세요</p>
+            <p className="text-xs text-muted-foreground/80">우측 기준 이미지 카드에서 업로드하거나 히스토리에서 드래그할 수 있습니다.</p>
+          </div>
+        ) : hasAfterImage ? (
           <DiffSlider
             key={`${record?.id ?? "workspace-diff"}-${referenceImageKey ?? 0}`}
             beforeSrc={isDiffAvailable ? beforeImageWithBust : undefined}
