@@ -16,10 +16,22 @@ export interface GenerateVariables {
 
 export interface GenerateResponse {
   ok: boolean;
-  base64Image?: string;
+  base64Image?: string | null;
   imageUrl?: string;
+  storagePath?: string | null;
+  id?: string;
+  model?: string;
+  revisedPrompt?: string | null;
   reason?: string;
   costCredits?: number;
+  images?: Array<{
+    id: string;
+    imageUrl: string;
+    base64Image?: string | null;
+    storagePath?: string | null;
+    revisedPrompt?: string | null;
+    mimeType?: string;
+  }>;
 }
 
 export async function callGenerateApi(variables: GenerateVariables, signal?: AbortSignal): Promise<GenerateResponse> {

@@ -82,7 +82,7 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, type HistorySyncPayload } from "@/components/studio/history-sync";
+import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, removeRecordFromLocalStorage, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 
 async function readFileAsDataURL(file: File): Promise<string> {
@@ -1341,10 +1341,14 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
           return;
         }
 
+        // 서버에서 디스크에 저장된 파일 id를 그대로 record id로 사용해야 디스크 파일과 record가 1:1로 매핑된다.
+        // 그래야 record 삭제 시 /api/images/<id> 파일도 함께 정리할 수 있다.
         const id =
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `local-${Date.now()}`;
+          (typeof result.id === "string" && result.id.length > 0)
+            ? result.id
+            : (typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `local-${Date.now()}`);
         const now = new Date().toISOString();
         const baseImage = result.imageUrl ?? result.base64Image;
         if (!baseImage) {
@@ -1445,9 +1449,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         }
         guard.onSuccess(newRecord.id);
         selectImageAuto(id, newRecord);
-        if (referenceEntry) {
-          await persistReferenceEntry(referenceEntry, now);
-        }
+        // 자동 promote 비활성화 — 사용자가 history에서 명시 선택 시에만 reference로 등록.
         const comparisonTargetId = primaryReferenceRecord?.id && primaryReferenceRecord.id !== id
           ? primaryReferenceRecord.id
           : referenceCandidate?.id && referenceCandidate.id !== id
@@ -2441,20 +2443,20 @@ ${viewInstruction}`;
     }
 
     setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
 
     if (selectedImageId === recordId) {
       const fallbackId = historyRecords.find(record => record.id !== recordId)?.id ?? null;
       selectImage(fallbackId);
     }
 
-    if (user && shouldUseFirestore) {
+    // 디스크 파일 정리: record id가 곧 /api/images/<id>의 id이므로 같은 키로 삭제 호출.
+    const looksLocalImage = typeof target.imageUrl === "string" && target.imageUrl.startsWith("/api/images/");
+    if (looksLocalImage) {
       try {
-        await deleteGeneratedImageDoc(user.uid, recordId);
-        if (target.imageUrl) {
-          await deleteUserImage(user.uid, recordId);
-        }
+        await fetch(`/api/images/${recordId}`, { method: "DELETE" });
       } catch (error) {
-        console.warn("Failed to delete remote record", error);
+        console.warn("Failed to delete local image file", error);
       }
     }
 

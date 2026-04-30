@@ -132,29 +132,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const persisted = await Promise.all(
-      allImages.map(async img => {
+    type Persisted = {
+      id: string;
+      imageUrl: string;
+      base64Image: null;
+      storagePath: string;
+      revisedPrompt: string | null;
+      mimeType: string;
+    };
+    const persistedSettled = await Promise.allSettled(
+      allImages.map(async (img): Promise<Persisted> => {
         const id = generateId();
         const buffer = Buffer.from(img.b64, "base64");
-        let imageUrl = `data:${img.mimeType};base64,${img.b64}`;
-        let storagePath: string | null = null;
-        try {
-          const saved = await saveImageBuffer(id, buffer, img.mimeType);
-          imageUrl = `/api/images/${id}`;
-          storagePath = saved.relativePath;
-        } catch (saveError) {
-          console.warn("/api/generate failed to persist image to disk", saveError);
-        }
+        const saved = await saveImageBuffer(id, buffer, img.mimeType);
         return {
           id,
-          imageUrl,
-          base64Image: imageUrl.startsWith("/api/") ? null : imageUrl,
-          storagePath,
+          imageUrl: `/api/images/${id}`,
+          base64Image: null,
+          storagePath: saved.relativePath,
           revisedPrompt: img.revisedPrompt ?? null,
           mimeType: img.mimeType
         };
       })
     );
+    const persisted: Persisted[] = [];
+    const persistErrors: string[] = [];
+    for (const entry of persistedSettled) {
+      if (entry.status === "fulfilled") persisted.push(entry.value);
+      else persistErrors.push(entry.reason instanceof Error ? entry.reason.message : String(entry.reason));
+    }
+    if (!persisted.length) {
+      console.error("/api/generate disk persistence failed for all images", persistErrors);
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: persistErrors[0] || "이미지를 디스크에 저장하지 못했습니다.",
+          imageUrl: "/samples/sample-ballerina-after.svg"
+        },
+        { status: 500 }
+      );
+    }
 
     const primaryImage = persisted[0];
     return NextResponse.json({
@@ -346,33 +363,35 @@ async function resolveReferenceSource(
 }
 
 async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
-  // 우리 로컬 라우트(/api/images/<id>)는 server-side fetch가 base URL을 모르면 실패한다.
-  // 디스크에서 직접 읽어 buffer로 변환한다.
-  const localMatch = url.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
-  if (localMatch) {
-    const id = localMatch[1];
-    const result = await readImageById(id);
-    if (!result) throw new Error(`Reference image not found locally: ${id}`);
-    const chunks: Buffer[] = [];
-    await new Promise<void>((resolve, reject) => {
-      result.stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      result.stream.on("end", () => resolve());
-      result.stream.on("error", err => reject(err));
+  // 보안 정책: server-side에서 임의 URL을 fetch하면 SSRF/내부망 접근/대용량 메모리 공격이 가능하다.
+  // 따라서 이 함수가 다루는 URL은 우리 로컬 라우트(/api/images/<id>)만 허용.
+  // data: URL은 호출자가 normalizeStringEntry에서 미리 분해하므로 여기까지 오지 않는다.
+  const localMatch = url.match(/^(?:https?:\/\/[^/]+)?\/api\/images\/([A-Za-z0-9_\-]+)/);
+  if (!localMatch) {
+    throw new Error("Reference URL이 허용되지 않습니다. 로컬 /api/images/<id> 또는 data URL만 사용 가능합니다.");
+  }
+  const id = localMatch[1];
+  const result = await readImageById(id);
+  if (!result) throw new Error(`Reference image not found locally: ${id}`);
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const MAX_REFERENCE_BYTES = 25 * 1024 * 1024; // 25MB 상한
+  await new Promise<void>((resolve, reject) => {
+    result.stream.on("data", (chunk: string | Buffer) => {
+      const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      total += buf.byteLength;
+      if (total > MAX_REFERENCE_BYTES) {
+        reject(new Error("Reference image exceeds 25MB limit"));
+        return;
+      }
+      chunks.push(buf);
     });
-    const data = Buffer.concat(chunks).toString("base64");
-    return { data, mimeType: result.mimeType };
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch reference image (${response.status})`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const mimeType = response.headers.get("content-type") ?? DEFAULT_IMAGE_MIME;
-  const data = Buffer.from(arrayBuffer).toString("base64");
-
-  return { data, mimeType };
+    result.stream.on("end", () => resolve());
+    result.stream.on("error", err => reject(err));
+  });
+  const data = Buffer.concat(chunks).toString("base64");
+  return { data, mimeType: result.mimeType };
 }
 
 // 명시적인 픽셀 크기 또는 종횡비 별칭을 모두 받아준다.

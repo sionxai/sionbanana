@@ -847,9 +847,9 @@ function BatchStudioShellInner() {
             localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(itemsToSave));
             console.log(`💾 [Batch Storage] ${completedItems.length}개 완료된 항목 저장 완료 (이미지 제외)`);
 
-            // 로컬 히스토리도 업데이트 (Firebase에 저장된 것만 - base64 이미지 제외)
+            // 로컬 통합 히스토리에 누적 — base64 잔재는 제외하고 디스크 URL(/api/images/<id>)만 저장.
             const historyRecords: GeneratedImageDocument[] = completedItems
-              .filter(item => item.result?.image && !item.result.image.startsWith('data:')) // Firebase URL만
+              .filter(item => item.result?.image && !item.result.image.startsWith('data:'))
               .map(item => ({
                 id: item.id,
                 userId: user?.uid ?? "local",
@@ -866,19 +866,22 @@ function BatchStudioShellInner() {
                   batchItem: true,
                   batchItemName: item.name
                 },
-                model: 'gemini-batch',
+                model: 'gpt-image-2',
                 createdAt: item.result?.completedAt || new Date().toISOString(),
                 updatedAt: item.result?.completedAt || new Date().toISOString(),
                 createdAtIso: item.result?.completedAt || new Date().toISOString(),
                 updatedAtIso: item.result?.completedAt || new Date().toISOString()
               }));
 
-            // Firestore 실시간 리스너가 자동으로 UI 업데이트 처리
-            // setLocalRecords(prev => {
-            //   const existingIds = prev.map(r => r.id);
-            //   const newRecords = historyRecords.filter(r => !existingIds.includes(r.id));
-            //   return [...prev, ...newRecords];
-            // });
+            if (historyRecords.length) {
+              setLocalRecords(prev => {
+                const existingIds = new Set(prev.map(r => r.id));
+                const additions = historyRecords.filter(r => !existingIds.has(r.id));
+                return additions.length ? [...prev, ...additions] : prev;
+              });
+              const merged = persistRecordsMerge(historyRecords);
+              broadcastHistoryUpdate(merged, "batch");
+            }
           } catch (error) {
             if (error instanceof Error && error.name === 'QuotaExceededError') {
               console.error('❌ [Batch Storage] 로컬 스토리지 용량 초과:', error.message);

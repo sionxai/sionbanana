@@ -1,5 +1,5 @@
-import { NextRequest } from "next/server";
-import { readImageById } from "@/lib/local/storage";
+import { NextRequest, NextResponse } from "next/server";
+import { readImageById, deleteImageById } from "@/lib/local/storage";
 import { Readable } from "node:stream";
 
 export const dynamic = "force-dynamic";
@@ -19,4 +19,9 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       "Cache-Control": "private, max-age=31536000, immutable"
     }
   });
+}
+
+export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+  const removed = await deleteImageById(params.id);
+  return NextResponse.json({ ok: true, removed });
 }
