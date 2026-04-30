@@ -17,9 +17,10 @@
 .env
 .env.*
 .env.local
+!.env.example
 
-# secrets
-firebase key/
+# local data (이미지, SQLite)
+/data/
 
 # misc
 npm-debug.log*

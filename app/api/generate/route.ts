@@ -1,14 +1,17 @@
 import { Buffer } from "node:buffer";
 import { NextRequest, NextResponse } from "next/server";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env";
-import { MissingServiceAccountKeyError, getAdminAuth, getAdminDb, getAdminStorage } from "@/lib/firebase/admin";
-import { ADMIN_UID, PLANS } from "@/lib/constants";
-import { startOfNextMonthUTC } from "@/lib/entitlements";
 import type { GenerationMode } from "@/lib/types";
 import { describeAspectRatioForPrompt } from "@/lib/aspect";
 import { generateId } from "@/lib/utils";
+import {
+  callCodexResponses,
+  CodexResponseError,
+  type CodexContentPart,
+  type CodexImageOptions
+} from "@/lib/codex-fetch";
+import { CodexAuthError } from "@/lib/codex-oauth";
+import { saveImageBuffer, readImageById } from "@/lib/local/storage";
 
 const generationModes = [
   "create",
@@ -41,296 +44,156 @@ const requestSchema = z.object({
   options: z.record(z.any()).optional()
 });
 
-const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-2.5-flash-image-preview";
-const FALLBACK_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
-const IMAGE_MODEL_PREFIXES = ["imagen-"];
-const TEXT_RESPONSE_MIME_SET = new Set([
-  "text/plain",
-  "application/json",
-  "application/xml",
-  "application/yaml",
-  "text/x.enum"
-]);
 const DEFAULT_IMAGE_MIME = "image/png";
+const MAX_REFERENCE_IMAGES = 8;
 
-function filterLargeBase64FromOptions(options: Record<string, any>): Record<string, any> {
-  const filtered: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(options)) {
-    if (typeof value === "string" && value.startsWith("data:") && value.length > 100000) {
-      // Replace large base64 data with a placeholder
-      filtered[key] = `[BASE64_DATA_FILTERED_${value.length}_BYTES]`;
-    } else if (Array.isArray(value)) {
-      // Check array elements for large base64 data
-      filtered[key] = value.map(item => {
-        if (typeof item === "string" && item.startsWith("data:") && item.length > 100000) {
-          return `[BASE64_DATA_FILTERED_${item.length}_BYTES]`;
-        }
-        return item;
-      });
-    } else {
-      filtered[key] = value;
-    }
-  }
-
-  return filtered;
-}
-
-async function canGenerateAndConsume(uid: string) {
-  const ref = getAdminDb().collection("users").doc(uid);
-  const now = Timestamp.now();
-  let allowed = false;
-  let reason = "forbidden";
-
-  const normalizeTimestamp = (value: any): Timestamp | null => {
-    if (!value) {
-      return null;
-    }
-    if (value instanceof Timestamp) {
-      return value;
-    }
-    if (value instanceof Date) {
-      return Timestamp.fromDate(value);
-    }
-    if (typeof value === "string") {
-      const ms = Date.parse(value);
-      if (!Number.isNaN(ms)) {
-        return Timestamp.fromDate(new Date(ms));
-      }
-      return null;
-    }
-    if (typeof value === "object" && typeof (value as { toDate?: () => Date }).toDate === "function") {
-      try {
-        const date = (value as { toDate: () => Date }).toDate();
-        if (date instanceof Date && !Number.isNaN(date.getTime())) {
-          return Timestamp.fromDate(date);
-        }
-      } catch (error) {
-        console.warn("Failed to normalize timestamp", error);
-      }
-    }
-    return null;
-  };
-
-  await getAdminDb().runTransaction(async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) {
-      throw new Error("user doc missing");
-    }
-
-    const data = snap.data() as any;
-
-    // Admin: unlimited usage, no quota decrement (but still track usage)
-    const isAdmin = uid === ADMIN_UID || data.role === "admin";
-    if (isAdmin) {
-      allowed = true;
-      reason = "admin";
-      tx.update(ref, {
-        "usage.generatedImages": (data.usage?.generatedImages ?? 0) + 1,
-        "usage.lastGeneratedAt": FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
-      return;
-    }
-
-    if (!data.quota || typeof data.quota !== "object") {
-      data.quota = { imagesRemaining: 0, resetsAt: null };
-    }
-
-    const quotaResetAt = normalizeTimestamp(data.quota.resetsAt);
-    if (quotaResetAt && quotaResetAt.toMillis() <= now.toMillis()) {
-      const planId = (data.plan?.id as keyof typeof PLANS | undefined) ?? "guest";
-      const base = PLANS[planId] ?? PLANS.guest;
-      const resetTimestamp = startOfNextMonthUTC();
-      tx.update(ref, {
-        "quota.imagesRemaining": base.monthlyImages,
-        "quota.resetsAt": resetTimestamp
-      });
-      data.quota = {
-        imagesRemaining: base.monthlyImages,
-        resetsAt: resetTimestamp
-      };
-    } else if (quotaResetAt) {
-      data.quota.resetsAt = quotaResetAt;
-    }
-
-    const remain = typeof data.quota.imagesRemaining === "number" ? data.quota.imagesRemaining : 0;
-
-    const pass = data.tempPass && typeof data.tempPass === "object" ? data.tempPass : null;
-    const passExpiresAt = normalizeTimestamp(pass?.expiresAt);
-    if (pass && passExpiresAt && passExpiresAt.toMillis() > now.toMillis()) {
-      allowed = true;
-      reason = "tempPass";
-    } else {
-      const activated = Boolean(data.plan?.activated);
-      if (activated && remain > 0) {
-        allowed = true;
-        reason = "quota";
-        tx.update(ref, {
-          "quota.imagesRemaining": remain - 1,
-          "usage.generatedImages": (data.usage?.generatedImages ?? 0) + 1,
-          "usage.lastGeneratedAt": FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp()
-        });
-      }
-    }
-  });
-
-  return { allowed, reason };
-}
+type ReferenceSource = { data: string; mimeType?: string } | { url: string };
 
 export async function POST(request: NextRequest) {
   try {
-    const authorization = request.headers.get("authorization") || "";
-    const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : null;
-    if (!token) {
-      return NextResponse.json({ ok: false, reason: "인증 토큰이 필요합니다." }, { status: 401 });
-    }
-
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const { allowed } = await canGenerateAndConsume(decoded.uid);
-    if (!allowed) {
-      return NextResponse.json({ ok: false, reason: "limit reached or not activated" }, { status: 403 });
-    }
-
     const payload = requestSchema.parse(await request.json());
-    const apiKey = serverEnv.GEMINI_API_KEY;
 
-    if (!apiKey) {
+    const referenceSettings = getReferenceImageSettings(payload.options);
+    const referenceParts: CodexContentPart[] = [];
+
+    const primary = await resolveReferenceSource(referenceSettings.primary);
+    if (primary) {
+      referenceParts.push({
+        type: "input_image",
+        image_url: `data:${primary.mimeType};base64,${primary.data}`
+      });
+    }
+
+    for (const entry of referenceSettings.gallery) {
+      if (referenceParts.length >= MAX_REFERENCE_IMAGES) break;
+      const resolved = await resolveReferenceSource(entry);
+      if (resolved) {
+        referenceParts.push({
+          type: "input_image",
+          image_url: `data:${resolved.mimeType};base64,${resolved.data}`
+        });
+      }
+    }
+
+    const promptText = buildPrompt(payload, referenceParts.length > 0);
+
+    const userContent: CodexContentPart[] = [
+      ...referenceParts,
+      { type: "input_text", text: promptText }
+    ];
+
+    const requestedSize = payload.options?.imageSize ?? payload.options?.aspectRatio;
+    const imageOptions: CodexImageOptions = {
+      quality: mapQuality(payload.options?.quality),
+      size: mapSize(requestedSize),
+      moderation: mapModeration(payload.options?.moderation),
+      output_format: mapFormat(payload.options?.format)
+    };
+
+    const count = clampCount(payload.options?.count);
+
+    const callOnce = () =>
+      callCodexResponses({
+        mode: "image",
+        input: [
+          {
+            role: "system",
+            content:
+              "You generate images for the user using the image_generation tool. Use the supplied prompt and any reference images. Do not narrate; just produce the image."
+          },
+          { role: "user", content: userContent }
+        ],
+        imageOptions,
+        logTag: "api/generate"
+      });
+
+    const settled = await Promise.allSettled(Array.from({ length: count }, () => callOnce()));
+    const allImages: Array<{ b64: string; mimeType: string; revisedPrompt?: string }> = [];
+    const errors: string[] = [];
+    for (const entry of settled) {
+      if (entry.status === "fulfilled") {
+        for (const img of entry.value.images) {
+          allImages.push(img);
+        }
+      } else {
+        const reason = entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
+        errors.push(reason);
+      }
+    }
+
+    if (!allImages.length) {
       return NextResponse.json(
         {
           ok: false,
-          reason: "GEMINI_API_KEY 미설정",
+          reason: errors[0] || "Codex가 이미지를 반환하지 않았습니다.",
           imageUrl: "/samples/sample-ballerina-after.svg"
         },
         { status: 200 }
       );
     }
 
-    const requestedModel = typeof payload.options?.model === "string" ? payload.options.model : undefined;
-    const primaryModel = requestedModel ?? DEFAULT_MODEL;
-
-    let result = await callModel(primaryModel, payload, apiKey);
-
-    if (
-      !result.ok &&
-      result.status === 404 &&
-      isImageModel(primaryModel) &&
-      (!requestedModel || requestedModel === DEFAULT_MODEL)
-    ) {
-      const fallbackResult = await callModel(FALLBACK_IMAGE_MODEL, payload, apiKey);
-      if (fallbackResult.ok) {
-        return NextResponse.json({ ok: true, base64Image: fallbackResult.base64Image, model: fallbackResult.modelId, fallback: true });
-      }
-
-      const combinedReason = `${result.reason} (fallback 모델 ${FALLBACK_IMAGE_MODEL} 시도 실패: ${fallbackResult.reason})`;
-      result = {
-        ok: false,
-        reason: combinedReason,
-        status: fallbackResult.status ?? result.status,
-        modelId: primaryModel
-      };
-    }
-
-    if (result.ok) {
-      // Save successful generation to Firestore
-      const imageId = generateId();
-      const now = Timestamp.now();
-
-      try {
-        // Convert base64 to blob and upload to Firebase Storage
-        const base64DataUrl = result.base64Image;
-        // Extract base64 part from data URL (remove "data:image/png;base64," prefix)
-        const base64Data = base64DataUrl.split(',')[1];
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-
-        const bucket = getAdminStorage().bucket();
-        const fileName = `users/${decoded.uid}/images/${imageId}.png`;
-        const file = bucket.file(fileName);
-
-        await file.save(imageBuffer, {
-          metadata: {
-            contentType: 'image/png',
-            metadata: {
-              firebaseStorageDownloadTokens: crypto.randomUUID(), // Firebase download token
-            }
-          },
-        });
-
-        // Get signed URL (valid for 1 year)
-        // Use signed URL instead of makePublic() to avoid "Uniform bucket-level access" errors
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 365 * 24 * 60 * 60 * 1000, // 1 year
-        });
-
-        const publicUrl = signedUrl;
-
-        console.log(`🔍 Debug publicUrl: ${publicUrl} (length: ${publicUrl.length})`);
-        console.log(`🔍 Debug base64DataUrl length: ${base64DataUrl.length}`);
-        console.log(`🔍 Debug payload.options:`, JSON.stringify(payload.options).length, "bytes");
-
-        const imageDocData = {
-          mode: payload.mode,
-          status: "completed",
-          promptMeta: {
-            rawPrompt: payload.prompt,
-            refinedPrompt: payload.refinedPrompt || null,
-            negativePrompt: payload.negativePrompt || null,
-            aspectRatio: payload.options?.aspectRatio || "original"
-          },
-          imageUrl: publicUrl,
-          originalImageUrl: null,
-          thumbnailUrl: null,
-          diff: null,
-          metadata: filterLargeBase64FromOptions(payload.options || {}),
-          model: result.modelId,
-          costCredits: 1,
-          createdAt: now,
-          updatedAt: now,
-          createdAtIso: now.toDate().toISOString(),
-          updatedAtIso: now.toDate().toISOString()
+    const persisted = await Promise.all(
+      allImages.map(async img => {
+        const id = generateId();
+        const buffer = Buffer.from(img.b64, "base64");
+        let imageUrl = `data:${img.mimeType};base64,${img.b64}`;
+        let storagePath: string | null = null;
+        try {
+          const saved = await saveImageBuffer(id, buffer, img.mimeType);
+          imageUrl = `/api/images/${id}`;
+          storagePath = saved.relativePath;
+        } catch (saveError) {
+          console.warn("/api/generate failed to persist image to disk", saveError);
+        }
+        return {
+          id,
+          imageUrl,
+          base64Image: imageUrl.startsWith("/api/") ? null : imageUrl,
+          storagePath,
+          revisedPrompt: img.revisedPrompt ?? null,
+          mimeType: img.mimeType
         };
-
-        console.log(`🔍 Debug imageDocData serialized length: ${JSON.stringify(imageDocData).length} bytes`);
-
-        await getAdminDb()
-          .collection("users")
-          .doc(decoded.uid)
-          .collection("images")
-          .doc(imageId)
-          .set(imageDocData);
-
-        console.log(`💾 Image saved to Storage and Firestore: ${publicUrl}`);
-      } catch (firestoreError) {
-        console.error("Failed to save image to Firestore:", firestoreError);
-        // Continue without failing the request
-      }
-
-      return NextResponse.json({ ok: true, base64Image: result.base64Image, model: result.modelId, id: imageId });
-    }
-
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: result.reason,
-        imageUrl: "/samples/sample-ballerina-after.svg"
-      },
-      { status: 200 }
+      })
     );
+
+    const primaryImage = persisted[0];
+    return NextResponse.json({
+      ok: true,
+      // 호환을 위해 첫 이미지를 최상위에 펼쳐 두고, 나머지는 images 배열로 제공
+      imageUrl: primaryImage.imageUrl,
+      base64Image: primaryImage.base64Image,
+      storagePath: primaryImage.storagePath,
+      model: "gpt-image-2",
+      id: primaryImage.id,
+      revisedPrompt: primaryImage.revisedPrompt,
+      images: persisted,
+      partial: errors.length > 0 ? errors : undefined
+    });
   } catch (error) {
-    console.error("/api/generate error", error);
-    if (error instanceof MissingServiceAccountKeyError) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues },
+        { status: 400 }
+      );
+    }
+    if (error instanceof CodexAuthError) {
+      return NextResponse.json(
+        { ok: false, reason: error.message, code: error.code },
+        { status: 401 }
+      );
+    }
+    if (error instanceof CodexResponseError) {
+      console.error("/api/generate Codex error", error.status, error.body.slice(0, 500));
       return NextResponse.json(
         {
           ok: false,
-          reason: "missing service account",
+          reason: `Codex 호출 실패 (${error.status})`,
           imageUrl: "/samples/sample-ballerina-after.svg"
         },
-        { status: 200 }
+        { status: error.status === 401 ? 401 : 200 }
       );
     }
+    console.error("/api/generate error", error);
     return NextResponse.json(
       {
         ok: false,
@@ -393,232 +256,19 @@ function buildPrompt(payload: z.infer<typeof requestSchema>, hasReferenceImage: 
   return segments.join("\n");
 }
 
-
-
-interface GeminiResponse {
-  generatedImages?: Array<{
-    image?: {
-      mimeType?: string;
-      data?: string;
-    };
-    revisedPrompt?: string;
-  }>;
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-        inlineData?: {
-          mimeType?: string;
-          data?: string;
-        };
-      }>;
-    };
-  }>;
-  error?: {
-    message?: string;
-    status?: string;
-  };
-}
-
-type ModelResult = ModelSuccess | ModelError;
-
-interface ModelSuccess {
-  ok: true;
-  base64Image: string;
-  modelId: string;
-}
-
-interface ModelError {
-  ok: false;
-  reason: string;
-  status?: number;
-  modelId: string;
-}
-
-async function callModel(
-  modelId: string,
-  payload: z.infer<typeof requestSchema>,
-  apiKey: string
-): Promise<ModelResult> {
-  const referenceSettings = getReferenceImageSettings(payload.options);
-
-  const resolveReferenceSource = async (
-    entry: ReferenceSource | null
-  ): Promise<{ data: string; mimeType: string } | null> => {
-    if (!entry) {
-      return null;
-    }
-
-    if ('data' in entry) {
-      return { data: entry.data, mimeType: entry.mimeType ?? DEFAULT_IMAGE_MIME };
-    }
-
-    if ('url' in entry) {
-      try {
-        return await fetchImageAsBase64(entry.url);
-      } catch (error) {
-        console.warn("Failed to fetch reference image", error);
-        return null;
-      }
-    }
-
-    return null;
-  };
-
-  let referenceImage = await resolveReferenceSource(referenceSettings.primary);
-  const additionalReferences: Array<{ data: string; mimeType: string }> = [];
-
-  for (const entry of referenceSettings.gallery) {
-    const resolved = await resolveReferenceSource(entry);
-    if (resolved) {
-      additionalReferences.push(resolved);
-    }
-  }
-
-  if (!referenceImage && additionalReferences.length) {
-    referenceImage = additionalReferences.shift() ?? null;
-  }
-
-  const effectiveModelId = referenceImage && isImageModel(modelId) ? FALLBACK_IMAGE_MODEL : modelId;
-  const useImagenEndpoint = isImageModel(effectiveModelId) && !referenceImage;
-  const methodPath = useImagenEndpoint ? "generateImage" : "generateContent";
-  const url = `${GEMINI_ENDPOINT}/${effectiveModelId}:${methodPath}?key=${apiKey}`;
-
-  const promptText = buildPrompt(payload, Boolean(referenceImage || additionalReferences.length));
-
-  const requestedOutputMime = getRequestedOutputMime(payload.options?.outputMimeType, useImagenEndpoint);
-  const resolvedOutputMime = useImagenEndpoint ? requestedOutputMime ?? DEFAULT_IMAGE_MIME : undefined;
-  const generationConfig = buildGenerationConfig(
-    payload.options?.generationConfig,
-    useImagenEndpoint ? undefined : requestedOutputMime
-  );
-
-  const contentParts: Array<Record<string, unknown>> = [{ text: promptText }];
-  if (referenceImage) {
-    contentParts.push({
-      inlineData: {
-        mimeType: referenceImage.mimeType ?? DEFAULT_IMAGE_MIME,
-        data: referenceImage.data
-      }
-    });
-  }
-  for (const extraReference of additionalReferences) {
-    contentParts.push({
-      inlineData: {
-        mimeType: extraReference.mimeType ?? DEFAULT_IMAGE_MIME,
-        data: extraReference.data
-      }
-    });
-  }
-
-  const requestBody = useImagenEndpoint
-    ? removeUndefined({
-        prompt: { text: promptText },
-        negativePrompt: payload.negativePrompt ? { text: payload.negativePrompt } : undefined,
-        outputMimeType: resolvedOutputMime ?? DEFAULT_IMAGE_MIME,
-        aspectRatio: payload.options?.aspectRatio,
-        safetyFilterLevel: payload.options?.safetyFilterLevel,
-        numberOfImages: payload.options?.numberOfImages ?? 1
-      })
-    : removeUndefined({
-        contents: [
-          {
-            role: "user",
-            parts: contentParts
-          }
-        ],
-        safetySettings: payload.options?.safetySettings,
-        generationConfig
-      });
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Request timeout - 이미지 생성 요청이 시간 초과되었습니다.');
-    }
-    throw error;
-  }
-
-  if (!response.ok) {
-    const errorBody = await parseErrorBody(response);
-    const reason =
-      errorBody ??
-      (response.status === 404
-        ? `모델 "${modelId}" 을(를) 찾을 수 없습니다. Google AI Studio에서 모델 이름과 접근 권한을 다시 확인해주세요.`
-        : `Gemini API error: ${response.status}`);
-    console.error("Gemini API error", response.status, errorBody);
-    return { ok: false, reason, status: response.status, modelId: effectiveModelId };
-  }
-
-  const data = (await response.json()) as GeminiResponse;
-  const base64Image = extractBase64Image(data);
-
-  if (!base64Image) {
-    return {
-      ok: false,
-      reason: data.error?.message ?? data.error?.status ?? "이미지 데이터를 찾을 수 없습니다.",
-      modelId: effectiveModelId
-    };
-  }
-
-  return { ok: true, base64Image, modelId: effectiveModelId };
-}
-
-function extractBase64Image(response: GeminiResponse) {
-  for (const item of response.generatedImages ?? []) {
-    const mime = item.image?.mimeType ?? "image/png";
-    if (item.image?.data) {
-      return `data:${mime};base64,${item.image.data}`;
-    }
-  }
-
-  for (const candidate of response.candidates ?? []) {
-    for (const part of candidate.content?.parts ?? []) {
-      if (part.inlineData?.mimeType?.startsWith("image/")) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
-      if (part.text?.startsWith("data:image")) {
-        return part.text;
-      }
-    }
-  }
-  return null;
-}
-
-type ReferenceSource = { data: string; mimeType?: string } | { url: string };
-
 function getReferenceImageSettings(options: unknown): {
   primary: ReferenceSource | null;
   gallery: ReferenceSource[];
 } {
   const normalizeStringEntry = (value: string): ReferenceSource | null => {
-    if (!value) {
-      return null;
-    }
+    if (!value) return null;
 
     if (value.startsWith("data:")) {
-      const commaIndex = value.indexOf(',');
-      if (commaIndex === -1) {
-        return null;
-      }
+      const commaIndex = value.indexOf(",");
+      if (commaIndex === -1) return null;
       const header = value.slice(5, commaIndex);
       const dataPart = value.slice(commaIndex + 1);
-      const parts = header.split(';');
+      const parts = header.split(";");
       const mimeType = parts[0] || DEFAULT_IMAGE_MIME;
       const isBase64 = parts.some(part => part.toLowerCase() === "base64");
       if (!isBase64) {
@@ -632,13 +282,8 @@ function getReferenceImageSettings(options: unknown): {
   };
 
   const normalizeEntry = (entry: unknown): ReferenceSource | null => {
-    if (!entry) {
-      return null;
-    }
-
-    if (typeof entry === "string") {
-      return normalizeStringEntry(entry);
-    }
+    if (!entry) return null;
+    if (typeof entry === "string") return normalizeStringEntry(entry);
 
     if (typeof entry === "object") {
       const objectEntry = entry as Record<string, unknown>;
@@ -647,15 +292,11 @@ function getReferenceImageSettings(options: unknown): {
       const url = typeof objectEntry.url === "string" ? objectEntry.url : undefined;
 
       if (data) {
-        if (data.startsWith("data:")) {
-          return normalizeStringEntry(data);
-        }
+        if (data.startsWith("data:")) return normalizeStringEntry(data);
         return { data, mimeType };
       }
 
-      if (url) {
-        return normalizeStringEntry(url);
-      }
+      if (url) return normalizeStringEntry(url);
     }
 
     return null;
@@ -683,7 +324,45 @@ function getReferenceImageSettings(options: unknown): {
   return { primary, gallery };
 }
 
+async function resolveReferenceSource(
+  entry: ReferenceSource | null
+): Promise<{ data: string; mimeType: string } | null> {
+  if (!entry) return null;
+
+  if ("data" in entry) {
+    return { data: entry.data, mimeType: entry.mimeType ?? DEFAULT_IMAGE_MIME };
+  }
+
+  if ("url" in entry) {
+    try {
+      return await fetchImageAsBase64(entry.url);
+    } catch (error) {
+      console.warn("Failed to fetch reference image", error);
+      return null;
+    }
+  }
+
+  return null;
+}
+
 async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
+  // 우리 로컬 라우트(/api/images/<id>)는 server-side fetch가 base URL을 모르면 실패한다.
+  // 디스크에서 직접 읽어 buffer로 변환한다.
+  const localMatch = url.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  if (localMatch) {
+    const id = localMatch[1];
+    const result = await readImageById(id);
+    if (!result) throw new Error(`Reference image not found locally: ${id}`);
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      result.stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      result.stream.on("end", () => resolve());
+      result.stream.on("error", err => reject(err));
+    });
+    const data = Buffer.concat(chunks).toString("base64");
+    return { data, mimeType: result.mimeType };
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch reference image (${response.status})`);
@@ -696,52 +375,67 @@ async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType
   return { data, mimeType };
 }
 
-async function parseErrorBody(response: Response) {
-  try {
-    const cloneForJson = response.clone();
-    const data = await cloneForJson.json();
-    return data.error?.message ?? JSON.stringify(data);
-  } catch (jsonError) {
-    try {
-      const text = await response.text();
-      return text || null;
-    } catch (textError) {
-      console.error("Failed to parse Gemini error body", jsonError, textError);
-      return null;
-    }
-  }
+// 명시적인 픽셀 크기 또는 종횡비 별칭을 모두 받아준다.
+const SIZE_ALIASES: Record<string, string> = {
+  "1:1": "1024x1024",
+  "16:9": "1824x1024",
+  "9:16": "1024x1824",
+  "4:3": "1360x1024",
+  "3:4": "1024x1360",
+  "3:2": "1536x1024",
+  "2:3": "1024x1536",
+  "2k-1:1": "2048x2048",
+  "2k-16:9": "2048x1152",
+  "2k-9:16": "1152x2048",
+  "4k-16:9": "3824x2160",
+  "4k-9:16": "2160x3824",
+  original: "1024x1024",
+  "": "1024x1024"
+};
+
+const ALLOWED_PIXEL_SIZES = new Set([
+  "1024x1024",
+  "1536x1024",
+  "1024x1536",
+  "1360x1024",
+  "1024x1360",
+  "1824x1024",
+  "1024x1824",
+  "2048x2048",
+  "2048x1152",
+  "1152x2048",
+  "3824x2160",
+  "2160x3824"
+]);
+
+function mapSize(input: unknown): CodexImageOptions["size"] {
+  if (typeof input !== "string") return "1024x1024";
+  const trimmed = input.trim();
+  if (trimmed === "auto") return "auto";
+  if (SIZE_ALIASES[trimmed]) return SIZE_ALIASES[trimmed];
+  const normalized = trimmed.replace(/[^0-9x]/gi, "").toLowerCase();
+  if (ALLOWED_PIXEL_SIZES.has(normalized)) return normalized;
+  return "1024x1024";
 }
 
-function removeUndefined<T extends Record<string, unknown>>(obj: T): T {
-  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
+function mapQuality(quality: unknown): CodexImageOptions["quality"] {
+  if (quality === "low" || quality === "medium" || quality === "high" || quality === "auto") {
+    return quality;
+  }
+  return "medium";
 }
 
-function isImageModel(modelId: string) {
-  return IMAGE_MODEL_PREFIXES.some(prefix => modelId.startsWith(prefix) || modelId.includes(`/${prefix}`));
+function mapModeration(value: unknown): CodexImageOptions["moderation"] {
+  return value === "auto" ? "auto" : "low";
 }
 
-function getRequestedOutputMime(mime: unknown, isImagenRequest: boolean) {
-  if (typeof mime !== "string") {
-    return undefined;
-  }
-
-  if (isImagenRequest) {
-    return mime.startsWith("image/") ? mime : undefined;
-  }
-
-  return TEXT_RESPONSE_MIME_SET.has(mime) ? mime : undefined;
+function mapFormat(value: unknown): CodexImageOptions["output_format"] | undefined {
+  if (value === "png" || value === "jpeg" || value === "webp") return value;
+  return undefined;
 }
 
-function buildGenerationConfig(rawConfig: unknown, requestedOutputMime: string | undefined) {
-  const baseConfig =
-    rawConfig && typeof rawConfig === "object"
-      ? { ...(rawConfig as Record<string, unknown>) }
-      : {};
-
-  if (requestedOutputMime && TEXT_RESPONSE_MIME_SET.has(requestedOutputMime)) {
-    baseConfig.responseMimeType = requestedOutputMime;
-  }
-
-  const cleaned = removeUndefined(baseConfig);
-  return Object.keys(cleaned).length ? cleaned : undefined;
+function clampCount(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(4, Math.floor(n)));
 }

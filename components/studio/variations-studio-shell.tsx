@@ -17,7 +17,8 @@ import {
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { callGenerateApi } from "@/hooks/use-generate-image";
-import { useAuth } from "@/components/providers/auth-provider";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
 import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
 import { shouldUseFirestore } from "@/lib/env";
@@ -28,6 +29,8 @@ import {
   HISTORY_SYNC_EVENT,
   broadcastHistoryUpdate,
   mergeHistoryRecords,
+  persistRecordsMerge,
+  removeRecordFromLocalStorage,
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
 import { usePresetLibrary } from "@/components/studio/preset-library-context";
@@ -58,7 +61,7 @@ const VARIATION_TYPE_LABEL: Record<VariationType, string> = {
 };
 
 export function VariationsStudioShell() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const { records, loading } = useGeneratedImages();
   const [localHistory, setLocalHistory] = useState<GeneratedImageDocument[]>([]);
   const [stylePresets, setStylePresets] = useState<StoryboardStyle[]>(FALLBACK_STORYBOARD_STYLES);
@@ -480,8 +483,7 @@ export function VariationsStudioShell() {
       }
     } else {
       setLocalHistory(prev => prev.filter(r => r.id !== recordId));
-      const updated = localHistory.filter(r => r.id !== recordId);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      removeRecordFromLocalStorage(recordId);
       toast.success('이미지가 삭제되었습니다.');
     }
   }, [recentVariationRecords, user, localHistory]);
@@ -551,24 +553,34 @@ export function VariationsStudioShell() {
         }
 
         try {
-          if (response && response.ok && response.base64Image) {
-            // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
-            // 클라이언트에서 중복 저장하지 않음. base64 이미지를 직접 사용.
+          if (response && response.ok && (response.imageUrl || response.base64Image)) {
+            const resolvedUrl = response.imageUrl ?? response.base64Image ?? null;
 
             setVariationItems(prev => prev.map(vi =>
               vi.id === item.id ? {
                 ...vi,
                 status: "completed",
-                imageUrl: response.base64Image
+                imageUrl: resolvedUrl
               } : vi
             ));
 
             // Update history (localStorage only)
+            const nowIso = new Date().toISOString();
             const historyRecord = {
               id: item.id,
-              imageUrl: response.base64Image,
+              userId: "local",
+              mode: "create" as const,
+              status: "completed" as const,
+              imageUrl: resolvedUrl,
+              originalImageUrl: resolvedUrl,
+              thumbnailUrl: resolvedUrl,
               prompt: presetPrompt,
-              createdAt: new Date().toISOString(),
+              promptMeta: { rawPrompt: presetPrompt },
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              createdAtIso: nowIso,
+              updatedAtIso: nowIso,
+              model: "gpt-image-2",
               metadata: {
                 batchType: "variations",
                 variationType: item.type,
@@ -577,10 +589,8 @@ export function VariationsStudioShell() {
               }
             };
 
-            const existingHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-            const newHistory = mergeHistoryRecords(existingHistory, [historyRecord as any]);
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newHistory));
-            broadcastHistoryUpdate(newHistory, "variations");
+            const merged = persistRecordsMerge([historyRecord as any]);
+            broadcastHistoryUpdate(merged, "variations");
           } else {
             throw new Error(response?.reason || '이미지 생성에 실패했습니다.');
           }

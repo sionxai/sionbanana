@@ -8,7 +8,7 @@ export type GenerationPhase =
   | "canceled";
 
 export interface GenerationSnapshot {
-  activeRequestId: RequestId | null;
+  activeRequestIds: RequestId[];
   lastFinishedRequestId: RequestId | null;
   phase: GenerationPhase;
   resultRecordId?: string;
@@ -25,52 +25,50 @@ export function genReducer(state: GenerationSnapshot, action: Action): Generatio
   switch (action.type) {
     case "START":
       return {
-        activeRequestId: action.requestId,
-        lastFinishedRequestId: state.lastFinishedRequestId,
-        phase: "pending",
-        resultRecordId: undefined,
-        errorMessage: undefined
+        ...state,
+        activeRequestIds: [...state.activeRequestIds, action.requestId],
+        phase: "pending"
       };
-    case "SUCCESS":
-      if (state.activeRequestId !== action.requestId) {
-        return state;
-      }
+    case "SUCCESS": {
+      const remaining = state.activeRequestIds.filter(id => id !== action.requestId);
       return {
-        activeRequestId: null,
+        activeRequestIds: remaining,
         lastFinishedRequestId: action.requestId,
-        phase: "success",
+        phase: remaining.length > 0 ? "pending" : "success",
         resultRecordId: action.recordId,
         errorMessage: undefined
       };
-    case "ERROR":
-      if (state.activeRequestId !== action.requestId) {
-        return state;
-      }
+    }
+    case "ERROR": {
+      const remaining = state.activeRequestIds.filter(id => id !== action.requestId);
       return {
-        activeRequestId: null,
+        activeRequestIds: remaining,
         lastFinishedRequestId: action.requestId,
-        phase: "error",
+        phase: remaining.length > 0 ? "pending" : "error",
         resultRecordId: undefined,
         errorMessage: action.message
       };
-    case "CANCEL":
-      if (state.activeRequestId !== action.requestId) {
-        return state;
-      }
+    }
+    case "CANCEL": {
+      const remaining = state.activeRequestIds.filter(id => id !== action.requestId);
       return {
-        activeRequestId: null,
+        activeRequestIds: remaining,
         lastFinishedRequestId: action.requestId,
-        phase: "canceled",
+        phase: remaining.length > 0 ? "pending" : "canceled",
         resultRecordId: undefined,
         errorMessage: undefined
       };
+    }
     default:
       return state;
   }
 }
 
 export const selectors = {
-  isGenerating: (snapshot: GenerationSnapshot) => snapshot.phase === "pending",
+  isGenerating: (snapshot: GenerationSnapshot) => snapshot.activeRequestIds.length > 0,
+  inflightCount: (snapshot: GenerationSnapshot) => snapshot.activeRequestIds.length,
   showSuccess: (snapshot: GenerationSnapshot, currentRequestId: RequestId | null) =>
-    snapshot.phase === "success" && snapshot.lastFinishedRequestId !== null && snapshot.lastFinishedRequestId === currentRequestId
+    snapshot.phase === "success" &&
+    snapshot.lastFinishedRequestId !== null &&
+    snapshot.lastFinishedRequestId === currentRequestId
 };

@@ -1,40 +1,23 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import type { StoryboardStyle, StoryboardStyleDocument, StoryboardStyleInput } from "@/lib/storyboard/types";
+import { FALLBACK_STORYBOARD_STYLES } from "@/data/storyboard-styles";
+import type {
+  StoryboardStyle,
+  StoryboardStyleInput
+} from "@/lib/storyboard/types";
 
-const COLLECTION = "storyboardStyles";
+// 로컬 단일 사용자 도구로 전환되면서 Firestore 의존을 제거.
+// 스타일 데이터는 data/storyboard-styles.ts(시드)와 인메모리 추가분만 사용한다.
+// 추후 SQLite 통합 시 이 모듈만 교체하면 됨.
 
-function timestampToString(timestamp: any): string | undefined {
-  if (!timestamp) return undefined;
-  if (typeof timestamp === "string") return timestamp;
-  if (timestamp._seconds) {
-    return new Date(timestamp._seconds * 1000).toISOString();
+const inMemoryStore = new Map<string, StoryboardStyle>();
+
+let seeded = false;
+
+function seedIfNeeded() {
+  if (seeded) return;
+  for (const style of FALLBACK_STORYBOARD_STYLES) {
+    inMemoryStore.set(style.id, style);
   }
-  if (timestamp.toDate) {
-    return timestamp.toDate().toISOString();
-  }
-  return undefined;
-}
-
-function docToStyle(doc: any): StoryboardStyle {
-  const data = doc.data();
-  return {
-    id: doc.id,
-    label: data.label,
-    description: data.description,
-    grading: data.grading,
-    bgm: data.bgm,
-    sfx: Array.isArray(data.sfx) ? data.sfx : [],
-    voTone: data.voTone,
-    previewGradient: data.previewGradient,
-    referenceImageUrl: data.referenceImageUrl,
-    prompt: data.prompt,
-    order: typeof data.order === "number" ? data.order : 0,
-    active: data.active !== false,
-    createdAt: timestampToString(data.createdAt),
-    updatedAt: timestampToString(data.updatedAt),
-    createdBy: data.createdBy,
-    updatedBy: data.updatedBy
-  };
+  seeded = true;
 }
 
 function sortStyles(styles: StoryboardStyle[]): StoryboardStyle[] {
@@ -47,39 +30,19 @@ function sortStyles(styles: StoryboardStyle[]): StoryboardStyle[] {
 }
 
 export async function getAllStoryboardStylesAdmin(): Promise<StoryboardStyle[]> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
-  const snapshot = await db.collection(COLLECTION).get();
-  const styles = snapshot.docs.map(docToStyle);
-  return sortStyles(styles);
+  seedIfNeeded();
+  return sortStyles(Array.from(inMemoryStore.values()));
 }
 
 export async function getActiveStoryboardStylesAdmin(): Promise<StoryboardStyle[]> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
-  const snapshot = await db.collection(COLLECTION).where("active", "==", true).get();
-  const styles = snapshot.docs.map(docToStyle);
-  return sortStyles(styles);
+  seedIfNeeded();
+  const active = Array.from(inMemoryStore.values()).filter(style => style.active !== false);
+  return sortStyles(active);
 }
 
 export async function getStoryboardStyleByIdAdmin(id: string): Promise<StoryboardStyle | null> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
-  const docRef = db.collection(COLLECTION).doc(id);
-  const docSnap = await docRef.get();
-  if (!docSnap.exists) {
-    return null;
-  }
-  return docToStyle(docSnap);
+  seedIfNeeded();
+  return inMemoryStore.get(id) ?? null;
 }
 
 export async function createStoryboardStyleAdmin(
@@ -87,24 +50,18 @@ export async function createStoryboardStyleAdmin(
   input: StoryboardStyleInput,
   userId: string
 ): Promise<StoryboardStyle> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
+  seedIfNeeded();
   const now = new Date().toISOString();
-  const docRef = db.collection(COLLECTION).doc(id);
-  const doc: StoryboardStyleDocument & { createdAt: string; updatedAt: string; createdBy: string; updatedBy: string } = {
+  const style: StoryboardStyle = {
+    id,
     ...input,
     createdAt: now,
     updatedAt: now,
     createdBy: userId,
     updatedBy: userId
   };
-
-  await docRef.set(doc);
-  const created = await docRef.get();
-  return docToStyle(created);
+  inMemoryStore.set(id, style);
+  return style;
 }
 
 export async function updateStoryboardStyleAdmin(
@@ -112,33 +69,22 @@ export async function updateStoryboardStyleAdmin(
   input: Partial<StoryboardStyleInput>,
   userId: string
 ): Promise<StoryboardStyle> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
-  const docRef = db.collection(COLLECTION).doc(id);
-  const docSnap = await docRef.get();
-  if (!docSnap.exists) {
+  seedIfNeeded();
+  const existing = inMemoryStore.get(id);
+  if (!existing) {
     throw new Error("스타일을 찾을 수 없습니다.");
   }
-
-  await docRef.update({
+  const updated: StoryboardStyle = {
+    ...existing,
     ...input,
     updatedAt: new Date().toISOString(),
     updatedBy: userId
-  });
-
-  const updated = await docRef.get();
-  return docToStyle(updated);
+  };
+  inMemoryStore.set(id, updated);
+  return updated;
 }
 
 export async function deleteStoryboardStyleAdmin(id: string): Promise<void> {
-  const db = getAdminDb();
-  if (!db) {
-    throw new Error("Firestore Admin이 초기화되지 않았습니다.");
-  }
-
-  await db.collection(COLLECTION).doc(id).delete();
+  seedIfNeeded();
+  inMemoryStore.delete(id);
 }
-

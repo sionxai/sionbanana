@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { FALLBACK_STORYBOARD_STYLES, DEFAULT_STORYBOARD_STYLE_ID } from "@/data/storyboard-styles";
-import { serverEnv } from "@/lib/env";
 import {
   getStoryboardStyleByIdAdmin
 } from "@/lib/storyboard/firestore-admin";
 import type { StoryboardStyle } from "@/lib/storyboard/types";
+import { callCodexResponses, CodexResponseError, type CodexMessage } from "@/lib/codex-fetch";
+import { CodexAuthError } from "@/lib/codex-oauth";
+
+type ChatRole = "system" | "user" | "assistant" | "developer";
+
+function toCodexInput(messages: { role: ChatRole; content: string }[]): CodexMessage[] {
+  return messages.map(message => ({
+    role: message.role === "system" ? "developer" : message.role,
+    content: message.content
+  }));
+}
 
 const generationModeSchema = z.enum(["auto", "none"]);
 const outputModeSchema = z.enum(["json", "natural"]);
@@ -910,13 +920,11 @@ interface GenerateScenesResult {
 }
 
 async function generateScenes({
-  apiKey,
   messages,
   sceneCount,
   sfxMode
 }: {
-  apiKey: string;
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  messages: { role: ChatRole; content: string }[];
   sceneCount: number;
   sfxMode: "auto" | "none";
 }): Promise<GenerateScenesResult> {
@@ -924,70 +932,37 @@ async function generateScenes({
   let currentMessages = [...messages];
   const sfxMinItems = sfxMode === "none" ? 0 : 1;
 
+  const sfxRule =
+    sfxMinItems === 0
+      ? "sfx must be an empty array []."
+      : "sfx must be an array of at least one short English sound effect phrase.";
+
+  const jsonGuard: { role: ChatRole; content: string } = {
+    role: "system",
+    content:
+      `Return ONLY a valid JSON object — no markdown, no commentary, no code fences. ` +
+      `Required shape: { "scenes": [ { "visual": string, "dialogue": string, "sfx": string[], "transition": string } ] }. ` +
+      `The scenes array must have exactly ${sceneCount} items. ` +
+      `${sfxRule}`
+  };
+
   while (attempts < MAX_ATTEMPTS) {
     attempts += 1;
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.7,
-        messages: currentMessages,
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "storyboard_scenes",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                scenes: {
-                  type: "array",
-                  minItems: sceneCount,
-                  maxItems: sceneCount,
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      visual: { type: "string" },
-                      dialogue: { type: "string" },
-                      sfx: {
-                        type: "array",
-                        minItems: sfxMinItems,
-                        items: { type: "string" }
-                      },
-                      transition: { type: "string" }
-                    },
-                    required: ["visual", "dialogue", "sfx", "transition"]
-                  }
-                }
-              },
-              required: ["scenes"],
-              additionalProperties: false
-            }
-          }
-        }
-      })
+    const result = await callCodexResponses({
+      mode: "text",
+      input: toCodexInput([jsonGuard, ...currentMessages]),
+      reasoningEffort: "none",
+      logTag: "api/storyboard:json"
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("OpenAI storyboard API error", response.status, errorText);
-      throw new Error("Failed to reach OpenAI API.");
-    }
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
+    const content = result.text?.trim();
     if (!content) {
-      throw new Error("OpenAI 응답이 비어 있습니다.");
+      throw new Error("Codex 응답이 비어 있습니다.");
     }
 
     let parsedScenes: ScenePayload[];
     try {
-      const parsed = JSON.parse(content) as { scenes: ScenePayload[] };
+      const parsed = JSON.parse(stripJsonFence(content)) as { scenes: ScenePayload[] };
       if (!Array.isArray(parsed.scenes)) {
         throw new Error("scenes is not an array");
       }
@@ -999,7 +974,7 @@ async function generateScenes({
       }));
     } catch (error) {
       console.error("Failed to parse storyboard response", content, error);
-      throw new Error("OpenAI 응답을 해석하지 못했습니다.");
+      throw new Error("Codex 응답을 해석하지 못했습니다.");
     }
 
     if (parsedScenes.length === sceneCount) {
@@ -1023,12 +998,18 @@ async function generateScenes({
   return { scenes: [], attempts };
 }
 
-export async function POST(request: NextRequest) {
-  const apiKey = serverEnv.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, reason: "OPENAI_API_KEY is not configured." }, { status: 500 });
+function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("```")) {
+    return trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
   }
+  return trimmed;
+}
 
+export async function POST(request: NextRequest) {
   try {
     const body = requestSchema.parse(await request.json());
     const outputMode = body.outputMode ?? "json";
@@ -1094,29 +1075,15 @@ export async function POST(request: NextRequest) {
         }
       ];
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.7,
-          messages: naturalMessages
-        })
+      const naturalResult = await callCodexResponses({
+        mode: "text",
+        input: toCodexInput(naturalMessages),
+        reasoningEffort: "none",
+        logTag: "api/storyboard:natural"
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("OpenAI storyboard natural API error", response.status, errorText);
-        return NextResponse.json({ ok: false, reason: "Failed to reach OpenAI API." }, { status: 502 });
-      }
-
-      const data = await response.json();
-      const initialText = data?.choices?.[0]?.message?.content?.trim();
+      const initialText = naturalResult.text?.trim();
       if (!initialText) {
-        return NextResponse.json({ ok: false, reason: "OpenAI 응답이 비어 있습니다." }, { status: 502 });
+        return NextResponse.json({ ok: false, reason: "Codex 응답이 비어 있습니다." }, { status: 502 });
       }
       let text = initialText;
 
@@ -1150,20 +1117,19 @@ export async function POST(request: NextRequest) {
               }
             ];
 
-            const retryRes = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.7, messages: retryMessages })
-            });
-            if (retryRes.ok) {
-              const retryData = await retryRes.json();
-              const retryText = retryData?.choices?.[0]?.message?.content?.trim();
+            try {
+              const retryResult = await callCodexResponses({
+                mode: "text",
+                input: toCodexInput(retryMessages),
+                reasoningEffort: "none",
+                logTag: "api/storyboard:natural-retry-detailed"
+              });
+              const retryText = retryResult.text?.trim();
               if (retryText) {
                 text = retryText;
               }
+            } catch (retryError) {
+              console.warn("storyboard detailed retry failed", retryError);
             }
 
             // Validate again (best-effort). Even if invalid, clean header and strip headings.
@@ -1190,18 +1156,17 @@ export async function POST(request: NextRequest) {
               { role: "assistant" as const, content: text },
               { role: "user" as const, content: "Remove all placeholders ([] and {}) and output only the filled STYLE/SCENE(/DIALOGUE) content." }
             ];
-            const retryRes = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.7, messages: retryMessages })
-            });
-            if (retryRes.ok) {
-              const retryData = await retryRes.json();
-              const retryText = retryData?.choices?.[0]?.message?.content?.trim();
+            try {
+              const retryResult = await callCodexResponses({
+                mode: "text",
+                input: toCodexInput(retryMessages),
+                reasoningEffort: "none",
+                logTag: "api/storyboard:natural-retry-concise"
+              });
+              const retryText = retryResult.text?.trim();
               if (retryText) cleaned = removeUndesiredHeadings(retryText);
+            } catch (retryError) {
+              console.warn("storyboard concise retry failed", retryError);
             }
           }
           text = cleaned;
@@ -1239,13 +1204,21 @@ export async function POST(request: NextRequest) {
     let generatedScenes: ScenePayload[] = [];
     try {
       const result = await generateScenes({
-        apiKey,
         messages: jsonMessages,
         sceneCount: body.sceneCount,
         sfxMode: audioPrefs.sfx
       });
       generatedScenes = result.scenes;
     } catch (error) {
+      if (error instanceof CodexAuthError) {
+        return NextResponse.json({ ok: false, reason: error.message, code: error.code }, { status: 401 });
+      }
+      if (error instanceof CodexResponseError) {
+        return NextResponse.json(
+          { ok: false, reason: `Codex 호출 실패 (${error.status})` },
+          { status: error.status === 401 ? 401 : 502 }
+        );
+      }
       const reason = error instanceof Error ? error.message : "Failed to generate scenes.";
       return NextResponse.json({ ok: false, reason }, { status: 502 });
     }
@@ -1302,6 +1275,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues }, { status: 400 });
+    }
+    if (error instanceof CodexAuthError) {
+      return NextResponse.json({ ok: false, reason: error.message, code: error.code }, { status: 401 });
+    }
+    if (error instanceof CodexResponseError) {
+      console.error("/api/storyboard Codex error", error.status, error.body.slice(0, 500));
+      return NextResponse.json(
+        { ok: false, reason: `Codex 호출 실패 (${error.status})` },
+        { status: error.status === 401 ? 401 : 502 }
+      );
     }
     console.error("/api/storyboard error", error);
     return NextResponse.json({ ok: false, reason: "스토리보드 생성 중 오류가 발생했습니다." }, { status: 500 });

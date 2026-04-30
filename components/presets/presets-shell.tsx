@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/components/providers/auth-provider";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 import type { AspectRatioPreset, GeneratedImageDocument, GenerationMode } from "@/lib/types";
@@ -42,7 +43,7 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
+import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { cn } from "@/lib/utils";
 import { Download, Image as ImageIcon, Sparkles, Stars, Zap } from "lucide-react";
 import Link from "next/link";
@@ -280,7 +281,7 @@ interface RunBatchOptions {
   referenceRecord: GeneratedImageDocument | null;
   referenceMetadata: { referenceId?: string | null };
   fallbackCandidate: GeneratedImageDocument | null;
-  user: ReturnType<typeof useAuth>["user"];
+  user: { uid: string } | null;
   shouldUseFirestore: boolean;
   onProgress?: (view: ViewSpec, index: number, total: number) => void;
   onResult?: (view: ViewSpec, index: number, total: number, outcome: "success" | "error") => void;
@@ -409,7 +410,7 @@ ${viewInstructionSegments.join(" ")}`;
         continue;
       }
 
-      const baseImage = result.base64Image ?? result.imageUrl;
+      const baseImage = result.imageUrl ?? result.base64Image;
       if (!baseImage) {
         toast.error(`${view.label} 뷰 생성 실패`, {
           description: "이미지 데이터를 찾을 수 없습니다."
@@ -531,7 +532,7 @@ ${viewInstructionSegments.join(" ")}`;
 
 
 export function PresetsShell() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const router = useRouter();
   const { records, loading } = useGeneratedImages();
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
@@ -613,7 +614,7 @@ export function PresetsShell() {
         const parsed = JSON.parse(raw) as GeneratedImageDocument[];
         if (Array.isArray(parsed)) {
           const uid = user?.uid ?? null;
-          const filtered = uid ? parsed.filter(record => record.userId === uid) : [];
+          const filtered = uid ? parsed.filter(record => !record.userId || record.userId === uid) : parsed;
           setLocalRecords(filtered);
         }
       }
@@ -701,7 +702,7 @@ export function PresetsShell() {
 
       const currentUid = user?.uid ?? null;
       const incoming = Array.isArray(detail.records)
-        ? detail.records.filter(record => record.userId && record.userId === currentUid)
+        ? detail.records.filter(record => !record.userId || record.userId === currentUid)
         : [];
       if (!incoming.length) {
         return;
@@ -748,7 +749,8 @@ export function PresetsShell() {
     console.log(`[Preset Merge] After merge: ${merged.length} records`);
 
     const uid = user?.uid ?? null;
-    const filtered = uid ? merged.filter(record => record.userId === uid) : [];
+    // 단일 사용자 도구라 userId 필터를 풀어준다.
+    const filtered = uid ? merged.filter(record => !record.userId || record.userId === uid) : merged;
     console.log(`[Preset Merge] After userId filter: ${filtered.length} records`);
 
     return filtered;
@@ -785,11 +787,12 @@ export function PresetsShell() {
     }
     try {
       const historySnapshot = historyRecords.slice(0, 50);
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(historySnapshot));
+      // 머지 패턴: 다른 페이지가 추가한 record를 덮어쓰지 않는다.
+      const merged = persistRecordsMerge(historySnapshot);
       if (historySyncSourceRef.current && historySyncSourceRef.current !== "presets") {
         historySyncSourceRef.current = null;
       } else {
-        broadcastHistoryUpdate(historySnapshot, "presets");
+        broadcastHistoryUpdate(merged, "presets");
       }
     } catch (error) {
       console.warn("Failed to persist local history", error);
@@ -1223,6 +1226,17 @@ type ReferenceImageState = {
     const filename = `${record.id}.png`;
 
     if (url.startsWith("data:")) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    // 로컬 라우트는 그대로 다운로드, 외부 URL만 /api/download 프록시 경유.
+    if (url.startsWith("/api/") || url.startsWith("/")) {
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;

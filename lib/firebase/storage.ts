@@ -1,39 +1,17 @@
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase/client";
+// Firebase Storage 의존이 제거되었지만 호출처가 점진적으로 정리되는 동안 stub만 유지.
 
-export function userImagePath(userId: string, imageId: string) {
+export function userImagePath(userId: string, imageId: string): string {
   return `users/${userId}/images/${imageId}.png`;
 }
 
 export async function uploadUserImage(
   userId: string,
   imageId: string,
-  file: Blob | ArrayBuffer
-) {
-  const storageInstance = storage();
-  if (!storageInstance) {
-    throw new Error("Firebase Storage not initialized");
-  }
-  const storageRef = ref(storageInstance, userImagePath(userId, imageId));
-  const data = file instanceof Blob ? file : new Blob([file]);
-  const result = await uploadBytes(storageRef, data, {
-    contentType: "image/png",
-    cacheControl: "public,max-age=31536000"
-  });
-
-  const url = await getDownloadURL(result.ref);
-  return { url, metadata: result.metadata };
+  _data: Blob | Buffer | ArrayBuffer
+): Promise<{ url: string; storagePath: string }> {
+  return { url: "", storagePath: userImagePath(userId, imageId) };
 }
 
-export async function deleteUserImage(userId: string, imageId: string) {
-  const storageInstance = storage();
-  if (!storageInstance) {
-    throw new Error("Firebase Storage not initialized");
-  }
-  const storageRef = ref(storageInstance, userImagePath(userId, imageId));
-  try {
-    await deleteObject(storageRef);
-  } catch (error) {
-    console.warn("Failed to delete user image", error);
-  }
+export async function deleteUserImage(_userId: string, _imageId: string): Promise<void> {
+  // noop
 }

@@ -103,6 +103,7 @@ interface PromptPanelProps {
   onGenerate?: (action: "primary" | "remix") => void;
   onRefinePrompt?: () => void;
   generating?: boolean;
+  inflightCount?: number;
 }
 
 export function PromptPanel({
@@ -135,7 +136,8 @@ export function PromptPanel({
   onResetPresets,
   onGenerate,
   onRefinePrompt,
-  generating
+  generating,
+  inflightCount = 0
 }: PromptPanelProps) {
   const {
     externalGroups,
@@ -353,9 +355,8 @@ export function PromptPanel({
           <Button
             className="bg-sky-500 hover:bg-sky-500/90"
             onClick={() => onGenerate?.("primary")}
-            disabled={generating}
           >
-            {generating ? "생성 중..." : "이미지 생성"}
+            {inflightCount > 0 ? `이미지 생성 (${inflightCount} 진행 중)` : "이미지 생성"}
           </Button>
           <Button className="bg-amber-500 hover:bg-amber-500/90" onClick={() => onGenerate?.("remix")}>
             변형 생성

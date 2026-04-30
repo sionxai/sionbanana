@@ -8,6 +8,12 @@ import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
+import { GenerationProgressIndicator } from "@/components/studio/generation-progress-indicator";
+import {
+  GenerationOptionsPanel,
+  DEFAULT_GENERATION_OPTIONS,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
 import { SketchCanvas } from "@/components/studio/sketch-canvas";
 import { DragHandle } from "@/components/studio/drag-handle";
 import { useResizable } from "@/hooks/use-resizable";
@@ -15,7 +21,9 @@ import { useGenerationCoordinator } from "./use-generation-coordinator";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 import { toast } from "sonner";
-import { useAuth } from "@/components/providers/auth-provider";
+// 로컬 단일 사용자 환경 — 인증 stub
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
 import {
   deleteGeneratedImageDoc,
@@ -74,7 +82,7 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
+import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 
 async function readFileAsDataURL(file: File): Promise<string> {
@@ -361,7 +369,7 @@ type ReferenceImageState = {
 };
 
 function StudioShellInner() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const { buildLightingInstruction, buildPoseInstruction } = usePresetLibrary();
   const lastUidRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -390,6 +398,7 @@ function StudioShellInner() {
   });
 const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
 const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
+const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
@@ -397,6 +406,39 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   );
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
+
+  // 카메라/조명/포즈 등 옵션이 변하면 그 라벨/지시문을 합쳐 prompt textarea를 자동 갱신.
+  // 사용자가 어떤 옵션도 안 건드린 default 상태에서는 textarea를 건드리지 않는다.
+  useEffect(() => {
+    const parts: string[] = [];
+
+    const lighting = buildLightingInstruction(lightingSelections);
+    if (lighting) parts.push(lighting);
+
+    const pose = buildPoseInstruction(poseSelections);
+    if (pose) parts.push(pose);
+
+    const cam: string[] = [];
+    if (cameraAngle && cameraAngle !== DEFAULT_CAMERA_ANGLE) cam.push(`Camera angle: ${cameraAngle}`);
+    if (aperture !== APERTURE_DEFAULT) cam.push(`Aperture: ${formatAperture(aperture)}`);
+    if (subjectDirection && subjectDirection !== DEFAULT_SUBJECT_DIRECTION) cam.push(`Subject direction: ${subjectDirection}`);
+    if (cameraDirection && cameraDirection !== DEFAULT_CAMERA_DIRECTION) cam.push(`Camera direction: ${cameraDirection}`);
+    if (zoomLevel && zoomLevel !== DEFAULT_ZOOM_LEVEL) cam.push(`Zoom: ${zoomLevel}`);
+    if (cam.length) parts.push(cam.join("; "));
+
+    if (parts.length === 0) return;
+    setPrompt(parts.join("\n\n"));
+  }, [
+    lightingSelections,
+    poseSelections,
+    cameraAngle,
+    aperture,
+    subjectDirection,
+    cameraDirection,
+    zoomLevel,
+    buildLightingInstruction,
+    buildPoseInstruction
+  ]);
   const [gptLoading, setGptLoading] = useState(false);
   const [lastPromptDetails, setLastPromptDetails] = useState<PromptDetails | null>(null);
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
@@ -406,7 +448,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   const pendingSelectedImageIdRef = useRef<string | null>(null);
   const [selectedRecordOverride, setSelectedRecordOverride] = useState<GeneratedImageDocument | null>(null);
   const [freshlyGeneratedRecord, setFreshlyGeneratedRecord] = useState<GeneratedImageDocument | null>(null);
-  const { snapshot: generationSnapshot, isGenerating, showSuccessFor, start: startGeneration } = useGenerationCoordinator();
+  const { snapshot: generationSnapshot, isGenerating, inflightCount, showSuccessFor, start: startGeneration } = useGenerationCoordinator();
   const [currentRequestId, setCurrentRequestId] = useState<number | null>(null);
   const [activeGuard, setActiveGuard] = useState<{ requestId: number; onSuccess: (recordId: string) => void; onError: (message?: string) => void; timeoutId?: NodeJS.Timeout } | null>(null);
 
@@ -574,7 +616,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         const parsed = JSON.parse(raw) as GeneratedImageDocument[];
         if (Array.isArray(parsed)) {
           const uid = user?.uid ?? null;
-          const filtered = uid ? parsed.filter(record => record.userId === uid) : [];
+          const filtered = uid ? parsed.filter(record => !record.userId || record.userId === uid) : parsed;
           setLocalRecords(filtered);
         }
       }
@@ -615,7 +657,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
 
       const currentUid = user?.uid ?? null;
       const incoming = Array.isArray(detail.records)
-        ? detail.records.filter(r => r.userId && r.userId === currentUid)
+        ? detail.records.filter(r => !r.userId || r.userId === currentUid)
         : [];
       if (!incoming.length) {
         return;
@@ -640,9 +682,11 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   }, [user?.uid]);
 
   const mergedRecords = useMemo(() => {
+    // 단일 사용자 도구라 userId 필터를 풀어준다. record.userId가 없거나 현재 uid면 통과.
     const merged = mergeHistoryRecords(localRecords, records);
     const uid = user?.uid ?? null;
-    return uid ? merged.filter(record => record.userId === uid) : [];
+    if (!uid) return merged;
+    return merged.filter(record => !record.userId || record.userId === uid);
   }, [localRecords, records, user?.uid]);
 
   const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
@@ -662,18 +706,10 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   }, [records]);
 
   useEffect(() => {
-    if (!historyHydrated || typeof window === "undefined") {
-      return;
-    }
-    // DISABLED: localStorage persistence to avoid quota issues
-    // Firestore is the primary storage, localStorage is no longer used
-    // Just clear it if it exists to free up space
-    try {
-      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
-    } catch (error) {
-      console.warn("Failed to clear localStorage", error);
-    }
-  }, [historyHydrated]);
+    if (!historyHydrated || typeof window === "undefined") return;
+    // localStorage는 단일 진실 원천. 자기 state로 통째 덮어쓰지 않고 항상 머지로 저장.
+    persistRecordsMerge(localRecords);
+  }, [historyHydrated, localRecords]);
 
   useEffect(() => {
     if (!historyRecords.length) {
@@ -994,13 +1030,13 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       const guard = startGeneration();
       setCurrentRequestId(guard.requestId);
 
-      // Set up 30-second timeout fallback
+      // 이미지 생성은 60~90초까지 걸릴 수 있어 클라이언트 강제 타임아웃은 180초로 둔다.
       const timeoutId = setTimeout(() => {
-        console.warn('Generation timeout after 30 seconds, forcing completion');
+        console.warn('Generation timeout after 180 seconds, forcing completion');
         guard.onError('Generation timeout - please try again');
         clearActiveGuard();
         setCurrentRequestId(null);
-      }, 30000);
+      }, 180000);
 
       setActiveGuard({
         requestId: guard.requestId,
@@ -1273,6 +1309,13 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         generationOptions.referenceGallery = uniqueGalleryReferences;
       }
 
+      // 좌하단 옵션 패널의 값 병합 (quality / size / format / moderation / count)
+      generationOptions.quality = imageGenOptions.quality;
+      generationOptions.imageSize = imageGenOptions.size;
+      generationOptions.format = imageGenOptions.format;
+      generationOptions.moderation = imageGenOptions.moderation;
+      generationOptions.count = imageGenOptions.count;
+
       try {
 
         const result = await callGenerateApi(
@@ -1303,7 +1346,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             ? crypto.randomUUID()
             : `local-${Date.now()}`;
         const now = new Date().toISOString();
-        const baseImage = result.base64Image ?? result.imageUrl;
+        const baseImage = result.imageUrl ?? result.base64Image;
         if (!baseImage) {
           toast.error("이미지 데이터를 찾을 수 없습니다.");
           guard.onError("missing-image");
@@ -1386,11 +1429,9 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
           updatedAt: now
         };
 
-        const promoteToReference = !hasReferenceDoc && action === "primary";
-        const referenceEntry = mergeLocalRecord(newRecord, { promoteToReference });
-        if (referenceEntry && promoteToReference) {
-          setReferenceImageOverride(storedImageUrl);
-        }
+        // 기준 이미지는 항상 비어 있는 게 디폴트. 첫 생성 결과를 자동으로 reference로 박지 않는다.
+        // 사용자가 history-panel에서 "기준이미지로 사용"을 누를 때만 promote.
+        mergeLocalRecord(newRecord, { promoteToReference: false });
 
         // Set freshly generated record for immediate display
         setFreshlyGeneratedRecord(newRecord);
@@ -1890,7 +1931,7 @@ ${viewInstruction}`;
             ? crypto.randomUUID()
             : `${actionLabel}-${view.id}-${Date.now()}`;
         const now = new Date().toISOString();
-        const baseImage = result.base64Image ?? result.imageUrl;
+        const baseImage = result.imageUrl ?? result.base64Image;
         if (!baseImage) {
           toast.error(`${view.label} 뷰 생성 실패`, {
             description: "이미지 데이터를 찾을 수 없습니다."
@@ -2367,6 +2408,17 @@ ${viewInstruction}`;
         return;
       }
 
+      // 로컬 라우트는 그대로 다운로드, 외부 URL만 /api/download 프록시 경유.
+      if (url.startsWith("/api/") || url.startsWith("/")) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${target.id}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
       const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes('?') ? '&' : '?'}alt=media`;
       const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(
         `${target.id}.png`
@@ -2760,7 +2812,9 @@ ${viewInstruction}`;
             record.id !== referenceId &&
             record.metadata?.isReference !== true
           );
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+          // 머지 패턴 통과 안 시키고, 명시적으로 reference 관련 record 제거.
+          window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+          window.dispatchEvent(new Event("yesgem-history-refresh"));
         }
       } catch (error) {
         console.warn("Failed to update localStorage", error);
@@ -2833,6 +2887,8 @@ ${viewInstruction}`;
 
   return (
     <div className="flex h-full flex-1 flex-col">
+      <GenerationProgressIndicator inflightCount={inflightCount} />
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       <div className="border-b bg-gradient-to-r from-background via-background to-background/95 shadow-sm">
         <div className="flex items-center justify-between px-8 py-5">
           <div className="flex flex-col gap-1">
@@ -2869,6 +2925,7 @@ ${viewInstruction}`;
                     <TabsTrigger
                       key={mode.id}
                       value={mode.id}
+                      onClick={() => setActiveMode(mode.id as GenerationMode)}
                       className={cn(
                         "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg",
                         "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
@@ -2953,6 +3010,7 @@ ${viewInstruction}`;
               onGenerate={handleGenerate}
               onRefinePrompt={handleRefinePrompt}
               generating={isGenerating || characterBatchPending || view360BatchPending}
+              inflightCount={inflightCount}
             />
           )}
         </div>

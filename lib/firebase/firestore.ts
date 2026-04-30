@@ -1,106 +1,66 @@
-import {
-  collection,
-  deleteDoc,
-  doc,
-  orderBy,
-  query,
-  serverTimestamp,
-  Timestamp,
-  setDoc
-} from "firebase/firestore";
-import { firestore } from "@/lib/firebase/client";
-import type { GenerationMode, GeneratedImageDocument } from "@/lib/types";
-
-export function userDocRef(userId: string) {
-  const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
-  return doc(db, "users", userId);
-}
-
-export function userImagesCollection(userId: string) {
-  const db = firestore();
-  if (!db) {
-    throw new Error("Firestore not initialized");
-  }
-  return collection(db, "users", userId, "images");
-}
-
-export function recentImagesQuery(userId: string) {
-  return query(userImagesCollection(userId), orderBy("createdAt", "desc"));
-}
-
-export function promptHistoryCollection(userId: string) {
-  const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
-  return collection(db, "users", userId, "prompts");
-}
-
-export const serverNow = () => serverTimestamp();
-export const toDateString = (timestamp: Timestamp | null | undefined) =>
-  timestamp ? timestamp.toDate().toISOString() : new Date(0).toISOString();
+// Firestore 의존이 제거되었지만 호출처가 점진적으로 정리되는 동안 stub만 유지.
 
 export interface GeneratedImageFirestorePayload {
-  mode: GenerationMode;
-  status: "pending" | "completed" | "failed";
-  promptMeta: GeneratedImageDocument["promptMeta"];
-  imageUrl?: string;
-  thumbnailUrl?: string;
-  originalImageUrl?: string;
-  diff?: GeneratedImageDocument["diff"];
-  metadata?: Record<string, unknown>;
-  model: string;
-  costCredits?: number;
-  createdAtIso: string;
-  updatedAtIso: string;
+  mode?: string;
+  status?: string;
+  promptMeta?: any;
+  imageUrl?: string | null;
+  originalImageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  diff?: Record<string, unknown> | null;
+  metadata?: any;
+  model?: string | null;
+  costCredits?: number | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  createdAtIso?: string | null;
+  updatedAtIso?: string | null;
+  [key: string]: unknown;
 }
 
 export async function saveGeneratedImageDoc(
-  userId: string,
-  imageId: string,
-  payload: GeneratedImageFirestorePayload
-) {
-  const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
-  const docRef = doc(db, "users", userId, "images", imageId);
-  const data: Record<string, unknown> = {
-    ...payload,
-    createdAt: serverNow(),
-    updatedAt: serverNow()
-  };
-
-  Object.keys(data).forEach(key => {
-    if (data[key] === undefined) {
-      delete data[key];
-    }
-  });
-
-  await setDoc(docRef, data);
-
-  return docRef;
+  _userId: string,
+  _imageId: string,
+  _payload: GeneratedImageFirestorePayload
+): Promise<void> {
+  // noop
 }
 
-export async function deleteGeneratedImageDoc(userId: string, imageId: string) {
-  const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
-  const docRef = doc(db, "users", userId, "images", imageId);
-  await deleteDoc(docRef);
+export async function deleteGeneratedImageDoc(
+  _userId: string,
+  _imageId: string
+): Promise<void> {
+  // noop
 }
 
 export async function updateGeneratedImageDoc(
-  userId: string,
-  imageId: string,
-  data: Record<string, unknown>
-) {
-  const db = firestore();
-  if (!db) throw new Error("Firestore not initialized");
-  const docRef = doc(db, "users", userId, "images", imageId);
-  const sanitized: Record<string, unknown> = { ...data, updatedAt: serverNow() };
+  _userId: string,
+  _imageId: string,
+  _patch: Partial<GeneratedImageFirestorePayload>
+): Promise<void> {
+  // noop
+}
 
-  Object.keys(sanitized).forEach(key => {
-    if (sanitized[key] === undefined) {
-      delete sanitized[key];
-    }
-  });
+export const serverNow = () => new Date();
 
-  await setDoc(docRef, sanitized, { merge: true });
+export function toDateString(timestamp: unknown): string {
+  if (typeof timestamp === "string") return timestamp;
+  if (timestamp instanceof Date) return timestamp.toISOString();
+  return new Date().toISOString();
+}
+
+export function userDocRef(_userId: string): null {
+  return null;
+}
+
+export function userImagesCollection(_userId: string): null {
+  return null;
+}
+
+export function recentImagesQuery(_userId: string): null {
+  return null;
+}
+
+export function promptHistoryCollection(_userId: string): null {
+  return null;
 }

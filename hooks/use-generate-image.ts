@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { firebaseAuth } from "@/lib/firebase/client";
 import type { GenerationMode } from "@/lib/types";
 
 export interface GenerateVariables {
@@ -24,23 +23,14 @@ export interface GenerateResponse {
 }
 
 export async function callGenerateApi(variables: GenerateVariables, signal?: AbortSignal): Promise<GenerateResponse> {
-  const auth = firebaseAuth();
-  const user = auth?.currentUser;
-  const token = user ? await user.getIdToken() : "";
-
-  // Create a timeout signal if none provided
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000); // 30 second timeout
-
+  const timeoutId = setTimeout(() => timeoutController.abort(), 90000); // 90 seconds (Codex 응답이 느릴 수 있음)
   const effectiveSignal = signal || timeoutController.signal;
 
   try {
     const response = await fetch("/api/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {})
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(variables),
       signal: effectiveSignal
     });
@@ -60,7 +50,7 @@ export async function callGenerateApi(variables: GenerateVariables, signal?: Abo
   } catch (error) {
     clearTimeout(timeoutId);
 
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
         reason: "요청 시간이 초과되었습니다. 다시 시도해주세요."

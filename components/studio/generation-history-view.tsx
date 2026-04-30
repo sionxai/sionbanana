@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useAuth } from "@/components/providers/auth-provider";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
 import { shouldUseFirestore } from "@/lib/env";
@@ -243,7 +244,7 @@ function GalleryCard({
 
 export function GenerationHistoryView() {
   const { records, loading } = useGeneratedImages({ limitResults: HISTORY_LIMIT });
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const [selectedRecord, setSelectedRecord] = useState<GeneratedImageDocument | null>(null);
   const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
   const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
@@ -386,6 +387,11 @@ export function GenerationHistoryView() {
     const filename = `${record.id}.png`;
 
     if (url.startsWith("data:")) {
+      return { href: url, filename };
+    }
+
+    // 로컬 라우트(/api/images/<id>)는 그대로 사용. 외부 URL만 /api/download 프록시 경유.
+    if (url.startsWith("/api/") || url.startsWith("/")) {
       return { href: url, filename };
     }
 

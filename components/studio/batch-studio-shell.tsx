@@ -30,14 +30,15 @@ import type {
 } from "@/components/studio/types";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/components/providers/auth-provider";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { uploadUserImage } from "@/lib/firebase/storage";
 import { saveGeneratedImageDoc } from "@/lib/firebase/firestore";
 import { shouldUseFirestore } from "@/lib/env";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
-import { mergeHistoryRecords, broadcastHistoryUpdate } from "@/components/studio/history-sync";
+import { mergeHistoryRecords, broadcastHistoryUpdate, persistRecordsMerge } from "@/components/studio/history-sync";
 import { PresetLibraryProvider } from "@/components/studio/preset-library-context";
 import { deleteUserImage } from "@/lib/firebase/storage";
 import { deleteGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
@@ -80,7 +81,7 @@ interface BatchItem {
 }
 
 function BatchStudioShellInner() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlsRef = useRef<string[]>([]);
 
@@ -137,17 +138,17 @@ function BatchStudioShellInner() {
     }
   }, []);
 
-  // 로컬 기록이 변경될 때 저장 (비활성화: Firestore 사용)
-  // useEffect(() => {
-  //   if (localRecords.length > 0) {
-  //     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localRecords));
-  //   }
-  // }, [localRecords]);
+  // localStorage는 단일 진실 원천. 머지 저장으로 다른 탭의 record를 덮어쓰지 않는다.
+  useEffect(() => {
+    persistRecordsMerge(localRecords);
+  }, [localRecords]);
 
   const mergedRecords = useMemo(() => {
     const merged = mergeHistoryRecords(localRecords, records);
     const uid = user?.uid ?? null;
-    return uid ? merged.filter(record => record.userId === uid) : [];
+    if (!uid) return merged;
+    // 단일 사용자 도구라 userId 필터를 풀어준다.
+    return merged.filter(record => !record.userId || record.userId === uid);
   }, [localRecords, records, user?.uid]);
 
   const historyRecords = useMemo(() => mergedRecords.filter(record =>
@@ -714,7 +715,7 @@ function BatchStudioShellInner() {
           continue;
         }
 
-        const base64 = response.base64Image ?? response.imageUrl;
+        const base64 = response.imageUrl ?? response.base64Image;
         if (!base64) {
           const errorMsg = "이미지 데이터를 찾을 수 없습니다.";
           console.error(`❌ [Batch Generate] 이미지 데이터 없음: ${item.name}`, {
