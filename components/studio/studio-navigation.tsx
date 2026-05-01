@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -15,6 +16,30 @@ const navItems = [
 
 export function StudioNavigation() {
   const pathname = usePathname();
+  const [authStatus, setAuthStatus] = useState<"unknown" | "missing" | "web" | "codex-cli">("unknown");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAuthStatus() {
+      try {
+        const response = await fetch("/api/auth/status", { cache: "no-store" });
+        const body = (await response.json()) as {
+          authenticated?: boolean;
+          source?: "web" | "codex-cli";
+        };
+        if (cancelled) return;
+        setAuthStatus(body.authenticated ? body.source ?? "codex-cli" : "missing");
+      } catch {
+        if (!cancelled) {
+          setAuthStatus("missing");
+        }
+      }
+    }
+    void loadAuthStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/90 backdrop-blur">
@@ -31,6 +56,18 @@ export function StudioNavigation() {
               )}
             >
               <span>{item.label}</span>
+              {item.href === "/usage" && authStatus !== "unknown" ? (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    authStatus === "missing"
+                      ? "bg-amber-500/10 text-amber-600"
+                      : "bg-emerald-500/10 text-emerald-600"
+                  )}
+                >
+                  {authStatus === "missing" ? "로그인" : authStatus === "web" ? "Web" : "CLI"}
+                </span>
+              ) : null}
             </Link>
           );
         })}

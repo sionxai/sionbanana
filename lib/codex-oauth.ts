@@ -3,6 +3,7 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { getDataDir } from "@/lib/local/storage";
 
 const REFRESH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const REFRESH_ENDPOINT = "https://auth.openai.com/oauth/token";
@@ -26,6 +27,18 @@ type CachedAuth = {
   refreshToken: string;
   expiresAt: number;
   filePath: string;
+  source: CodexAuthSource;
+  email?: string;
+  planType?: string;
+};
+
+export type CodexAuthSource = "web" | "codex-cli";
+
+export type CodexOAuthTokens = {
+  access_token: string;
+  id_token?: string;
+  refresh_token: string;
+  account_id?: string;
 };
 
 let cache: CachedAuth | null = null;
@@ -41,20 +54,34 @@ export class CodexAuthError extends Error {
   }
 }
 
-function authFileCandidates(): string[] {
-  const candidates = [
-    process.env.CHATGPT_LOCAL_HOME ? path.join(process.env.CHATGPT_LOCAL_HOME, "auth.json") : null,
-    process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, "auth.json") : null,
-    path.join(homedir(), ".chatgpt-local", "auth.json"),
-    path.join(homedir(), ".codex", "auth.json")
-  ];
-  return candidates.filter((p): p is string => Boolean(p));
+type AuthFileCandidate = {
+  filePath: string;
+  source: CodexAuthSource;
+};
+
+export function getWebCodexAuthFilePath(): string {
+  return path.join(getDataDir(), "codex-auth.json");
 }
 
-async function locateAuthFile(): Promise<string> {
+function authFileCandidates(): AuthFileCandidate[] {
+  const candidates = [
+    { filePath: getWebCodexAuthFilePath(), source: "web" },
+    process.env.CHATGPT_LOCAL_HOME
+      ? { filePath: path.join(process.env.CHATGPT_LOCAL_HOME, "auth.json"), source: "codex-cli" }
+      : null,
+    process.env.CODEX_HOME
+      ? { filePath: path.join(process.env.CODEX_HOME, "auth.json"), source: "codex-cli" }
+      : null,
+    { filePath: path.join(homedir(), ".chatgpt-local", "auth.json"), source: "codex-cli" },
+    { filePath: path.join(homedir(), ".codex", "auth.json"), source: "codex-cli" }
+  ];
+  return candidates.filter((candidate): candidate is AuthFileCandidate => Boolean(candidate));
+}
+
+async function locateAuthFile(): Promise<AuthFileCandidate> {
   for (const candidate of authFileCandidates()) {
     try {
-      await fs.access(candidate);
+      await fs.access(candidate.filePath);
       return candidate;
     } catch {
       // try next
@@ -80,6 +107,7 @@ async function readAuthFile(filePath: string): Promise<CodexAuthFile> {
 
 async function writeAuthFile(filePath: string, data: CodexAuthFile): Promise<void> {
   const serialized = JSON.stringify(data, null, 2);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, serialized, { mode: 0o600 });
 }
 
@@ -105,6 +133,22 @@ function tokenExpiresAt(jwt: string): number {
     return 0;
   }
   return payload.exp * 1000;
+}
+
+function extractStringClaim(
+  payload: Record<string, unknown> | null,
+  keys: string[]
+): string | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function extractAccountId(idToken: string | undefined, fallback: string | undefined): string | null {
@@ -170,7 +214,8 @@ async function refreshTokens(refreshToken: string): Promise<{
 }
 
 async function loadFreshAuth(): Promise<CachedAuth> {
-  const filePath = await locateAuthFile();
+  const located = await locateAuthFile();
+  const filePath = located.filePath;
   const file = await readAuthFile(filePath);
   const tokens = file.tokens ?? {};
 
@@ -205,10 +250,12 @@ async function loadFreshAuth(): Promise<CachedAuth> {
       last_refresh: new Date().toISOString()
     };
 
-    try {
-      await writeAuthFile(filePath, updatedFile);
-    } catch (error) {
-      console.warn("[codex-oauth] auth.json 재기록 실패 (메모리 캐시는 유지)", error);
+    if (located.source === "web") {
+      try {
+        await writeAuthFile(filePath, updatedFile);
+      } catch (error) {
+        console.warn("[codex-oauth] web auth 재기록 실패 (메모리 캐시는 유지)", error);
+      }
     }
   }
 
@@ -220,12 +267,22 @@ async function loadFreshAuth(): Promise<CachedAuth> {
     );
   }
 
+  const idPayload = idToken ? decodeJwtPayload(idToken) : null;
+
   return {
     accessToken,
     accountId,
     refreshToken,
     expiresAt: expiresAt || Date.now() + 60 * 60 * 1000,
-    filePath
+    filePath,
+    source: located.source,
+    email: extractStringClaim(idPayload, ["email", "https://api.openai.com/auth.email"]),
+    planType: extractStringClaim(idPayload, [
+      "plan_type",
+      "planType",
+      "https://api.openai.com/auth.plan_type",
+      "https://api.openai.com/auth.planType"
+    ])
   };
 }
 
@@ -253,11 +310,47 @@ export function clearCodexAuthCache(): void {
   inflight = null;
 }
 
+export async function saveWebCodexAuth(tokens: CodexOAuthTokens): Promise<string> {
+  const filePath = getWebCodexAuthFilePath();
+  const accountId = extractAccountId(tokens.id_token, tokens.account_id);
+  const file: CodexAuthFile = {
+    tokens: {
+      access_token: tokens.access_token,
+      id_token: tokens.id_token,
+      refresh_token: tokens.refresh_token,
+      ...(accountId ? { account_id: accountId } : {})
+    },
+    last_refresh: new Date().toISOString()
+  };
+
+  await writeAuthFile(filePath, file);
+  clearCodexAuthCache();
+  return filePath;
+}
+
+export async function deleteWebCodexAuth(): Promise<boolean> {
+  const filePath = getWebCodexAuthFilePath();
+  try {
+    await fs.unlink(filePath);
+    clearCodexAuthCache();
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      clearCodexAuthCache();
+      return false;
+    }
+    throw error;
+  }
+}
+
 export async function getCodexAuthStatus(): Promise<{
   authenticated: boolean;
   filePath?: string;
   accountId?: string;
   expiresAt?: number;
+  source?: CodexAuthSource;
+  email?: string;
+  planType?: string;
   error?: { code: string; message: string };
 }> {
   try {
@@ -267,7 +360,10 @@ export async function getCodexAuthStatus(): Promise<{
       authenticated: true,
       filePath: fresh.filePath,
       accountId: fresh.accountId,
-      expiresAt: fresh.expiresAt
+      expiresAt: fresh.expiresAt,
+      source: fresh.source,
+      email: fresh.email,
+      planType: fresh.planType
     };
   } catch (error) {
     if (error instanceof CodexAuthError) {

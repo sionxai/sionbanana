@@ -1,18 +1,19 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
-type HealthResponse = {
-  ok: boolean;
-  codex?: {
-    authenticated: boolean;
-    error?: { code: string; message: string } | null;
-  };
+type AuthStatusResponse = {
+  authenticated: boolean;
+  error?: { code: string; message: string } | null;
 };
 
 const POLL_INTERVAL_MS = 30_000;
 
 export function AuthStatusBanner() {
+  const pathname = usePathname();
   const [status, setStatus] = useState<"loading" | "ok" | "missing">("loading");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -21,15 +22,15 @@ export function AuthStatusBanner() {
 
     const tick = async () => {
       try {
-        const res = await fetch("/api/health", { cache: "no-store" });
-        const body = (await res.json()) as HealthResponse;
+        const res = await fetch("/api/auth/status", { cache: "no-store" });
+        const body = (await res.json()) as AuthStatusResponse;
         if (cancelled) return;
-        if (body.codex?.authenticated) {
+        if (body.authenticated) {
           setStatus("ok");
           setMessage(null);
         } else {
           setStatus("missing");
-          setMessage(body.codex?.error?.message ?? "Codex 인증 정보를 찾지 못했습니다.");
+          setMessage(body.error?.message ?? "Codex 인증 정보를 찾지 못했습니다.");
         }
       } catch (err) {
         if (cancelled) return;
@@ -46,20 +47,20 @@ export function AuthStatusBanner() {
     };
   }, []);
 
-  if (status !== "missing") {
+  if (status !== "missing" || pathname === "/auth") {
     return null;
   }
 
   return (
-    <div className="sticky top-0 z-50 border-b border-yellow-300/60 bg-yellow-50 text-yellow-950 dark:border-yellow-300/40 dark:bg-yellow-950/40 dark:text-yellow-100">
-      <div className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-2 text-sm sm:flex-row sm:items-center sm:gap-3">
-        <span className="font-semibold">⚠ Codex 인증 필요</span>
+    <div className="sticky top-0 z-50 border-b border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+      <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-2 text-sm sm:flex-row sm:items-center sm:gap-3">
+        <span className="font-semibold">Codex 인증 필요</span>
         <span className="flex-1">
-          {message} 터미널에서 다음 명령을 실행한 뒤 페이지를 새로고침해주세요.
+          {message} 브라우저에서 ChatGPT 계정을 연결하면 바로 생성 기능을 사용할 수 있습니다.
         </span>
-        <code className="self-start rounded bg-yellow-100 px-2 py-1 font-mono text-xs text-yellow-900 sm:self-auto dark:bg-yellow-900/60 dark:text-yellow-50">
-          npx @openai/codex login
-        </code>
+        <Button asChild size="sm" variant="outline" className="self-start border-amber-500/40 bg-background/40 sm:self-auto">
+          <Link href="/auth">로그인 페이지로 이동</Link>
+        </Button>
       </div>
     </div>
   );

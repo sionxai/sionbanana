@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +41,15 @@ type ApiResponse =
   | { ok: true; usage: Usage }
   | { ok: false; reason: string; code?: string };
 
+type AuthStatus = {
+  authenticated: boolean;
+  email?: string | null;
+  planType?: string | null;
+  accountId?: string | null;
+  expiresAt?: number | null;
+  source?: "web" | "codex-cli";
+};
+
 function formatDuration(seconds: number): string {
   if (seconds <= 0) return "지금";
   const h = Math.floor(seconds / 3600);
@@ -64,6 +75,12 @@ function formatResetAt(epochSec: number): string {
   if (!epochSec) return "—";
   const d = new Date(epochSec * 1000);
   return d.toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatAuthSource(source?: AuthStatus["source"]): string {
+  if (source === "web") return "Web 로그인";
+  if (source === "codex-cli") return "Codex CLI 인증";
+  return "확인 중";
 }
 
 function ProgressBar({ percent }: { percent: number }) {
@@ -118,13 +135,26 @@ function WindowRow({
 
 export function UsageView() {
   const [data, setData] = useState<Usage | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const refreshAuthStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/status", { cache: "no-store" });
+      const body = (await response.json()) as AuthStatus;
+      setAuthStatus(body);
+    } catch {
+      setAuthStatus({ authenticated: false });
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      await refreshAuthStatus();
       const response = await fetch("/api/usage", { cache: "no-store" });
       const body = (await response.json()) as ApiResponse;
       if (!body.ok) {
@@ -138,7 +168,28 @@ export function UsageView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshAuthStatus]);
+
+  const handleLogout = useCallback(async () => {
+    if (!window.confirm("Web 로그인 토큰을 삭제할까요? Codex CLI 인증 파일은 유지됩니다.")) {
+      return;
+    }
+
+    setLoggingOut(true);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "DELETE" });
+      const body = (await response.json()) as { ok?: boolean; removed?: boolean };
+      if (!response.ok || !body.ok) {
+        throw new Error("로그아웃에 실패했습니다.");
+      }
+      toast.success(body.removed ? "Web 로그인 토큰을 삭제했습니다." : "삭제할 Web 로그인 토큰이 없습니다.");
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "로그아웃에 실패했습니다.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
@@ -153,9 +204,14 @@ export function UsageView() {
             ChatGPT 구독 한도 (5시간 / 주간) 및 모델별 추가 한도 현황입니다.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-          {loading ? "불러오는 중..." : "새로고침"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleLogout} disabled={loggingOut}>
+            {loggingOut ? "로그아웃 중..." : "로그아웃"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+            {loading ? "불러오는 중..." : "새로고침"}
+          </Button>
+        </div>
       </header>
 
       {error ? (
@@ -163,9 +219,11 @@ export function UsageView() {
           <CardContent className="py-6 text-sm text-destructive">
             {error}
             <div className="mt-2 text-xs text-muted-foreground">
-              인증이 만료되었거나 Codex CLI에 로그인되지 않았을 수 있습니다. 터미널에서{" "}
-              <code className="rounded bg-muted px-1 py-0.5">npx @openai/codex login</code>을 실행한 후
-              다시 시도해주세요.
+              인증이 만료되었거나 연결되지 않았을 수 있습니다.{" "}
+              <Link href="/auth" className="font-medium text-primary underline-offset-4 hover:underline">
+                로그인 페이지
+              </Link>
+              에서 ChatGPT 계정을 다시 연결해주세요.
             </div>
           </CardContent>
         </Card>
@@ -185,12 +243,18 @@ export function UsageView() {
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">플랜</span>
                 <Badge variant="secondary" className="capitalize">
-                  {data.plan_type ?? "unknown"}
+                  {data.plan_type ?? authStatus?.planType ?? "unknown"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">인증 방식</span>
+                <Badge variant={authStatus?.source === "web" ? "success" : "outline"}>
+                  {formatAuthSource(authStatus?.source)}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">계정 ID</span>
-                <span className="font-mono text-xs">{data.account_id ?? "—"}</span>
+                <span className="font-mono text-xs">{data.account_id ?? authStatus?.accountId ?? "—"}</span>
               </div>
             </CardContent>
           </Card>
