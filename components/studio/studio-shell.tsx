@@ -1244,8 +1244,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       // Define rawPromptForRequest for API call
       const rawPromptForRequest = basePrompt;
 
-      const primaryModel = "imagen-3.0-generate-002";
-      const previewModel = "gemini-2.5-flash-image-preview";
+      const primaryModel = "gpt-image-2";
+      const previewModel = "gpt-image-2";
 
 
       // Build prompt components separately
