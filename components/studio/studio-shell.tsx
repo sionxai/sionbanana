@@ -162,9 +162,39 @@ const ZOOM_PROMPT_MAP: Record<string, string> = {
   줌인: "tight zoomed-in framing that highlights facial detail",
   줌아웃: "zoomed-out framing that reveals the environment",
   확대: "an extreme close-up magnification",
+  "익스트림 롱샷": "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  "롱샷 / 와이드샷": "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  풀샷: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  니샷: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  "미디엄 롱샷": "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  미디엄샷: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  "미디엄 클로즈업": "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  클로즈업: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  "빅 클로즈업": "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  "익스트림 클로즈업": "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture",
   zoomin: "tight zoomed-in framing that highlights facial detail",
   zoomout: "zoomed-out framing that reveals the environment",
-  magnify: "an extreme close-up magnification"
+  magnify: "an extreme close-up magnification",
+  extremelongshot: "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  els: "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  longshot: "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  wideshot: "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  fullshot: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  fs: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  kneeshot: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  ks: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  mediumlongshot: "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  mls: "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  mediumshot: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  ms: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  mediumcloseup: "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  mcu: "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  closeup: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  cu: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  bigcloseup: "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  bcu: "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  extremecloseup: "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture",
+  ecu: "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture"
 };
 
 function sanitizePromptKey(value?: string | null) {
@@ -251,13 +281,17 @@ ${trimmedGuidance}`.trim();
 }
 
 function applyCameraPromptDirectives(
-  _promptText: string | null | undefined,
+  promptText: string | null | undefined,
   guidance: string | null
 ): string {
   const trimmedGuidance = guidance?.trim();
-  return trimmedGuidance && trimmedGuidance.length
-    ? trimmedGuidance
-    : CAMERA_MODE_DEFAULT_DIRECTIVE;
+  const base = (promptText ?? "").trim();
+
+  if (trimmedGuidance && trimmedGuidance.length) {
+    return combinePromptWithGuidance(base, trimmedGuidance);
+  }
+
+  return base || CAMERA_MODE_DEFAULT_DIRECTIVE;
 }
 
 const LIGHTING_CATEGORY_ORDER: LightingPresetCategory[] = [
@@ -407,8 +441,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
 
-  // 카메라/조명/포즈 등 옵션이 변하면 그 라벨/지시문을 합쳐 prompt textarea를 자동 갱신.
-  // 사용자가 어떤 옵션도 안 건드린 default 상태에서는 textarea를 건드리지 않는다.
+  // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
+  // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
+  // 앞부분 텍스트는 보존한다. 사용자가 카테고리 부분을 직접 편집해 ref와 어긋나면
+  // basePrompt를 건드리지 않고 새 결과를 끝에 누적해 사용자 의도를 존중한다.
+  const lastCategoryGuidanceRef = useRef<string>("");
+
   useEffect(() => {
     const parts: string[] = [];
 
@@ -426,8 +464,31 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     if (zoomLevel && zoomLevel !== DEFAULT_ZOOM_LEVEL) cam.push(`Zoom: ${zoomLevel}`);
     if (cam.length) parts.push(cam.join("; "));
 
-    if (parts.length === 0) return;
-    setPrompt(parts.join("\n\n"));
+    const newGuidance = parts.length ? parts.join("\n\n") : "";
+    const oldGuidance = lastCategoryGuidanceRef.current;
+
+    if (newGuidance === oldGuidance) {
+      return;
+    }
+
+    lastCategoryGuidanceRef.current = newGuidance;
+
+    setPrompt(currentPrompt => {
+      let basePrompt = currentPrompt;
+
+      if (oldGuidance) {
+        if (basePrompt.endsWith(`\n\n${oldGuidance}`)) {
+          basePrompt = basePrompt.slice(0, basePrompt.length - oldGuidance.length - 2);
+        } else if (basePrompt === oldGuidance) {
+          basePrompt = "";
+        }
+      }
+
+      if (!newGuidance) {
+        return basePrompt;
+      }
+      return basePrompt ? `${basePrompt}\n\n${newGuidance}` : newGuidance;
+    });
   }, [
     lightingSelections,
     poseSelections,
@@ -439,6 +500,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     buildLightingInstruction,
     buildPoseInstruction
   ]);
+
   const [gptLoading, setGptLoading] = useState(false);
   const [lastPromptDetails, setLastPromptDetails] = useState<PromptDetails | null>(null);
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
@@ -1091,12 +1153,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       const isLightingMode = activeMode === "lighting";
       const isPoseMode = activeMode === "pose";
 
-      const lightingGuidance = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
-      const poseGuidance = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+      const lightingGuidance = buildLightingInstruction(lightingSelections);
+      const poseGuidance = buildPoseInstruction(poseSelections);
       const applyLightingGuidanceTo = (value: string | null | undefined) =>
-        isLightingMode ? combinePromptWithGuidance(value, lightingGuidance) : value ?? "";
+        combinePromptWithGuidance(value, lightingGuidance);
       const applyPoseGuidanceTo = (value: string | null | undefined) =>
-        isPoseMode ? combinePromptWithGuidance(value, poseGuidance) : value ?? "";
+        combinePromptWithGuidance(value, poseGuidance);
 
       const hasCameraReference = Boolean(referenceImageForRequest || uniqueGalleryReferences.length);
       const cameraPromptFallback = buildCameraPrompt({ settings: normalizedCameraSettings });
@@ -1109,15 +1171,17 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
             .join(", ")
         : negativePrompt;
 
-      const hasLightingInstruction = Boolean(isLightingMode && lightingGuidance && lightingGuidance?.trim().length);
-      const hasPoseInstruction = Boolean(isPoseMode && poseGuidance && poseGuidance?.trim().length);
+      const hasLightingInstruction = Boolean(lightingGuidance && lightingGuidance?.trim().length);
+      const hasPoseInstruction = Boolean(poseGuidance && poseGuidance?.trim().length);
+      const hasCameraInstruction = Boolean(cameraGuidance && cameraGuidance?.trim().length);
 
       if (
         !prompt &&
         !refinedPrompt &&
         !(isCameraMode && hasCameraPromptFallback) &&
-        !(isLightingMode && hasLightingInstruction) &&
-        !(isPoseMode && hasPoseInstruction)
+        !hasCameraInstruction &&
+        !hasLightingInstruction &&
+        !hasPoseInstruction
       ) {
         toast.error(
           isLightingMode
@@ -1131,10 +1195,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         setCurrentRequestId(null);
         return;
       }
-
-      const cameraOnlyPrompt = isCameraMode
-        ? applyCameraPromptDirectives(null, cameraGuidance)
-        : null;
 
       // Clean base prompt to avoid accumulated history
       const getCleanBasePrompt = (candidate: GeneratedImageDocument | null): string => {
@@ -1168,15 +1228,9 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       let basePromptForRemix: string;
       let basePromptDefault: string;
 
-      if (isCameraMode) {
-        const effectiveCameraPrompt = cameraOnlyPrompt ?? CAMERA_MODE_DEFAULT_DIRECTIVE;
-        basePromptForRemix = effectiveCameraPrompt;
-        basePromptDefault = effectiveCameraPrompt;
-      } else {
-        const basePromptDefaultRaw = hasUserPrompt ? userPromptInput : defaultPromptFallback;
-        basePromptForRemix = combinePromptWithGuidance(basePromptForRemixRaw, cameraGuidance);
-        basePromptDefault = combinePromptWithGuidance(basePromptDefaultRaw, cameraGuidance);
-      }
+      const basePromptDefaultRaw = hasUserPrompt ? userPromptInput : defaultPromptFallback;
+      basePromptForRemix = basePromptForRemixRaw;
+      basePromptDefault = basePromptDefaultRaw;
 
       // Remove duplicate mode adjustments - they will be applied later in the new logic
       const basePrompt =
@@ -1201,13 +1255,16 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       const hasLightingPresets = Object.values(lightingSelections).some(selections =>
         selections.length > 0 && !selections.every(s => s === "default")
       );
+      const effectiveCameraGuidance = isCameraMode
+        ? cameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+        : cameraGuidance;
 
       // Collect mode-specific adjustments (only from presets, not user input)
       const modeAdjustments = {
-        camera: (activeMode === "camera" && cameraGuidance) ? cameraGuidance : undefined,
-        pose: (isPoseMode && poseGuidance) ? poseGuidance : undefined,
+        camera: effectiveCameraGuidance ?? undefined,
+        pose: poseGuidance ?? undefined,
         // Only include lighting guidance if it's from preset selection, not user input
-        lighting: (isLightingMode && lightingGuidance && hasLightingPresets) ? lightingGuidance : undefined
+        lighting: (lightingGuidance && hasLightingPresets) ? lightingGuidance : undefined
       };
 
       // Build the prompt step by step
@@ -1215,7 +1272,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
 
       // Apply mode adjustments to base prompt
       if (modeAdjustments.camera) {
-        promptToSend = applyCameraPromptDirectives(promptToSend, cameraGuidance);
+        promptToSend = applyCameraPromptDirectives(promptToSend, modeAdjustments.camera);
       }
       if (modeAdjustments.pose) {
         promptToSend = applyPoseGuidanceTo(promptToSend);
@@ -1386,10 +1443,10 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         if (promptCameraNotes) {
           metadataPayload.promptCameraNotes = promptCameraNotes;
         }
-        if (isLightingMode) {
+        if (lightingGuidance) {
           metadataPayload.lighting = cloneLightingSelections(lightingSelections);
         }
-        if (isPoseMode) {
+        if (poseGuidance) {
           metadataPayload.pose = clonePoseSelections(poseSelections);
         }
         if (uniqueGalleryReferences.length) {
@@ -1413,7 +1470,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
             referenceGallery: uniqueGalleryReferences,
-            ...(isLightingMode ? { lighting: cloneLightingSelections(lightingSelections) } : {})
+            ...(lightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
+            ...(poseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
           status: "completed",
           imageUrl: storedImageUrl,
@@ -1776,12 +1834,15 @@ const runViewBatch = async ({
       cameraPayload.zoom ?? DEFAULT_ZOOM_LEVEL
     );
     const batchCameraGuidance = buildCameraAdjustmentInstruction(normalizedBatchCameraSettings);
-    const batchLightingGuidance = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
+    const effectiveBatchCameraGuidance = isCameraMode
+      ? batchCameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+      : batchCameraGuidance;
+    const batchLightingGuidance = buildLightingInstruction(lightingSelections);
     const applyBatchLighting = (value: string | null | undefined) =>
-      isLightingMode ? combinePromptWithGuidance(value, batchLightingGuidance) : value ?? "";
-    const batchPoseGuidance = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+      combinePromptWithGuidance(value, batchLightingGuidance);
+    const batchPoseGuidance = buildPoseInstruction(poseSelections);
     const applyBatchPose = (value: string | null | undefined) =>
-      isPoseMode ? combinePromptWithGuidance(value, batchPoseGuidance) : value ?? "";
+      combinePromptWithGuidance(value, batchPoseGuidance);
 
     const effectivePromptFallback = isCameraMode
       ? CAMERA_MODE_DEFAULT_DIRECTIVE
@@ -1794,12 +1855,9 @@ const runViewBatch = async ({
       ? basePromptDefault
       : effectivePromptFallback;
 
-    const rawPromptWithLighting = isLightingMode ? applyBatchLighting(rawPromptBase) : rawPromptBase;
-    const rawPromptWithPose = isPoseMode ? applyBatchPose(rawPromptWithLighting) : rawPromptWithLighting;
-
-    const rawPromptForRequest = isCameraMode
-      ? applyCameraPromptDirectives(null, batchCameraGuidance)
-      : rawPromptWithPose;
+    const rawPromptWithLighting = applyBatchLighting(rawPromptBase);
+    const rawPromptWithPose = applyBatchPose(rawPromptWithLighting);
+    const rawPromptForRequest = applyCameraPromptDirectives(rawPromptWithPose, effectiveBatchCameraGuidance);
 
     const negativePromptToSend = negativePrompt && negativePrompt.trim().length
       ? `${negativePrompt}, ${negativePromptEnforcement}`
@@ -1867,12 +1925,15 @@ ${viewInstruction}`;
         }
 
         if (isCameraMode) {
-          viewPrompt = applyCameraPromptDirectives(null, cameraGuidance);
+          viewPrompt = applyCameraPromptDirectives(
+            viewPrompt,
+            cameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+          );
         }
-        if (isLightingMode && batchLightingGuidance) {
+        if (batchLightingGuidance) {
           viewPrompt = applyBatchLighting(viewPrompt);
         }
-        if (isPoseMode && batchPoseGuidance) {
+        if (batchPoseGuidance) {
           viewPrompt = applyBatchPose(viewPrompt);
         }
 
@@ -1972,10 +2033,10 @@ ${viewInstruction}`;
         };
         metadataPayload.sequenceIndex = index + 1;
         metadataPayload.sequenceTotal = total;
-        if (isLightingMode) {
+        if (batchLightingGuidance) {
           metadataPayload.lighting = cloneLightingSelections(lightingSelections);
         }
-        if (isPoseMode) {
+        if (batchPoseGuidance) {
           metadataPayload.pose = clonePoseSelections(poseSelections);
         }
         if (uniqueGalleryReferences.length) {
@@ -2004,7 +2065,9 @@ ${viewInstruction}`;
             negativePrompt: negativePromptToSend,
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
-            referenceGallery: uniqueGalleryReferences
+            referenceGallery: uniqueGalleryReferences,
+            ...(batchLightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
+            ...(batchPoseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
           status: "completed",
           imageUrl: storedImageUrl,
@@ -2589,6 +2652,7 @@ ${viewInstruction}`;
     setRefinedPrompt("");
     setNegativePrompt("");
     setLastPromptDetails(null);
+    lastCategoryGuidanceRef.current = "";
     toast.success("프리셋을 초기화했습니다.");
   };
 
@@ -2697,14 +2761,17 @@ ${viewInstruction}`;
 
     let basePromptForRequest = resolvedBasePrompt;
     const isCameraMode = activeMode === "camera";
-    const isLightingMode = activeMode === "lighting";
-    const isPoseMode = activeMode === "pose";
-    const lightingGuidanceForPrompt = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
-    const poseGuidanceForPrompt = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+    const lightingGuidanceForPrompt = buildLightingInstruction(lightingSelections);
+    const poseGuidanceForPrompt = buildPoseInstruction(poseSelections);
+    const effectiveCameraGuidanceForPrompt = isCameraMode
+      ? cameraGuidanceForPrompt ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+      : cameraGuidanceForPrompt;
+    basePromptForRequest = applyCameraPromptDirectives(basePromptForRequest, effectiveCameraGuidanceForPrompt);
+    basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, lightingGuidanceForPrompt);
+    basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, poseGuidanceForPrompt);
     if (isCameraMode) {
-      basePromptForRequest = applyCameraPromptDirectives(basePromptForRequest, cameraGuidanceForPrompt);
       const finalPrompt = basePromptForRequest;
-      const cameraNotes = cameraGuidanceForPrompt ?? finalPrompt;
+      const cameraNotes = effectiveCameraGuidanceForPrompt ?? finalPrompt;
       setRefinedPrompt(finalPrompt);
       setLastPromptDetails({
         basePrompt: finalPrompt,
@@ -2713,13 +2780,6 @@ ${viewInstruction}`;
         timestamp: new Date().toISOString()
       });
       return { finalPrompt, summary: undefined, cameraNotes };
-    }
-
-    if (isLightingMode) {
-      basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, lightingGuidanceForPrompt);
-    }
-    if (isPoseMode) {
-      basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, poseGuidanceForPrompt);
     }
 
     setGptLoading(true);
