@@ -8,7 +8,7 @@ import path from "node:path";
 
 const DEFAULT_DIR = "./data";
 
-function dataDir(): string {
+export function getDataDir(): string {
   const fromEnv = process.env.SIONBANANA_DATA_DIR?.trim();
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv.startsWith("~/") ? path.join(homedir(), fromEnv.slice(2)) : fromEnv;
@@ -17,7 +17,7 @@ function dataDir(): string {
 }
 
 function imagesDir(): string {
-  return path.join(dataDir(), "images");
+  return path.join(getDataDir(), "images");
 }
 
 function monthBucket(date: Date = new Date()): string {
@@ -113,4 +113,52 @@ export async function deleteImageById(id: string): Promise<boolean> {
     }
   }
   return removed;
+}
+
+export type DiskImageEntry = {
+  id: string;
+  ext: string;
+  bucket: string;
+  createdAtIso: string;
+  size: number;
+};
+
+export async function listAllImages(): Promise<DiskImageEntry[]> {
+  const root = imagesDir();
+  let buckets: string[];
+  try {
+    buckets = await fs.readdir(root);
+  } catch {
+    return [];
+  }
+
+  const results: DiskImageEntry[] = [];
+  for (const bucket of buckets) {
+    const bucketDir = path.join(root, bucket);
+    let entries: string[];
+    try {
+      entries = await fs.readdir(bucketDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const match = entry.match(/^([A-Za-z0-9_\-]+)\.(png|jpg|jpeg|webp)$/);
+      if (!match) continue;
+      const [, id, ext] = match;
+      try {
+        const stat = await fs.stat(path.join(bucketDir, entry));
+        if (!stat.isFile()) continue;
+        results.push({
+          id,
+          ext,
+          bucket,
+          createdAtIso: stat.mtime.toISOString(),
+          size: stat.size
+        });
+      } catch {
+        // ignore unreadable entries
+      }
+    }
+  }
+  return results;
 }

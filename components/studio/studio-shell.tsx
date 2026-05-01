@@ -434,6 +434,9 @@ const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null)
 const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
 const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+  // 디스크(data/images/)에 있지만 localStorage에는 없는 record를 fallback으로 채워주는 list.
+  // 같은 id가 localRecords/records에 있으면 mergeHistoryRecords가 알아서 secondary skip.
+  const [diskRecords, setDiskRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
     Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
@@ -743,13 +746,48 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     return () => window.removeEventListener(HISTORY_SYNC_EVENT, handler as EventListener);
   }, [user?.uid]);
 
+  // 디스크 스캔 — 마운트 시 한 번. localStorage가 비어 있어도 디스크에 있는
+  // 이미지 파일을 fallback record로 history에 표시한다.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDisk() {
+      try {
+        const res = await fetch("/api/images");
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok?: boolean; items?: Array<{ id: string; ext: string; bucket: string; createdAtIso: string; size: number }> };
+        if (cancelled || !data.ok || !Array.isArray(data.items)) return;
+        const uid = user?.uid ?? "local";
+        const fallbackRecords: GeneratedImageDocument[] = data.items.map(item => ({
+          id: item.id,
+          userId: uid,
+          mode: "create",
+          promptMeta: { rawPrompt: "", refinedPrompt: "" },
+          status: "completed",
+          imageUrl: `/api/images/${item.id}`,
+          model: "gpt-image-2",
+          createdAt: item.createdAtIso,
+          updatedAt: item.createdAtIso
+        }));
+        setDiskRecords(fallbackRecords);
+      } catch {
+        // 디스크 스캔 실패는 silent — localStorage만으로도 동작
+      }
+    }
+    loadDisk();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
   const mergedRecords = useMemo(() => {
-    // 단일 사용자 도구라 userId 필터를 풀어준다. record.userId가 없거나 현재 uid면 통과.
-    const merged = mergeHistoryRecords(localRecords, records);
+    // primary(localRecords)와 secondary(records=Firestore stub)를 먼저 머지하고,
+    // 마지막에 디스크 fallback을 tertiary로 더해 둔다. 같은 id는 mergeHistoryRecords가 skip.
+    const localMerged = mergeHistoryRecords(localRecords, records);
+    const merged = mergeHistoryRecords(localMerged, diskRecords);
     const uid = user?.uid ?? null;
     if (!uid) return merged;
     return merged.filter(record => !record.userId || record.userId === uid);
-  }, [localRecords, records, user?.uid]);
+  }, [localRecords, records, diskRecords, user?.uid]);
 
   const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
 
@@ -2506,6 +2544,7 @@ ${viewInstruction}`;
     }
 
     setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    setDiskRecords(prev => prev.filter(record => record.id !== recordId));
     removeRecordFromLocalStorage(recordId);
 
     if (selectedImageId === recordId) {
