@@ -1145,9 +1145,11 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         timeoutId
       });
 
-      const fallbackCandidate = selectedRecord ?? historyRecords[0] ?? null;
+      // 자동 fallback 일체 제거 — 사용자가 명시 등록한 reference 슬롯만 사용.
+      // (selectedRecord/historyRecords[0] 자동 fallback X — 비어 있으면 비어 있는 채로)
       const primaryReferenceRecord = referenceRecord ?? null;
-      const referenceCandidate = primaryReferenceRecord ?? fallbackCandidate;
+      const fallbackCandidate = primaryReferenceRecord;
+      const referenceCandidate = primaryReferenceRecord;
 
 
       const normalizedCameraSettings = normalizeCameraSettings(
@@ -1179,8 +1181,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         primaryReferenceRecord?.imageUrl ??
         primaryReferenceRecord?.originalImageUrl ??
         referenceImageState.url ??
-        referenceCandidate?.originalImageUrl ??
-        referenceCandidate?.imageUrl ??
         null;
 
       const referenceMetadata = (referenceCandidate?.metadata ?? {}) as { referenceId?: string | null };
