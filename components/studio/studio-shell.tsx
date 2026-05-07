@@ -24,13 +24,6 @@ import { toast } from "sonner";
 // 로컬 단일 사용자 환경 — 인증 stub
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
-import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
-import {
-  deleteGeneratedImageDoc,
-  saveGeneratedImageDoc,
-  updateGeneratedImageDoc
-} from "@/lib/firebase/firestore";
-import { shouldUseFirestore } from "@/lib/env";
 import {
   APERTURE_DEFAULT,
   APERTURE_MAX,
@@ -1047,48 +1040,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     updatedAt: now
   };
 
-  const referenceEntry = mergeLocalRecord(baseRecord, { promoteToReference: true });
-  if (referenceEntry) {
-    await persistReferenceEntry(referenceEntry, now);
-  }
+  mergeLocalRecord(baseRecord, { promoteToReference: true });
 };
-
-  const persistReferenceEntry = useCallback(
-    async (entry: GeneratedImageDocument, nowIso: string) => {
-      if (!user || !shouldUseFirestore) {
-        return;
-      }
-
-      const imageUrl = entry.imageUrl ?? entry.originalImageUrl;
-      if (!imageUrl) {
-        console.warn("기준 이미지 URL을 찾을 수 없어 동기화를 건너뜁니다.");
-        return;
-      }
-
-      const originalImageUrl = entry.originalImageUrl ?? imageUrl;
-      const thumbnailUrl = entry.thumbnailUrl ?? imageUrl;
-
-      try {
-        await saveGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID, {
-          mode: entry.mode,
-          status: entry.status,
-          promptMeta: entry.promptMeta,
-          imageUrl,
-          thumbnailUrl,
-          originalImageUrl,
-          metadata: { ...(entry.metadata ?? {}), isReference: true },
-          model: entry.model,
-          costCredits: entry.costCredits,
-          createdAtIso: entry.createdAt ?? nowIso,
-          updatedAtIso: nowIso
-        });
-      } catch (error) {
-        console.error("기준 이미지 동기화 실패", error);
-        toast.error("기준 이미지를 저장하는 중 문제가 발생했습니다.");
-      }
-    },
-    [user]
-  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1115,15 +1068,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       if (detail.record.userId && detail.record.userId !== currentUid) {
         return;
       }
-      const referenceEntry = mergeLocalRecord(detail.record, { promoteToReference: true, broadcast: false });
-      if (referenceEntry && user && shouldUseFirestore) {
-        void persistReferenceEntry(referenceEntry, new Date().toISOString());
-      }
+      mergeLocalRecord(detail.record, { promoteToReference: true, broadcast: false });
     };
 
     window.addEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
-  }, [mergeLocalRecord, persistReferenceEntry, selectImage, setLocalRecords, user]);
+  }, [mergeLocalRecord, selectImage, setLocalRecords, user]);
 
   const handleGenerate = (action: "primary" | "remix") => {
     const execute = async () => {
@@ -1574,40 +1524,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const handleReferenceUpload = async (file: File) => {
     try {
       const dataUrl = await readFileAsDataURL(file);
-      const now = new Date().toISOString();
       const recordId =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `upload-${Date.now()}`;
 
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, recordId, blob);
-          storedUrl = uploadResult.url;
-          await saveGeneratedImageDoc(user.uid, recordId, {
-            mode: "create",
-            status: "completed",
-            promptMeta: {
-              rawPrompt: "사용자 기준 이미지 업로드",
-              refinedPrompt: "사용자 기준 이미지 업로드"
-            },
-            imageUrl: storedUrl,
-            thumbnailUrl: storedUrl,
-            originalImageUrl: storedUrl,
-            metadata: { upload: true },
-            model: "reference-upload",
-            createdAtIso: now,
-            updatedAtIso: now
-          });
-        } catch (error) {
-          console.error(error);
-          toast.error("업로드한 이미지를 저장하는 중 오류가 발생했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
       setReferenceImageOverride(storedUrl);
@@ -1642,19 +1564,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         targetSlot = newSlot;
       }
 
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `reference-slot-${targetSlot.id}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error(error);
-          toast.error("스케치를 저장하는 중 오류가 발생했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       // 참조 슬롯에 스케치 추가
       setReferenceSlots(prev =>
@@ -1707,19 +1617,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
 
     try {
       const dataUrl = await readFileAsDataURL(file);
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `reference-slot-${slotId}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error("reference slot upload error", error);
-          toast.error("참조 이미지를 업로드하지 못했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       setReferenceSlots(prev =>
         prev.map(item =>
@@ -2399,7 +2297,6 @@ ${viewInstruction}`;
       return;
     }
 
-    const now = new Date().toISOString();
     const newUrl = candidate.imageUrl ?? candidate.originalImageUrl ?? null;
     const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
     if (newUrl) {
@@ -2407,10 +2304,7 @@ ${viewInstruction}`;
     }
 
     try {
-      const referenceEntry = mergeLocalRecord(candidate, { promoteToReference: true });
-      if (referenceEntry) {
-        await persistReferenceEntry(referenceEntry, now);
-      }
+      mergeLocalRecord(candidate, { promoteToReference: true });
     } catch (error) {
       console.error("history reference select error", error);
       if (newUrl) {
@@ -2465,16 +2359,6 @@ ${viewInstruction}`;
       }
     }
   }
-
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-        });
-      } catch (error) {
-        console.warn("Failed to update favorite flag", error);
-      }
-    }
 
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
@@ -2586,38 +2470,7 @@ ${viewInstruction}`;
 
     console.log(`[DeleteAll] Starting deletion of ${recordsToDelete.length} records`);
     console.log(`[DeleteAll] User ID: ${user.uid}`);
-    console.log(`[DeleteAll] shouldUseFirestore:`, shouldUseFirestore);
-
     try {
-      // Delete from Firestore first
-      if (shouldUseFirestore) {
-        console.log(`[DeleteAll] Deleting from Firestore...`);
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const record of recordsToDelete) {
-          try {
-            console.log(`[DeleteAll] Deleting Firestore doc: ${record.id}`);
-            await deleteGeneratedImageDoc(user.uid, record.id);
-
-            if (record.imageUrl && !record.imageUrl.startsWith('data:')) {
-              console.log(`[DeleteAll] Deleting Storage image: ${record.id}`);
-              await deleteUserImage(user.uid, record.id);
-            }
-
-            successCount++;
-            console.log(`[DeleteAll] Successfully deleted: ${record.id}`);
-          } catch (error) {
-            failCount++;
-            console.error(`[DeleteAll] Failed to delete record ${record.id}:`, error);
-          }
-        }
-
-        console.log(`[DeleteAll] Deletion complete. Success: ${successCount}, Failed: ${failCount}`);
-      }
-
-      // Clear local state after Firestore deletion
       setLocalRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
       selectImage(null);
 
@@ -2889,13 +2742,6 @@ ${viewInstruction}`;
     const referenceId = referenceRecord.id ?? REFERENCE_IMAGE_DOC_ID;
 
     try {
-      if (user && shouldUseFirestore) {
-        await deleteGeneratedImageDoc(user.uid, referenceId);
-        await deleteUserImage(user.uid, referenceId).catch(error => {
-          console.warn("Failed to delete reference image from storage", error);
-        });
-      }
-
       // Remove from local records (including any record with isReference metadata)
       setLocalRecords(prev => prev.filter(record =>
         record.id !== REFERENCE_IMAGE_DOC_ID &&
@@ -3318,7 +3164,3 @@ export function StudioShell() {
   );
 }
 
-async function dataUrlToBlob(dataUrl: string) {
-  const response = await fetch(dataUrl);
-  return response.blob();
-}
