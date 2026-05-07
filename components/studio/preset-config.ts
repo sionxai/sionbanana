@@ -10,10 +10,10 @@ export const CHARACTER_NEGATIVE_ENFORCEMENT =
   "collage, multi view, multiple angles, turnaround sheet, reference sheet, sprite sheet, split screen, grid layout, duplicated pose, mirrored duplicates, text labels, different character, different costume, different hairstyle";
 
 export const TURNAROUND_BASE_PROMPT_FALLBACK =
-  "High-resolution 360-degree turnaround sequence of the supplied reference character, maintain identical facial features, hairstyle, outfit, proportions, pose, and expression while rotating the camera around the subject, preserving the reference image's original background, environment, and lighting.";
+  "Photograph the exact same subject from the reference image at multiple camera angles by rotating the camera around them. The original scene, background, environment, props, lighting, time of day, and atmosphere from the reference image must remain perfectly identical across every shot. This is on-location photography in the same environment, not a studio session. Only the camera viewpoint changes; the subject's identity, outfit, pose, expression, and surroundings stay exactly as in the reference.";
 
 export const TURNAROUND_NEGATIVE_ENFORCEMENT =
-  `${CHARACTER_NEGATIVE_ENFORCEMENT}, different pose, dynamic pose, action stance, arms raised, animated motion, inconsistent lighting, mismatched angle, different camera height, different facial expression, closed eyes, blinking, motion blur, pure white background, plain white background, white void, empty studio backdrop, seamless studio background, isolated subject on white, missing background, replaced background, removed background, character sheet style, reference sheet layout`;
+  `${CHARACTER_NEGATIVE_ENFORCEMENT}, different pose, dynamic pose, action stance, arms raised, animated motion, inconsistent lighting, mismatched angle, different camera height, different facial expression, closed eyes, blinking, motion blur, white studio backdrop, blank background, character sheet, reference sheet layout, subject removed from original scene, relocated to studio`;
 
 export const TURNAROUND_SINGLE_VIEW_GUIDELINE =
   "Maintain the exact same pose, expression, limb placement, and camera distance as the reference image. Only rotate the camera around the character; do not move or animate the character.";
