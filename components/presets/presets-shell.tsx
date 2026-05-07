@@ -2387,12 +2387,7 @@ type ReferenceImageState = {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              프리셋
-              <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-normal text-primary">
-                1.0v
-              </span>
-            </CardTitle>
+            <CardTitle>프리셋</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2">
