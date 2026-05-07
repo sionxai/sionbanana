@@ -28,3 +28,10 @@ yarn-error.log*
 pnpm-debug.log*
 .vscode
 .idea
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Firebase debug logs (legacy SaaS, 안전망)
+firebase-debug.log
