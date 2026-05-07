@@ -1491,7 +1491,6 @@ type ReferenceImageState = {
       return;
     }
 
-    const now = new Date().toISOString();
     const newUrl = getRecordGeneratedImageUrl(candidate);
     const previousReferenceUrl = referenceImageState.url ?? getRecordGeneratedImageUrl(referenceRecord);
     if (newUrl) {
@@ -1500,7 +1499,6 @@ type ReferenceImageState = {
 
     try {
       mergeLocalRecord(candidate, { promoteToReference: true });
-      await persistReferenceEntry(candidate, now);
     } catch (error) {
       console.error("preset history reference select error", error);
       if (newUrl) {
@@ -1534,15 +1532,6 @@ type ReferenceImageState = {
       return [updatedRecord, ...prev];
     });
 
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-        });
-      } catch (error) {
-        console.warn("favorite update error", error);
-      }
-    }
   };
 
   const handleDownloadRecord = async (record: GeneratedImageDocument) => {
@@ -1591,39 +1580,26 @@ type ReferenceImageState = {
       return;
     }
 
-    if (user && shouldUseFirestore) {
+    setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
+
+    const metadataFileId = (target.metadata as { fileId?: unknown } | undefined)?.fileId;
+    const localImageId =
+      getLocalImageId(target.imageUrl) ??
+      getLocalImageId(target.thumbnailUrl) ??
+      getLocalImageId(target.originalImageUrl) ??
+      (typeof metadataFileId === "string" ? metadataFileId : null) ??
+      recordId;
+
+    if (
+      target.imageUrl?.startsWith("/api/images/") ||
+      target.thumbnailUrl?.startsWith("/api/images/") ||
+      target.originalImageUrl?.startsWith("/api/images/")
+    ) {
       try {
-        await deleteGeneratedImageDoc(user.uid, recordId);
-        if (target.imageUrl && !target.imageUrl.startsWith("data:")) {
-          await deleteUserImage(user.uid, recordId);
-        }
+        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
       } catch (error) {
-        console.error("preset history delete error", error);
-        toast.error("이미지를 삭제하는 중 오류가 발생했습니다.");
-        return;
-      }
-    } else {
-      setLocalRecords(prev => prev.filter(record => record.id !== recordId));
-      removeRecordFromLocalStorage(recordId);
-
-      const metadataFileId = (target.metadata as { fileId?: unknown } | undefined)?.fileId;
-      const localImageId =
-        getLocalImageId(target.imageUrl) ??
-        getLocalImageId(target.thumbnailUrl) ??
-        getLocalImageId(target.originalImageUrl) ??
-        (typeof metadataFileId === "string" ? metadataFileId : null) ??
-        recordId;
-
-      if (
-        target.imageUrl?.startsWith("/api/images/") ||
-        target.thumbnailUrl?.startsWith("/api/images/") ||
-        target.originalImageUrl?.startsWith("/api/images/")
-      ) {
-        try {
-          await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
-        } catch (error) {
-          console.warn("[Presets] Failed to delete local image file", error);
-        }
+        console.warn("[Presets] Failed to delete local image file", error);
       }
     }
 
@@ -1715,7 +1691,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
@@ -1769,7 +1744,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
@@ -1827,7 +1801,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions: nineZoomImageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
@@ -1886,7 +1859,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions: nineAngleImageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
@@ -1945,7 +1917,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions: nineShotImageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
@@ -2004,7 +1975,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions: action9ImageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
@@ -2060,7 +2030,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         interRequestDelayMs: 1200,
         cancelRef,
@@ -2122,7 +2091,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         interRequestDelayMs: 0,
         cancelRef,
@@ -2178,7 +2146,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         interRequestDelayMs: 1200,
         cancelRef,
@@ -2234,7 +2201,6 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
         imageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
