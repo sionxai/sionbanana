@@ -10,7 +10,7 @@ export const CHARACTER_NEGATIVE_ENFORCEMENT =
   "collage, multi view, multiple angles, turnaround sheet, reference sheet, sprite sheet, split screen, grid layout, duplicated pose, mirrored duplicates, text labels, different character, different costume, different hairstyle";
 
 export const TURNAROUND_BASE_PROMPT_FALLBACK =
-  "High-resolution 360-degree turnaround sequence of the supplied reference character, maintain identical facial features, hairstyle, outfit, proportions, pose, and expression while rotating the camera around the subject, pure white seamless studio background with even lighting.";
+  "High-resolution 360-degree turnaround sequence of the supplied reference character, maintain identical facial features, hairstyle, outfit, proportions, pose, and expression while rotating the camera around the subject, preserving the reference image's original background, environment, and lighting.";
 
 export const TURNAROUND_NEGATIVE_ENFORCEMENT =
   `${CHARACTER_NEGATIVE_ENFORCEMENT}, different pose, dynamic pose, action stance, arms raised, animated motion, inconsistent lighting, mismatched angle, different camera height, different facial expression, closed eyes, blinking, motion blur`;

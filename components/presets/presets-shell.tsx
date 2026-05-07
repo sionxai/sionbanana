@@ -1727,6 +1727,8 @@ type ReferenceImageState = {
         basePrompt: TURNAROUND_BASE_PROMPT_FALLBACK,
         singleViewGuideline: TURNAROUND_SINGLE_VIEW_GUIDELINE,
         negativePrompt: TURNAROUND_NEGATIVE_ENFORCEMENT,
+        commonViewGuideline:
+          "Keep the design and the entire scene (background, environment, lighting) consistent with the supplied references.",
         referenceImageForRequest,
         uniqueGalleryReferences,
         aspectRatioValue,
