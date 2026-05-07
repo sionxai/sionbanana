@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { AuthStatusBanner } from "@/components/auth-status-banner";
+import { LegacyStorageMigration } from "@/components/legacy-storage-migration";
 
 export const metadata: Metadata = {
   title: "시온 바나나 | Sion Banana",
@@ -11,7 +13,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko" suppressHydrationWarning>
       <body className="font-sans" suppressHydrationWarning>
-        <Providers>{children}</Providers>
+        <Providers>
+          <LegacyStorageMigration />
+          <AuthStatusBanner />
+          {children}
+        </Providers>
       </body>
     </html>
   );

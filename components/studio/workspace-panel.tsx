@@ -12,6 +12,7 @@ import { usePresetLibrary } from "@/components/studio/preset-library-context";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { DiffSlider } from "@/components/studio/diff-slider";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_CAMERA_DIRECTION,
@@ -40,6 +41,8 @@ interface WorkspacePanelProps {
   cameraDirection: string;
   zoomLevel: string;
   isGenerating: boolean;
+  generationReferenceCount?: number;
+  generationSize?: string;
   showGenerationSuccess?: boolean;
   successRecordId?: string;
   promptDetails?: PromptDetails | null;
@@ -78,6 +81,8 @@ export function WorkspacePanel({
   referenceImageUrl,
   referenceImageKey = 0,
   isGenerating,
+  generationReferenceCount = 0,
+  generationSize,
   showGenerationSuccess = false,
   successRecordId,
   promptDetails,
@@ -87,7 +92,16 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
   const { poseGroups } = usePresetLibrary();
   const [showPromptDetail, setShowPromptDetail] = useState(false);
-  const [imageZoomLevel, setImageZoomLevel] = useState(1.0);
+  const imagePanZoom = useImagePanZoom();
+  const {
+    transform: imageTransform,
+    bind: imagePanZoomBind,
+    isPanning: isImagePanning,
+    scale: imageZoomLevel,
+    zoomIn,
+    zoomOut,
+    reset: resetImageZoom
+  } = imagePanZoom;
   const comparisonImage = useMemo(() => {
     if (!comparisonRecord) {
       return null;
@@ -244,42 +258,21 @@ export function WorkspacePanel({
 
   useEffect(() => setShowPromptDetail(false), [record?.id]);
 
-  // 줌 레벨 관리 함수들
-  const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-  const MIN_ZOOM = 0.25;
-  const MAX_ZOOM = 3.0;
-
   const handleZoom = useCallback((action: 'in' | 'out' | 'reset') => {
-    setImageZoomLevel(currentLevel => {
+    switch (action) {
+      case 'in':
+        zoomIn();
+        break;
+      case 'out':
+        zoomOut();
+        break;
+      case 'reset':
+        resetImageZoom();
+        break;
+    }
+  }, [resetImageZoom, zoomIn, zoomOut]);
 
-      switch (action) {
-        case 'in': {
-          // 현재 레벨보다 큰 첫 번째 레벨 찾기
-          for (let i = 0; i < ZOOM_LEVELS.length; i++) {
-            if (ZOOM_LEVELS[i] > currentLevel) {
-              return ZOOM_LEVELS[i];
-            }
-          }
-          return MAX_ZOOM;
-        }
-        case 'out': {
-          // 현재 레벨보다 작은 가장 큰 레벨 찾기
-          for (let i = ZOOM_LEVELS.length - 1; i >= 0; i--) {
-            if (ZOOM_LEVELS[i] < currentLevel) {
-              return ZOOM_LEVELS[i];
-            }
-          }
-          return MIN_ZOOM;
-        }
-        case 'reset':
-          return 1.0;
-        default:
-          return currentLevel;
-      }
-    });
-  }, [setImageZoomLevel]);
-
-  // Keyboard shortcuts and mouse wheel support
+  // Keyboard shortcuts only. Ctrl/Cmd + wheel is scoped inside DiffSlider so normal page scroll stays intact.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -305,23 +298,10 @@ export function WorkspacePanel({
       }
     };
 
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-          handleZoom('in');
-        } else if (e.deltaY > 0) {
-          handleZoom('out');
-        }
-      }
-    };
-
     document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('wheel', handleWheel, { passive: false });
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('wheel', handleWheel);
     };
   }, [handleZoom]);
 
@@ -385,7 +365,7 @@ export function WorkspacePanel({
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{record ? new Date(record.createdAt).toLocaleString() : "미생성"}</span>
             <Separator orientation="vertical" className="h-4" />
-            <span>{record?.model ?? "Gemini Nano Banana"}</span>
+            <span>{record?.model ?? "gpt-image-2"}</span>
           </div>
         </div>
         {showReferencePlaceholder ? (
@@ -404,8 +384,9 @@ export function WorkspacePanel({
             labelBefore={beforeLabel}
             labelAfter={afterLabel}
             priority
-            zoomLevel={imageZoomLevel}
-            onZoomChange={setImageZoomLevel}
+            transform={imageTransform}
+            panZoomBind={imagePanZoomBind}
+            isPanning={isImagePanning}
           />
         ) : (
           <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/30 text-sm text-muted-foreground">
@@ -432,8 +413,9 @@ export function WorkspacePanel({
               afterSrc={applyCacheBust(comparisonAfterImage)}
               labelBefore={comparisonBeforeLabel}
               labelAfter={comparisonAfterLabel}
-              zoomLevel={imageZoomLevel}
-              onZoomChange={setImageZoomLevel}
+              transform={imageTransform}
+              panZoomBind={imagePanZoomBind}
+              isPanning={isImagePanning}
             />
             <div className="flex flex-col gap-1 text-[11px] text-amber-900">
               <span>{new Date(comparisonDetails.createdAt).toLocaleString()}</span>
@@ -451,7 +433,7 @@ export function WorkspacePanel({
             variant="outline"
             size="sm"
             onClick={() => handleZoom('out')}
-            disabled={imageZoomLevel <= MIN_ZOOM}
+            disabled={imageZoomLevel <= MIN_IMAGE_ZOOM}
           >
             축소
           </Button>
@@ -459,7 +441,7 @@ export function WorkspacePanel({
             variant="outline"
             size="sm"
             onClick={() => handleZoom('reset')}
-            disabled={imageZoomLevel === 1.0}
+            disabled={imageZoomLevel === 1}
           >
             {Math.round(imageZoomLevel * 100)}% (원래대로)
           </Button>
@@ -467,7 +449,7 @@ export function WorkspacePanel({
             variant="outline"
             size="sm"
             onClick={() => handleZoom('in')}
-            disabled={imageZoomLevel >= MAX_ZOOM}
+            disabled={imageZoomLevel >= MAX_IMAGE_ZOOM}
           >
             확대
           </Button>
@@ -483,7 +465,10 @@ export function WorkspacePanel({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/40" />
               <span className="relative inline-flex h-5 w-5 rounded-full bg-primary/70" />
             </span>
-            <span>이미지를 생성 중입니다. 몇초가 소요될 수 있습니다.</span>
+            <span>
+              이미지를 생성 중입니다. 고해상도나 참조 이미지 {generationReferenceCount}장 조합은 시간이 더 걸릴 수 있습니다.
+              {generationSize ? ` 현재 크기: ${generationSize}` : null}
+            </span>
           </div>
         ) : null}
 
@@ -669,7 +654,7 @@ export function WorkspacePanel({
             </div>
             <div>
               <span className="font-semibold text-foreground">사용 모델</span>
-              <p className="mt-1 rounded-md bg-muted/40 px-3 py-2">{record?.model ?? "Gemini Nano Banana"}</p>
+              <p className="mt-1 rounded-md bg-muted/40 px-3 py-2">{record?.model ?? "gpt-image-2"}</p>
             </div>
             <div>
               <span className="font-semibold text-foreground">크레딧</span>
@@ -698,7 +683,7 @@ export function WorkspacePanel({
           <LogItem label="생성 모드" value={modeLabelMap[record?.mode ?? mode]} />
           <LogItem label="프롬프트 길이" value={`${promptToShow.length} chars`} />
           <LogItem label="상태" value={record?.status ?? "대기중"} />
-          <LogItem label="저장 위치" value={record?.imageUrl ? "Firebase Storage" : "미저장"} />
+          <LogItem label="저장 위치" value={record?.imageUrl ? "로컬 파일" : "미저장"} />
         </CardContent>
       </Card>
     </div>

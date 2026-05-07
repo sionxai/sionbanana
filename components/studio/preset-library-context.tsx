@@ -1,8 +1,6 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { shouldUseFirestore } from "@/lib/env";
-import { getAllPresets } from "@/lib/presets/firestore";
 import type { Preset } from "@/lib/presets/types";
 import {
   EXTERNAL_PRESET_GROUPS,
@@ -641,82 +639,16 @@ function createPoseInstructionBuilder(lookup: PosePromptLookup) {
 
 export function PresetLibraryProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<PresetLibraryData>(() => createFallbackState());
-  const [status, setStatus] = useState<"loading" | "ready" | "error">(
-    shouldUseFirestore ? "loading" : "ready"
-  );
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("ready");
   const [source, setSource] = useState<"fallback" | "firestore">("fallback");
   const [error, setError] = useState<Error | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   useEffect(() => {
-    if (!shouldUseFirestore) {
-      setStatus("ready");
-      setSource("fallback");
-      setError(null);
-      setData(createFallbackState());
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadPresets() {
-      setStatus("loading");
-      try {
-        const presets = await getAllPresets();
-        if (cancelled) {
-          return;
-        }
-
-        const activePresets = presets.filter(preset => preset.active !== false);
-
-        const {
-          groups: cameraGroups,
-          hasRemote: hasCameraRemote
-        } = buildCameraGroupsFromPresets(activePresets.filter(p => p.category === "camera"), FALLBACK_CAMERA_GROUPS);
-
-        const {
-          groups: externalGroups,
-          hasRemote: hasExternalRemote
-        } = buildExternalGroupsFromPresets(activePresets.filter(p => p.category === "external"), EXTERNAL_PRESET_GROUPS);
-
-        const {
-          groups: lightingGroups,
-          hasRemote: hasLightingRemote
-        } = buildLightingGroupsFromPresets(activePresets.filter(p => p.category === "lighting"), LIGHTING_PRESET_GROUPS);
-
-        const {
-          groups: poseGroups,
-          hasRemote: hasPoseRemote
-        } = buildPoseGroupsFromPresets(activePresets.filter(p => p.category === "pose"), POSE_PRESET_GROUPS);
-
-        const hasRemote = hasCameraRemote || hasExternalRemote || hasLightingRemote || hasPoseRemote;
-
-        setData({
-          cameraGroups,
-          externalGroups,
-          lightingGroups,
-          poseGroups
-        });
-        setSource(hasRemote ? "firestore" : "fallback");
-        setStatus("ready");
-        setError(null);
-      } catch (err) {
-        console.error("[PresetLibrary] Failed to load presets from Firestore", err);
-        if (cancelled) {
-          return;
-        }
-        setData(createFallbackState());
-        setSource("fallback");
-        setStatus("error");
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-
-    loadPresets();
-
-    return () => {
-      cancelled = true;
-    };
+    setStatus("ready");
+    setSource("fallback");
+    setError(null);
+    setData(createFallbackState());
   }, [refreshIndex]);
 
   const refresh = useCallback(() => {

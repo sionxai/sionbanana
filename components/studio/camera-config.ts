@@ -84,7 +84,17 @@ export const generateCombinedCameraPrompt = (settings: {
     const zoomPrompts: Record<string, string> = {
       "줌인": "Move closer for tighter framing and more intimate composition.",
       "줌아웃": "Pull back for wider framing showing more environment.",
-      "확대": "Use telephoto lens for compressed perspective and background isolation."
+      "확대": "Use telephoto lens for compressed perspective and background isolation.",
+      "익스트림 롱샷": "Use an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation.",
+      "롱샷 / 와이드샷": "Use a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment.",
+      "풀샷": "Use a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement.",
+      "니샷": "Use a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression.",
+      "미디엄 롱샷": "Use a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action.",
+      "미디엄샷": "Use a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes.",
+      "미디엄 클로즈업": "Use a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion.",
+      "클로즈업": "Use a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion.",
+      "빅 클로즈업": "Use a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions.",
+      "익스트림 클로즈업": "Use an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture."
     };
     if (zoomPrompts[settings.zoom]) {
       prompts.push(zoomPrompts[settings.zoom]);

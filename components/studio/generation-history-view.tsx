@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
@@ -9,15 +9,19 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useAuth } from "@/components/providers/auth-provider";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
+import { removeRecordFromLocalStorage } from "@/components/studio/history-sync";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
-import { shouldUseFirestore } from "@/lib/env";
-import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
-import { deleteUserImage } from "@/lib/firebase/storage";
 import { toast } from "sonner";
 
-const HISTORY_LIMIT = 120;
+const PAGE_SIZE = 36;
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
 
 type ModeFilterValue = "all" | GenerationMode;
 type TimeframeValue = "all" | "1d" | "7d" | "30d" | "90d";
@@ -108,6 +112,37 @@ function formatDate(value: unknown) {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit"
+  }).format(parsed);
+}
+
+function dateGroupKey(value: unknown) {
+  const parsed = toDate(value);
+  if (!parsed) {
+    return "unknown";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateGroupLabel(key: string) {
+  if (key === "unknown") {
+    return "날짜 없음";
+  }
+
+  const [year, month, day] = key.split("-").map(Number);
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) {
+    return key;
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short"
   }).format(parsed);
 }
 
@@ -242,14 +277,16 @@ function GalleryCard({
 }
 
 export function GenerationHistoryView() {
-  const { records, loading } = useGeneratedImages({ limitResults: HISTORY_LIMIT });
-  const { user } = useAuth();
+  const { records, loading } = useGeneratedImages();
+  const { user } = useLocalUser();
   const [selectedRecord, setSelectedRecord] = useState<GeneratedImageDocument | null>(null);
   const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
   const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setLocalRecords(records ?? []);
@@ -278,14 +315,67 @@ export function GenerationHistoryView() {
   }, [historyItems, modeFilter, timeframeFilter]);
 
   useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [modeFilter, timeframeFilter, historyItems.length]);
+
+  const displayedItems = useMemo(
+    () => filteredItems.slice(0, visibleCount),
+    [filteredItems, visibleCount]
+  );
+
+  const displayedGroups = useMemo(() => {
+    const groups = new Map<string, GeneratedImageDocument[]>();
+    displayedItems.forEach(record => {
+      const key = dateGroupKey(record.createdAt);
+      const group = groups.get(key) ?? [];
+      group.push(record);
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.entries()).map(([key, items]) => ({
+      key,
+      label: formatDateGroupLabel(key),
+      items
+    }));
+  }, [displayedItems]);
+
+  const hasMoreItems = visibleCount < filteredItems.length;
+  const handleLoadMore = () => {
+    setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredItems.length));
+  };
+
+  useEffect(() => {
+    if (!hasMoreItems || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const target = loadMoreRef.current;
+    if (!target) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredItems.length));
+        }
+      },
+      { rootMargin: "480px 0px" }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMoreItems, filteredItems.length]);
+
+  useEffect(() => {
     if (!selectedRecord) {
       return;
     }
-    const stillVisible = filteredItems.some(record => record.id === selectedRecord.id);
+    const stillVisible = displayedItems.some(record => record.id === selectedRecord.id);
     if (!stillVisible) {
       setSelectedRecord(null);
     }
-  }, [filteredItems, selectedRecord]);
+  }, [displayedItems, selectedRecord]);
 
   useEffect(() => {
     if (selectedRecord) {
@@ -316,7 +406,7 @@ export function GenerationHistoryView() {
     );
   };
 
-  const visibleIds = useMemo(() => filteredItems.map(record => record.id), [filteredItems]);
+  const visibleIds = useMemo(() => displayedItems.map(record => record.id), [displayedItems]);
   const recordMap = useMemo(() => {
     const map = new Map<string, GeneratedImageDocument>();
     historyItems.forEach(item => map.set(item.id, item));
@@ -389,6 +479,11 @@ export function GenerationHistoryView() {
       return { href: url, filename };
     }
 
+    // 로컬 라우트(/api/images/<id>)는 그대로 사용. 외부 URL만 /api/download 프록시 경유.
+    if (url.startsWith("/api/") || url.startsWith("/")) {
+      return { href: url, filename };
+    }
+
     const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes("?") ? "&" : "?"}alt=media`;
     const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(filename)}`;
     return { href: downloadUrl, filename };
@@ -440,19 +535,6 @@ export function GenerationHistoryView() {
 
     updateRecordInState(record.id, () => updatedRecord);
 
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, record.id, {
-          metadata: { ...(record.metadata ?? {}), favorite: nextFavorite }
-        });
-      } catch (error) {
-        console.warn("[History] Failed to toggle favorite", error);
-        updateRecordInState(record.id, () => record);
-        toast.error("즐겨찾기 상태를 저장하지 못했습니다.");
-        return;
-      }
-    }
-
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
@@ -469,20 +551,12 @@ export function GenerationHistoryView() {
 
     setLocalRecords(prev => prev.filter(item => item.id !== record.id));
     setSelectedRecord(prev => (prev && prev.id === record.id ? null : prev));
-
-    if (shouldUseFirestore) {
-      try {
-        await deleteGeneratedImageDoc(user.uid, record.id);
-      } catch (error) {
-        console.warn("[History] Failed to delete Firestore document", error);
-        toast.error("기록을 삭제하지 못했습니다.");
-        return;
-      }
-    }
+    removeRecordFromLocalStorage(record.id);
 
     try {
-      if (record.imageUrl && !record.imageUrl.startsWith("data:")) {
-        await deleteUserImage(user.uid, record.id);
+      const localImageId = getLocalImageId(record.imageUrl) ?? record.id;
+      if (record.imageUrl?.startsWith("/api/images/")) {
+        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
       }
     } catch (error) {
       console.warn("[History] Failed to delete storage image", error);
@@ -512,28 +586,6 @@ export function GenerationHistoryView() {
     };
 
     broadcastReferenceUpdate(referenceRecord, "history");
-
-    if (user && shouldUseFirestore) {
-      try {
-        await saveGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID, {
-          mode: record.mode,
-          status: record.status,
-          promptMeta: record.promptMeta,
-          imageUrl,
-          thumbnailUrl: record.thumbnailUrl ?? imageUrl,
-          originalImageUrl: record.originalImageUrl ?? imageUrl,
-          metadata: { ...(record.metadata ?? {}), isReference: true, referenceSourceId: record.id },
-          model: record.model,
-          costCredits: record.costCredits,
-          createdAtIso,
-          updatedAtIso: nowIso
-        });
-      } catch (error) {
-        console.error("[History] Failed to persist reference", error);
-        toast.error("기준 이미지를 저장하지 못했습니다.");
-        return;
-      }
-    }
 
     toast.success("기준 이미지로 설정했습니다.");
   };
@@ -565,7 +617,7 @@ export function GenerationHistoryView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">필터</span>
           <span className="text-xs text-muted-foreground">
-            총 {historyItems.length}개 중 {filteredItems.length}개 표시
+            총 {historyItems.length}개 중 {filteredItems.length}개 필터 · {displayedItems.length}개 표시
           </span>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -617,7 +669,7 @@ export function GenerationHistoryView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">선택</span>
           <span className="text-xs text-muted-foreground">
-            선택 {selectedIds.length}개 / 표시 {filteredItems.length}개
+            선택 {selectedIds.length}개 / 표시 {displayedItems.length}개
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -625,7 +677,7 @@ export function GenerationHistoryView() {
             size="sm"
             variant="outline"
             onClick={handleSelectAllVisible}
-            disabled={!filteredItems.length}
+            disabled={!displayedItems.length}
           >
             {allVisibleSelected ? "선택 해제" : "전체 선택"}
           </Button>
@@ -672,20 +724,37 @@ export function GenerationHistoryView() {
         </div>
       ) : null}
 
-      {filteredItems.length > 0 ? (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {filteredItems.map(record => {
-            const isSelected = selectedIds.includes(record.id);
-            return (
-              <GalleryCard
-                key={record.id}
-                record={record}
-                selected={isSelected}
-                onSelect={handleSelectRecord}
-                onToggleSelect={handleToggleRecordSelection}
-              />
-            );
-          })}
+      {displayedItems.length > 0 ? (
+        <div className="flex flex-col gap-8">
+          {displayedGroups.map(group => (
+            <section key={group.key} className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-2">
+                <h2 className="text-sm font-semibold text-foreground">{group.label}</h2>
+                <span className="text-xs text-muted-foreground">{group.items.length}개 표시</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                {group.items.map(record => {
+                  const isSelected = selectedIds.includes(record.id);
+                  return (
+                    <GalleryCard
+                      key={record.id}
+                      record={record}
+                      selected={isSelected}
+                      onSelect={handleSelectRecord}
+                      onToggleSelect={handleToggleRecordSelection}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+          {hasMoreItems ? (
+            <div ref={loadMoreRef} className="flex justify-center pt-2">
+              <Button type="button" variant="outline" onClick={handleLoadMore}>
+                더 보기 ({filteredItems.length - displayedItems.length}개 남음)
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -7,20 +7,26 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DEFAULT_GENERATION_OPTIONS,
+  GenerationOptionsPanel,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import type { GenerationMode, GeneratedImageDocument } from "@/lib/types";
 import {
   APERTURE_DEFAULT,
   DEFAULT_CAMERA_ANGLE,
   DEFAULT_CAMERA_DIRECTION,
   DEFAULT_SUBJECT_DIRECTION,
-  DEFAULT_ZOOM_LEVEL
+  DEFAULT_ZOOM_LEVEL,
+  formatAperture
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { callGenerateApi } from "@/hooks/use-generate-image";
-import { useAuth } from "@/components/providers/auth-provider";
-import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
-import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
-import { shouldUseFirestore } from "@/lib/env";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import Image from "next/image";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
@@ -28,6 +34,8 @@ import {
   HISTORY_SYNC_EVENT,
   broadcastHistoryUpdate,
   mergeHistoryRecords,
+  persistRecordsMerge,
+  removeRecordFromLocalStorage,
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
 import { usePresetLibrary } from "@/components/studio/preset-library-context";
@@ -36,6 +44,21 @@ import type { StoryboardStyle } from "@/lib/storyboard/types";
 import { cn } from "@/lib/utils";
 
 const MAX_VARIATIONS = 30;
+const INITIAL_HISTORY_VISIBLE_COUNT = 36;
+const HISTORY_VISIBLE_INCREMENT = 36;
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
+
+function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): string | null {
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? null;
+}
+
+function getRecordPromptText(record?: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
+}
 
 type VariationType = "camera" | "lighting" | "pose" | "external" | "style";
 
@@ -49,6 +72,12 @@ interface VariationItem {
   error?: string;
 }
 
+type VariationApiImage = {
+  id?: string;
+  imageUrl?: string;
+  base64Image?: string | null;
+};
+
 const VARIATION_TYPE_LABEL: Record<VariationType, string> = {
   camera: "카메라",
   lighting: "조명",
@@ -58,13 +87,17 @@ const VARIATION_TYPE_LABEL: Record<VariationType, string> = {
 };
 
 export function VariationsStudioShell() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const { records, loading } = useGeneratedImages();
   const [localHistory, setLocalHistory] = useState<GeneratedImageDocument[]>([]);
   const [stylePresets, setStylePresets] = useState<StoryboardStyle[]>(FALLBACK_STORYBOARD_STYLES);
   const [styleLoading, setStyleLoading] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
   const [selectedStylePresets, setSelectedStylePresets] = useState<string[]>([]);
+  const [historyVisibleCount, setHistoryVisibleCount] = useState(INITIAL_HISTORY_VISIBLE_COUNT);
+  const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
+  const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +184,7 @@ export function VariationsStudioShell() {
 
   // Base image state
   const [baseImage, setBaseImage] = useState<string | null>(null);
-  const [baseImageFile, setBaseImageFile] = useState<File | null>(null);
+  const [basePrompt, setBasePrompt] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Preset selection states - arrays for individual selections
@@ -334,10 +367,15 @@ export function VariationsStudioShell() {
       }));
   }, [localHistory, normalizeTimestamp]);
 
-  const recentVariationRecords = useMemo(() => {
+  const allRecentImageRecords = useMemo(() => {
     const merged = mergeHistoryRecords(remoteVariationRecords, localVariationRecords);
-    return merged.slice(0, 12);
+    return merged.filter(record => Boolean(getRecordGeneratedImageUrl(record)));
   }, [localVariationRecords, remoteVariationRecords]);
+  const visibleRecentImageRecords = useMemo(
+    () => allRecentImageRecords.slice(0, historyVisibleCount),
+    [allRecentImageRecords, historyVisibleCount]
+  );
+  const hasMoreRecentImages = historyVisibleCount < allRecentImageRecords.length;
 
   // Base image upload handler
   const handleBaseImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -358,7 +396,6 @@ export function VariationsStudioShell() {
     reader.onload = (e) => {
       const result = e.target?.result as string;
       setBaseImage(result);
-      setBaseImageFile(file);
     };
     reader.readAsDataURL(file);
   }, []);
@@ -437,7 +474,6 @@ export function VariationsStudioShell() {
   // Base image handlers
   const handleRemoveBaseImage = useCallback(() => {
     setBaseImage(null);
-    setBaseImageFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -446,49 +482,95 @@ export function VariationsStudioShell() {
 
   // History action handlers
   const handleToggleFavorite = useCallback(async (recordId: string) => {
-    const record = recentVariationRecords.find(r => r.id === recordId);
+    const record = allRecentImageRecords.find(r => r.id === recordId);
     if (!record || !user) return;
-
-    const isFavorite = record.metadata?.favorite === true;
-    const updatedMetadata = { ...record.metadata, favorite: !isFavorite };
-
-    if (shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, { metadata: updatedMetadata });
-        toast.success(isFavorite ? '즐겨찾기에서 제거했습니다.' : '즐겨찾기에 추가했습니다.');
-      } catch (error) {
-        console.error('Failed to toggle favorite:', error);
-        toast.error('즐겨찾기 변경에 실패했습니다.');
-      }
-    }
-  }, [recentVariationRecords, user]);
+  }, [allRecentImageRecords, user]);
 
   const handleDeleteRecord = useCallback(async (recordId: string) => {
-    const record = recentVariationRecords.find(r => r.id === recordId);
+    const record = allRecentImageRecords.find(r => r.id === recordId);
     if (!record || !user) return;
 
-    if (shouldUseFirestore) {
+    setLocalHistory(prev => prev.filter(r => r.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
+    const localImageId = getLocalImageId(record.imageUrl) ?? recordId;
+    if (record.imageUrl?.startsWith("/api/images/")) {
       try {
-        await deleteGeneratedImageDoc(user.uid, recordId);
-        if (record.imageUrl && !record.imageUrl.startsWith('data:')) {
-          await deleteUserImage(user.uid, recordId);
-        }
-        toast.success('이미지가 삭제되었습니다.');
+        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
       } catch (error) {
-        console.error('Failed to delete image:', error);
-        toast.error('이미지 삭제에 실패했습니다.');
+        console.warn("[VariationsStudio] Failed to delete local image file", error);
       }
-    } else {
-      setLocalHistory(prev => prev.filter(r => r.id !== recordId));
-      const updated = localHistory.filter(r => r.id !== recordId);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      toast.success('이미지가 삭제되었습니다.');
     }
-  }, [recentVariationRecords, user, localHistory]);
+    toast.success('이미지가 삭제되었습니다.');
+  }, [allRecentImageRecords, user, localHistory]);
+
+  const handlePreviewRecord = useCallback((record: GeneratedImageDocument) => {
+    setPreviewRecord(record);
+    previewZoom.reset();
+  }, [previewZoom]);
+
+  const closePreviewRecord = useCallback(() => {
+    setPreviewRecord(null);
+    previewZoom.reset();
+  }, [previewZoom]);
+
+  const handleCopyPreviewPrompt = useCallback(async () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!promptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(promptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  }, [previewRecord]);
+
+  const handleSetPreviewAsBaseImage = useCallback(() => {
+    const imageUrl = getRecordGeneratedImageUrl(previewRecord);
+    if (!imageUrl) {
+      toast.error("기준 이미지로 등록할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    setBaseImage(imageUrl);
+    closePreviewRecord();
+    toast.success("기준 이미지로 설정되었습니다.");
+  }, [closePreviewRecord, previewRecord]);
+
+  const handleDownloadPreviewRecord = useCallback(() => {
+    const imageUrl = getRecordGeneratedImageUrl(previewRecord);
+    if (!previewRecord || !imageUrl) {
+      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = `variation-${previewRecord.id}.png`;
+    link.click();
+  }, [previewRecord]);
+
+  const handleDeletePreviewRecord = useCallback(async () => {
+    if (!previewRecord) {
+      return;
+    }
+
+    const confirmed = window.confirm("이 이미지를 삭제하시겠습니까?");
+    if (!confirmed) {
+      return;
+    }
+
+    const recordId = previewRecord.id;
+    closePreviewRecord();
+    await handleDeleteRecord(recordId);
+  }, [closePreviewRecord, handleDeleteRecord, previewRecord]);
 
   // Generation handler with retry logic
   const handleStartGeneration = useCallback(async () => {
-    if (!baseImage || !baseImageFile || variationItems.length === 0 || !user) {
+    if (!baseImage || variationItems.length === 0 || !user) {
       toast.error('기준 이미지와 프리셋을 선택해주세요.');
       return;
     }
@@ -520,6 +602,17 @@ export function VariationsStudioShell() {
           return;
         }
 
+        const basePromptText = basePrompt.trim();
+        const presetPromptText = presetPrompt.trim();
+        const variationPrompt = [
+          basePromptText,
+          `${VARIATION_TYPE_LABEL[item.type]} preset (${presetName}): ${presetPromptText}`
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        const requestPrompt = basePromptText || presetPromptText;
+        const requestRefinedPrompt = variationPrompt !== requestPrompt ? variationPrompt : undefined;
+
         let retryCount = 0;
         const maxRetries = 2;
         let response: any = null;
@@ -528,15 +621,23 @@ export function VariationsStudioShell() {
           try {
             response = await callGenerateApi({
               mode: "remix" as GenerationMode,
-              prompt: presetPrompt,
+              prompt: requestPrompt,
+              refinedPrompt: requestRefinedPrompt,
+              camera: {
+                angle: DEFAULT_CAMERA_ANGLE,
+                aperture: formatAperture(APERTURE_DEFAULT),
+                subjectDirection: DEFAULT_SUBJECT_DIRECTION,
+                cameraDirection: DEFAULT_CAMERA_DIRECTION,
+                zoom: DEFAULT_ZOOM_LEVEL
+              },
               options: {
                 referenceImage: baseImage,
                 aspectRatio: DEFAULT_ASPECT_RATIO,
-                cameraAngle: DEFAULT_CAMERA_ANGLE,
-                cameraDirection: DEFAULT_CAMERA_DIRECTION,
-                subjectDirection: DEFAULT_SUBJECT_DIRECTION,
-                zoomLevel: DEFAULT_ZOOM_LEVEL,
-                aperture: APERTURE_DEFAULT
+                quality: imageGenOptions.quality,
+                imageSize: imageGenOptions.size,
+                format: imageGenOptions.format,
+                moderation: imageGenOptions.moderation,
+                count: imageGenOptions.count
               }
             });
             break; // Success, exit retry loop
@@ -551,36 +652,86 @@ export function VariationsStudioShell() {
         }
 
         try {
-          if (response && response.ok && response.base64Image) {
-            // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
-            // 클라이언트에서 중복 저장하지 않음. base64 이미지를 직접 사용.
+          if (response && response.ok && (response.imageUrl || response.base64Image)) {
+            const responseImages = Array.isArray(response.images)
+              ? (response.images as VariationApiImage[])
+              : [];
+            const generatedImages =
+              responseImages.length > 0
+                ? responseImages
+                    .map((image, imageIndex) => ({
+                      id:
+                        typeof image.id === "string" && image.id.length > 0
+                          ? image.id
+                          : getLocalImageId(image.imageUrl) ?? `${item.id}-${imageIndex + 1}`,
+                      imageUrl: image.imageUrl ?? image.base64Image ?? null
+                    }))
+                    .filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl))
+                : [
+                    {
+                      id:
+                        typeof response.id === "string" && response.id.length > 0
+                          ? response.id
+                          : getLocalImageId(response.imageUrl ?? response.base64Image) ?? item.id,
+                      imageUrl: response.imageUrl ?? response.base64Image ?? null
+                    }
+                  ].filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl));
+
+            const primaryImage = generatedImages[0];
+            if (!primaryImage) {
+              throw new Error("이미지 데이터를 찾을 수 없습니다.");
+            }
 
             setVariationItems(prev => prev.map(vi =>
               vi.id === item.id ? {
                 ...vi,
                 status: "completed",
-                imageUrl: response.base64Image
+                imageUrl: primaryImage.imageUrl
               } : vi
             ));
 
             // Update history (localStorage only)
-            const historyRecord = {
-              id: item.id,
-              imageUrl: response.base64Image,
-              prompt: presetPrompt,
-              createdAt: new Date().toISOString(),
+            const nowIso = new Date().toISOString();
+            const historyRecords: GeneratedImageDocument[] = generatedImages.map((image, imageIndex) => ({
+              id: image.id,
+              userId: "local",
+              mode: "remix" as const,
+              status: "completed" as const,
+              imageUrl: image.imageUrl,
+              originalImageUrl: baseImage,
+              thumbnailUrl: image.imageUrl,
+              prompt: variationPrompt,
+              promptMeta: {
+                rawPrompt: requestPrompt,
+                refinedPrompt: variationPrompt,
+                guidance: [presetPromptText]
+              },
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              createdAtIso: nowIso,
+              updatedAtIso: nowIso,
+              model: "gpt-image-2",
               metadata: {
                 batchType: "variations",
                 variationType: item.type,
                 variationIndex: item.index,
-                variationLabel: presetName
+                variationLabel: presetName,
+                variationItemId: item.id,
+                variationCopyIndex: imageIndex + 1,
+                variationCopyTotal: generatedImages.length,
+                fileId: image.id,
+                generationOptions: {
+                  quality: imageGenOptions.quality,
+                  size: imageGenOptions.size,
+                  format: imageGenOptions.format,
+                  moderation: imageGenOptions.moderation,
+                  count: imageGenOptions.count
+                }
               }
-            };
+            }));
 
-            const existingHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-            const newHistory = mergeHistoryRecords(existingHistory, [historyRecord as any]);
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newHistory));
-            broadcastHistoryUpdate(newHistory, "variations");
+            const merged = persistRecordsMerge(historyRecords);
+            broadcastHistoryUpdate(merged, "variations");
           } else {
             throw new Error(response?.reason || '이미지 생성에 실패했습니다.');
           }
@@ -605,12 +756,16 @@ export function VariationsStudioShell() {
     } finally {
       setIsGenerating(false);
     }
-  }, [baseImage, baseImageFile, variationItems, user]);
+  }, [baseImage, basePrompt, imageGenOptions, variationItems, user]);
 
-  const canGenerate = baseImage && variationItems.length > 0 && !isGenerating;
+  const canGenerate = Boolean(baseImage && variationItems.length > 0 && !isGenerating);
+  const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
+  const previewPromptText = getRecordPromptText(previewRecord);
+  const previewZoomPercent = Math.round(previewZoom.scale * 100);
 
   return (
     <div className="flex h-screen bg-background">
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       {/* Left Panel - Controls */}
       <div className="flex w-96 flex-col border-r bg-muted/30">
         {/* Header */}
@@ -664,6 +819,23 @@ export function VariationsStudioShell() {
                     />
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">공통 프롬프트</CardTitle>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  모든 변형에 유지할 캐릭터, 분위기, 품질 조건을 입력하세요. 선택한 프리셋 지시는 이 내용 뒤에 추가됩니다.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  value={basePrompt}
+                  onChange={event => setBasePrompt(event.target.value)}
+                  placeholder="예: Preserve the same character identity, clean line art, soft cinematic lighting..."
+                  className="min-h-28 resize-y text-sm"
+                />
               </CardContent>
             </Card>
 
@@ -1063,109 +1235,262 @@ export function VariationsStudioShell() {
 
             {/* Recent Generated Images */}
             <div>
-              <h3 className="text-sm font-medium mb-4">최근 생성된 변형</h3>
-              {loading && recentVariationRecords.length === 0 ? (
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium">최근 생성 이미지</h3>
+                {allRecentImageRecords.length > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    {Math.min(historyVisibleCount, allRecentImageRecords.length)}/{allRecentImageRecords.length}
+                  </span>
+                ) : null}
+              </div>
+              {loading && visibleRecentImageRecords.length === 0 ? (
                 <div className="flex h-32 items-center justify-center">
                   <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 </div>
-              ) : recentVariationRecords.length === 0 ? (
+              ) : visibleRecentImageRecords.length === 0 ? (
                 <div className="flex h-32 items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg">
-                  아직 생성된 변형이 없습니다
+                  아직 생성된 이미지가 없습니다
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
-                  {recentVariationRecords.map((record) => (
-                      <Card key={record.id} className="overflow-hidden group">
-                        <CardContent className="p-2">
-                          <div className="space-y-2">
-                            <div className="aspect-square relative bg-muted rounded-md overflow-hidden">
-                              {record.imageUrl && (
-                                <Image
-                                  src={record.imageUrl}
-                                  alt={record.promptMeta?.refinedPrompt || "Generated variation"}
-                                  fill
-                                  className="object-cover"
-                                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 16.67vw"
-                                />
-                              )}
-                              {/* Hover overlay with actions */}
-                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="w-full text-xs h-7"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (record.imageUrl) {
-                                      setBaseImage(record.imageUrl);
-                                      const file = new File([], 'reference.png');
-                                      setBaseImageFile(file);
-                                      toast.success('기준 이미지로 설정되었습니다.');
-                                    }
-                                  }}
-                                >
-                                  기준이미지 등록
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant={record.metadata?.favorite ? "secondary" : "outline"}
-                                  className="w-full text-xs h-7"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleFavorite(record.id);
-                                  }}
-                                >
-                                  {record.metadata?.favorite ? '★' : '☆'} 즐겨찾기
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  className="w-full text-xs h-7"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (record.imageUrl) {
-                                      const link = document.createElement('a');
-                                      link.href = record.imageUrl;
-                                      link.download = `variation-${record.id}.png`;
-                                      link.click();
-                                    }
-                                  }}
-                                >
-                                  다운로드
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  className="w-full text-xs h-7"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (confirm('이 이미지를 삭제하시겠습니까?')) {
-                                      handleDeleteRecord(record.id);
-                                    }
-                                  }}
-                                >
-                                  삭제
-                                </Button>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+                    {visibleRecentImageRecords.map((record) => {
+                      const imageUrl = getRecordGeneratedImageUrl(record);
+                      return (
+                        <Card
+                          key={record.id}
+                          className="overflow-hidden group cursor-zoom-in transition hover:border-primary/50"
+                          onClick={() => handlePreviewRecord(record)}
+                        >
+                          <CardContent className="p-2">
+                            <div className="space-y-2">
+                              <div className="aspect-square relative bg-muted rounded-md overflow-hidden">
+                                {imageUrl && (
+                                  <Image
+                                    src={imageUrl}
+                                    alt={record.promptMeta?.refinedPrompt || "Generated variation"}
+                                    fill
+                                    className="object-cover"
+                                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 16.67vw"
+                                  />
+                                )}
+                                {/* Hover overlay with actions */}
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="w-full text-xs h-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (imageUrl) {
+                                        setBaseImage(imageUrl);
+                                        toast.success('기준 이미지로 설정되었습니다.');
+                                      }
+                                    }}
+                                  >
+                                    기준이미지 등록
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant={record.metadata?.favorite ? "secondary" : "outline"}
+                                    className="w-full text-xs h-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleFavorite(record.id);
+                                    }}
+                                  >
+                                    {record.metadata?.favorite ? '★' : '☆'} 즐겨찾기
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="w-full text-xs h-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (imageUrl) {
+                                        const link = document.createElement('a');
+                                        link.href = imageUrl;
+                                        link.download = `variation-${record.id}.png`;
+                                        link.click();
+                                      }
+                                    }}
+                                  >
+                                    다운로드
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="w-full text-xs h-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('이 이미지를 삭제하시겠습니까?')) {
+                                        handleDeleteRecord(record.id);
+                                      }
+                                    }}
+                                  >
+                                    삭제
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="text-xs space-y-1">
+                                <div className="font-medium truncate">
+                                  {(record.metadata as any)?.variationLabel || record.promptMeta?.refinedPrompt || "Generated image"}
+                                </div>
+                                <div className="text-muted-foreground text-xs">
+                                  {new Date(record.createdAt).toLocaleString()}
+                                </div>
                               </div>
                             </div>
-                            <div className="text-xs space-y-1">
-                              <div className="font-medium truncate">
-                                {(record.metadata as any)?.variationLabel || record.promptMeta?.refinedPrompt || "Variation"}
-                              </div>
-                              <div className="text-muted-foreground text-xs">
-                                {new Date(record.createdAt).toLocaleString()}
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                  {hasMoreRecentImages ? (
+                    <div className="flex justify-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => setHistoryVisibleCount(count => count + HISTORY_VISIBLE_INCREMENT)}
+                      >
+                        더 보기
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
           </div>
         </ScrollArea>
       </div>
+
+      {previewRecord ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+          onClick={closePreviewRecord}
+        >
+          <div
+            className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
+            onClick={event => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
+              onClick={event => {
+                event.stopPropagation();
+                closePreviewRecord();
+              }}
+            >
+              닫기
+            </button>
+            <div className="flex min-h-0 flex-col bg-black">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">원본 이미지</p>
+                  <p className="truncate text-xs text-white/60">
+                    {previewRecord.model} · {new Date(previewRecord.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="mr-14 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomOut()}
+                    disabled={previewZoom.scale <= MIN_IMAGE_ZOOM}
+                  >
+                    축소
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.reset()}
+                    disabled={previewZoom.scale === 1}
+                  >
+                    {previewZoomPercent}%
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomIn()}
+                    disabled={previewZoom.scale >= MAX_IMAGE_ZOOM}
+                  >
+                    확대
+                  </Button>
+                </div>
+              </div>
+              <div
+                {...previewZoom.bind}
+                className={cn(
+                  "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+                  previewZoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+                )}
+                title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+              >
+                {previewImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewImageUrl}
+                    alt={previewPromptText || "preview"}
+                    className="max-h-full max-w-full object-contain will-change-transform"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${previewZoom.transform.panX}px, ${previewZoom.transform.panY}px) scale(${previewZoom.transform.scale})`,
+                      transformOrigin: "center center"
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+                )}
+              </div>
+            </div>
+            <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+              <div className="space-y-1 pr-10 lg:pr-0">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+                <h2 className="text-base font-semibold text-foreground">프롬프트와 액션</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={handleSetPreviewAsBaseImage} disabled={!previewImageUrl}>
+                  기준이미지 등록
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleCopyPreviewPrompt()} disabled={!previewPromptText}>
+                  프롬프트 복사
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDownloadPreviewRecord} disabled={!previewImageUrl}>
+                  다운로드
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()}>
+                  삭제
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+                <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+                  {previewPromptText || "저장된 프롬프트가 없습니다."}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모드</p>
+                  <p className="uppercase">{previewRecord.mode}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모델</p>
+                  <p>{previewRecord.model}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">파일</p>
+                  <p>{previewImageUrl?.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+                </div>
+                {(previewRecord.metadata as any)?.variationLabel ? (
+                  <div className="rounded-lg border bg-background/60 p-2">
+                    <p className="font-medium text-foreground">변형</p>
+                    <p>{(previewRecord.metadata as any).variationLabel}</p>
+                  </div>
+                ) : null}
+              </div>
+            </aside>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

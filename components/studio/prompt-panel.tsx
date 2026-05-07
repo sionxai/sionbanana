@@ -27,7 +27,6 @@ import {
 } from "@/lib/camera";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections } from "@/components/studio/types";
-import { generateCombinedCameraPrompt } from "@/components/studio/camera-config";
 import { usePresetLibrary } from "@/components/studio/preset-library-context";
 import type { ExternalPresetOption } from "@/components/studio/external-preset-config";
 
@@ -67,10 +66,30 @@ const ZOOM_OPTIONS: Array<{ value: string; label: string }> = [
   { value: DEFAULT_ZOOM_LEVEL, label: "기본값" },
   { value: "줌인", label: "줌인" },
   { value: "줌아웃", label: "줌아웃" },
-  { value: "확대", label: "확대" }
+  { value: "확대", label: "확대" },
+  { value: "익스트림 롱샷", label: "익스트림 롱샷 (ELS)" },
+  { value: "롱샷 / 와이드샷", label: "롱샷/와이드샷" },
+  { value: "풀샷", label: "풀샷 (FS)" },
+  { value: "니샷", label: "니샷 (KS)" },
+  { value: "미디엄 롱샷", label: "미디엄 롱샷 (MLS)" },
+  { value: "미디엄샷", label: "미디엄샷 (MS)" },
+  { value: "미디엄 클로즈업", label: "미디엄 클로즈업 (MCU)" },
+  { value: "클로즈업", label: "클로즈업 (CU)" },
+  { value: "빅 클로즈업", label: "빅 클로즈업 (BCU)" },
+  { value: "익스트림 클로즈업", label: "익스트림 클로즈업 (ECU)" }
 ];
 
 const APERTURE_MARKS = [0, 12, 28, 56, 110, 160, 220];
+const NOISE_AUTO_CORRECTION_PROMPT = `Remove all noise, grain, and digital artifacts from the image
+while preserving all lines, shapes, colors, and composition exactly.
+Output a clean, denoised version with smooth gradients.`;
+
+function removeNoiseAutoCorrectionPrompt(value: string) {
+  return value
+    .replace(NOISE_AUTO_CORRECTION_PROMPT, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 interface PromptPanelProps {
   mode: GenerationMode;
@@ -103,6 +122,7 @@ interface PromptPanelProps {
   onGenerate?: (action: "primary" | "remix") => void;
   onRefinePrompt?: () => void;
   generating?: boolean;
+  inflightCount?: number;
 }
 
 export function PromptPanel({
@@ -135,14 +155,13 @@ export function PromptPanel({
   onResetPresets,
   onGenerate,
   onRefinePrompt,
-  generating
+  generating,
+  inflightCount = 0
 }: PromptPanelProps) {
   const {
     externalGroups,
     lightingGroups,
-    poseGroups,
-    lightingLookup,
-    generatePosePrompt
+    poseGroups
   } = usePresetLibrary();
   const apertureLabel = useMemo(() => formatAperture(aperture), [aperture]);
   const apertureValue = useMemo(() => [aperture], [aperture]);
@@ -206,54 +225,63 @@ export function PromptPanel({
   }, []);
   const cameraCardTitle = isCameraMode ? "카메라 프롬프트" : "카메라 프리셋";
 
+  const appendPromptText = useCallback(
+    (nextPrompt: string) => {
+      const next = nextPrompt.trim();
+      if (!next) {
+        return;
+      }
+
+      const current = prompt.trim();
+      if (!current) {
+        onPromptChange(next);
+        return;
+      }
+
+      if (current.includes(next)) {
+        return;
+      }
+
+      onPromptChange(`${current}\n\n${next}`);
+    },
+    [onPromptChange, prompt]
+  );
+  const noiseAutoCorrectionEnabled = useMemo(
+    () => prompt.includes(NOISE_AUTO_CORRECTION_PROMPT),
+    [prompt]
+  );
+  const handleToggleNoiseAutoCorrection = useCallback(
+    (checked: boolean) => {
+      if (checked) {
+        appendPromptText(NOISE_AUTO_CORRECTION_PROMPT);
+      } else {
+        onPromptChange(removeNoiseAutoCorrectionPrompt(prompt));
+      }
+      onRefinedPromptChange("");
+    },
+    [appendPromptText, onPromptChange, onRefinedPromptChange, prompt]
+  );
+
   const handleLightingSelectionsChange = useCallback(
     (category: LightingPresetCategory, values: string[]) => {
       onLightingSelectionsChange?.(category, values);
-
-      // Update prompt input with selected lighting presets
-      const lookup = lightingLookup[category] ?? {};
-      const selectedPrompts = values
-        .map(value => lookup[value])
-        .filter(Boolean);
-
-      if (selectedPrompts.length > 0) {
-        // Set the first selected preset's prompt to the input field
-        onPromptChange(selectedPrompts[0]);
-      } else if (values.length === 0) {
-        // Clear prompt if no presets selected for this category
-        onPromptChange("");
-      }
     },
-    [lightingLookup, onLightingSelectionsChange, onPromptChange]
+    [onLightingSelectionsChange]
   );
 
   const handlePoseSelectionsChange = useCallback(
     (category: PosePresetCategory, values: string[]) => {
       onPoseSelectionsChange?.(category, values);
-
-      // Get current selections from poseSelections state
-      const currentExpression = poseSelections?.expression?.[0] || 'default';
-      const currentPosture = poseSelections?.posture?.[0] || 'default';
-
-      // Update the changed category
-      const newSelections = {
-        expression: category === 'expression' ? (values[0] || 'default') : currentExpression,
-        posture: category === 'posture' ? (values[0] || 'default') : currentPosture,
-      };
-
-      // Generate combined prompt
-      const combinedPrompt = generatePosePrompt(newSelections);
-      onPromptChange(combinedPrompt);
     },
-    [generatePosePrompt, onPoseSelectionsChange, onPromptChange, poseSelections]
+    [onPoseSelectionsChange]
   );
 
   const handleExternalPresetApply = useCallback(
     (option: ExternalPresetOption) => {
-      onPromptChange(option.prompt);
+      appendPromptText(option.prompt);
       onRefinedPromptChange("");
     },
-    [onPromptChange, onRefinedPromptChange]
+    [appendPromptText, onRefinedPromptChange]
   );
 
   const handleStylePresetApply = useCallback(
@@ -263,11 +291,11 @@ export function PromptPanel({
         toast.error("해당 스타일에는 적용할 프롬프트가 없습니다.");
         return;
       }
-      onPromptChange(promptText);
+      appendPromptText(promptText);
       onRefinedPromptChange("");
       toast.success(`${style.label} 스타일 프리셋을 적용했습니다.`);
     },
-    [onPromptChange, onRefinedPromptChange]
+    [appendPromptText, onRefinedPromptChange]
   );
 
   const handleCameraAngleChangeInternal = useCallback(
@@ -316,27 +344,6 @@ export function PromptPanel({
     }
   }, [prompt]);
 
-  const updateCameraPrompt = useCallback(() => {
-    if (!isCameraMode) return;
-
-    const combinedPrompt = generateCombinedCameraPrompt({
-      angle: cameraAngle,
-      aperture: formatAperture(aperture),
-      subjectDirection: subjectDirection,
-      cameraDirection: cameraDirection,
-      zoom: zoomLevel
-    });
-
-    onPromptChange(combinedPrompt);
-  }, [isCameraMode, cameraAngle, aperture, subjectDirection, cameraDirection, zoomLevel, onPromptChange]);
-
-  // Auto-update camera prompt when settings change
-  useEffect(() => {
-    if (isCameraMode) {
-      updateCameraPrompt();
-    }
-  }, [isCameraMode, cameraAngle, aperture, subjectDirection, cameraDirection, zoomLevel, updateCameraPrompt]);
-
   const promptCard = (
     <Card className="flex-1">
       <CardHeader className="pb-4">
@@ -353,9 +360,8 @@ export function PromptPanel({
           <Button
             className="bg-sky-500 hover:bg-sky-500/90"
             onClick={() => onGenerate?.("primary")}
-            disabled={generating}
           >
-            {generating ? "생성 중..." : "이미지 생성"}
+            {inflightCount > 0 ? `이미지 생성 (${inflightCount} 진행 중)` : "이미지 생성"}
           </Button>
           <Button className="bg-amber-500 hover:bg-amber-500/90" onClick={() => onGenerate?.("remix")}>
             변형 생성
@@ -368,19 +374,35 @@ export function PromptPanel({
           </Button>
         </div>
         <div className="space-y-2">
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <p className="text-sm font-medium text-foreground">GPT 자동 보정</p>
-              <p className="text-xs text-muted-foreground">카메라 옵션을 반영해 프롬프트를 재구성합니다.</p>
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-foreground">GPT 자동 보정</p>
+                <p className="text-xs text-muted-foreground">카메라 옵션을 반영해 프롬프트를 재구성합니다.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={useGpt}
+                  onCheckedChange={() => onToggleGpt()}
+                  disabled={gptLoading}
+                  aria-label="GPT 자동 보정 토글"
+                />
+                <span className="text-xs text-muted-foreground">{useGpt ? "켜짐" : "꺼짐"}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={useGpt}
-                onCheckedChange={() => onToggleGpt()}
-                disabled={gptLoading || generating}
-                aria-label="GPT 자동 보정 토글"
-              />
-              <span className="text-xs text-muted-foreground">{useGpt ? "켜짐" : "꺼짐"}</span>
+            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-foreground">노이즈 자동보정</p>
+                <p className="text-xs text-muted-foreground">노이즈, 그레인, 디지털 아티팩트를 정리합니다.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={noiseAutoCorrectionEnabled}
+                  onCheckedChange={handleToggleNoiseAutoCorrection}
+                  aria-label="노이즈 자동보정 토글"
+                />
+                <span className="text-xs text-muted-foreground">{noiseAutoCorrectionEnabled ? "켜짐" : "꺼짐"}</span>
+              </div>
             </div>
           </div>
           <Label className="text-xs text-muted-foreground">GPT 프롬프트 리라이팅</Label>
@@ -396,7 +418,7 @@ export function PromptPanel({
             size="sm"
             className="w-full border-dashed"
             onClick={onRefinePrompt}
-            disabled={generating || gptLoading}
+            disabled={gptLoading}
           >
             {gptLoading ? "GPT 생성 중..." : "GPT에게 프롬프트 개선 요청"}
           </Button>
@@ -436,7 +458,6 @@ export function PromptPanel({
                   value={selected}
                   onValueChange={values => handleLightingSelectionsChange(group.key, values)}
                   className="flex flex-wrap gap-2"
-                  disabled={generating}
                 >
                   {group.options.map(option => (
                     <ToggleGroupItem key={option.value} value={option.value} className="px-3 py-1 text-xs">
@@ -473,7 +494,6 @@ export function PromptPanel({
                   value={selected[0] || "default"}
                   onValueChange={value => handlePoseSelectionsChange(group.key, [value || "default"])}
                   className="flex flex-wrap gap-2"
-                  disabled={generating}
                 >
                   {group.options.map(option => (
                     <ToggleGroupItem key={option.value} value={option.value} className="px-3 py-1 text-xs">
@@ -531,7 +551,7 @@ export function PromptPanel({
                 </ToggleGroup>
               </div>
               <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">줌 설정</Label>
+                <Label className="text-xs text-muted-foreground">샷 사이즈 / 줌</Label>
                 <ToggleGroup
                   type="single"
                   value={zoomLevel}
@@ -585,7 +605,7 @@ export function PromptPanel({
                 size="sm"
                 className="border-dashed px-2 py-1 text-[11px]"
                 onClick={() => onApertureChange(APERTURE_NONE)}
-                disabled={generating || aperture === APERTURE_NONE}
+                disabled={aperture === APERTURE_NONE}
               >
                 기본값
               </Button>
@@ -611,7 +631,7 @@ export function PromptPanel({
                 size="sm"
                 className="border-dashed px-2 py-1 text-[11px]"
                 onClick={() => onAspectRatioChange(DEFAULT_ASPECT_RATIO)}
-                disabled={generating || aspectRatio === DEFAULT_ASPECT_RATIO}
+                disabled={aspectRatio === DEFAULT_ASPECT_RATIO}
               >
                 기본값 {ASPECT_RATIO_PRESETS.find(item => item.value === DEFAULT_ASPECT_RATIO)?.label ?? "원본 그대로"}
               </Button>
@@ -766,7 +786,6 @@ export function PromptPanel({
               onRefinedPromptChange("");
               onNegativePromptChange("");
             }}
-            disabled={generating}
           >
             프리셋 리셋
           </Button>

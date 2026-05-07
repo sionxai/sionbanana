@@ -1,134 +1,36 @@
 import { z } from "zod";
 
-const clientSchema = z.object({
-  NEXT_PUBLIC_FIREBASE_API_KEY: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_DATABASE_URL: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_APP_ID: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_USE_FIRESTORE: z.string().optional(),
-  NEXT_PUBLIC_FIREBASE_DATABASE_ID: z.string().optional()
-});
-
 const serverSchema = z.object({
+  SIONBANANA_DATA_DIR: z.string().optional(),
+  CODEX_HOME: z.string().optional(),
+  CHATGPT_LOCAL_HOME: z.string().optional(),
+  CODEX_RESPONSES_ENDPOINT: z.string().optional(),
+  DEFAULT_TEXT_MODEL: z.string().optional(),
+  DEFAULT_IMAGE_MODEL: z.string().optional(),
+  // 호환성 (제거 예정)
   GEMINI_API_KEY: z.string().optional(),
-  FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional(),
-  FIRESTORE_DATABASE_ID: z.string().optional()
+  OPENAI_API_KEY: z.string().optional()
 });
 
-const rawClientEnv = clientSchema.parse({
-  NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  NEXT_PUBLIC_FIREBASE_DATABASE_URL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-  NEXT_PUBLIC_FIREBASE_USE_FIRESTORE: process.env.NEXT_PUBLIC_FIREBASE_USE_FIRESTORE,
-  NEXT_PUBLIC_FIREBASE_DATABASE_ID: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID
-});
-
-// ⚠️ SECURITY WARNING: Do NOT hardcode credentials here.
-// All Firebase configuration should come from environment variables (.env.local)
-const defaultClientEnv = {
-  NEXT_PUBLIC_FIREBASE_API_KEY: "",
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "",
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: "",
-  NEXT_PUBLIC_FIREBASE_DATABASE_URL: "",
-  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "",
-  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "",
-  NEXT_PUBLIC_FIREBASE_APP_ID: "",
-  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: "",
-  NEXT_PUBLIC_FIREBASE_USE_FIRESTORE: "true",
-  NEXT_PUBLIC_FIREBASE_DATABASE_ID: "(default)"
-};
-
-// Only use environment variables if they exist and are not empty
-function sanitizeValue(value: string | undefined) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-const cleanRawClientEnvEntries = Object.entries(rawClientEnv)
-  .map(([key, value]) => [key, sanitizeValue(value)] as const)
-  .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0);
-
-const cleanRawClientEnv = Object.fromEntries(cleanRawClientEnvEntries);
-
-// Debug environment variables
-console.log('[ENV] Environment Variables Debug:', {
-  NODE_ENV: process.env.NODE_ENV,
-  VERCEL: process.env.VERCEL,
-  hasRawApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  hasRawProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  rawProjectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  cleanedEnvKeys: Object.keys(cleanRawClientEnv),
-  defaultEnvKeys: Object.keys(defaultClientEnv)
-});
-
-export const clientEnv = {
-  ...defaultClientEnv,
-  ...cleanRawClientEnv
-};
-
-console.log('[ENV] Final Client Environment:', {
-  apiKey: clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY ? `${clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY.substring(0, 10)}...` : 'undefined',
-  projectId: clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  authDomain: clientEnv.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  databaseId: clientEnv.NEXT_PUBLIC_FIREBASE_DATABASE_ID,
-  isUsingDefaults: Object.keys(cleanRawClientEnv).length === 0
-});
-
-export const isFirebaseConfigured = Boolean(
-  clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY &&
-  clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
-  clientEnv.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo" &&
-  clientEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== "demo-project"
-);
-export const shouldUseFirestore = isFirebaseConfigured && clientEnv.NEXT_PUBLIC_FIREBASE_USE_FIRESTORE !== "false";
-
-
-// ⚠️ SECURITY WARNING: NEVER hardcode API keys in source code
 export const serverEnv = serverSchema.parse({
+  SIONBANANA_DATA_DIR: process.env.SIONBANANA_DATA_DIR,
+  CODEX_HOME: process.env.CODEX_HOME,
+  CHATGPT_LOCAL_HOME: process.env.CHATGPT_LOCAL_HOME,
+  CODEX_RESPONSES_ENDPOINT: process.env.CODEX_RESPONSES_ENDPOINT,
+  DEFAULT_TEXT_MODEL: process.env.DEFAULT_TEXT_MODEL,
+  DEFAULT_IMAGE_MODEL: process.env.DEFAULT_IMAGE_MODEL,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-  FIREBASE_SERVICE_ACCOUNT_KEY: process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  FIRESTORE_DATABASE_ID: process.env.FIRESTORE_DATABASE_ID || "(default)"
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY
 });
 
-export function getServiceAccountKey(): {
-  projectId: string;
-  clientEmail: string;
-  privateKey: string;
-} | null {
-  const { FIREBASE_SERVICE_ACCOUNT_KEY } = serverEnv;
+// 로컬 단일 사용자 도구로 전환되면서 Firebase 의존성을 제거. 호출처는 점진적으로 정리.
+export const clientEnv = {} as Record<string, string | undefined>;
+export const isFirebaseConfigured = false;
 
-  if (!FIREBASE_SERVICE_ACCOUNT_KEY) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(FIREBASE_SERVICE_ACCOUNT_KEY);
-    return {
-      projectId: parsed.project_id,
-      clientEmail: parsed.client_email,
-      privateKey: parsed.private_key?.replace(/\\n/g, "\n") ?? ""
-    };
-  } catch (error) {
-    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", error);
-    return null;
-  }
+export function getServiceAccountKey(): null {
+  return null;
 }
 
 export function getFirestoreDatabaseId(): string {
-  const id = serverEnv.FIRESTORE_DATABASE_ID;
-  return id && id.trim().length > 0 ? id : "(default)";
+  return "(default)";
 }

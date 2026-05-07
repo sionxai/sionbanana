@@ -6,15 +6,19 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/components/providers/auth-provider";
+import {
+  DEFAULT_GENERATION_OPTIONS,
+  GenerationOptionsPanel,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 import type { AspectRatioPreset, GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { DEFAULT_ASPECT_RATIO, getAspectRatioDimensions, getAspectRatioLabel } from "@/lib/aspect";
 import { APERTURE_DEFAULT, formatAperture } from "@/lib/camera";
-import { deleteGeneratedImageDoc, saveGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
-import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
-import { shouldUseFirestore } from "@/lib/env";
 import {
   CHARACTER_BASE_PROMPT_FALLBACK,
   CHARACTER_NEGATIVE_ENFORCEMENT,
@@ -42,9 +46,16 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
+import {
+  HISTORY_SYNC_EVENT,
+  broadcastHistoryUpdate,
+  mergeHistoryRecords,
+  persistRecordsMerge,
+  removeRecordFromLocalStorage,
+  type HistorySyncPayload
+} from "@/components/studio/history-sync";
 import { cn } from "@/lib/utils";
-import { Download, Image as ImageIcon, Sparkles, Stars, Zap } from "lucide-react";
+import { Download, Image as ImageIcon, Sparkles, Stars, Zap, ZoomIn } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsList } from "@/components/ui/tabs";
 
@@ -158,7 +169,9 @@ const PHOTO_DUMP_VARIATION_VIEWS: ViewSpec[] = [
   }
 ];
 
-const TILE_LIMIT = 24;
+const INITIAL_HISTORY_VISIBLE_COUNT = 36;
+const HISTORY_VISIBLE_INCREMENT = 36;
+const PRESET_BATCH_PROGRESS_TOAST_ID = "preset-batch-progress";
 const FOUR_THREE_RATIO_CLASS = "aspect-[4/3]";
 const PRESET_ACTION_MODE: GenerationMode = "create";
 
@@ -252,8 +265,332 @@ const EMOTION_STUDY_VIEWS: ViewSpec[] = [
   }
 ];
 
-function dataUrlToBlob(dataUrl: string) {
-  return fetch(dataUrl).then(res => res.blob());
+const NINE_ZOOM_VIEW_POOL: ViewSpec[] = [
+  {
+    id: "nine-zoom-els-deep",
+    label: "ELS 딥 포커스",
+    instruction:
+      "Extreme Long Shot / ELS, the subject appears very small inside a much larger environment, 24mm wide lens feeling, deep focus, high depth of field, f/8, background and subject both clear"
+  },
+  {
+    id: "nine-zoom-wide-deep",
+    label: "와이드 딥 포커스",
+    instruction:
+      "Long Shot / Wide Shot, full body visible with generous surrounding space, 28mm wide lens, deep depth of field, f/5.6, clear environment context"
+  },
+  {
+    id: "nine-zoom-full-balanced",
+    label: "풀샷 균형 심도",
+    instruction:
+      "Full Shot / FS, head-to-toe full body framing, 35mm lens, balanced depth of field, f/4, readable posture and outfit with soft background separation"
+  },
+  {
+    id: "nine-zoom-knee-medium",
+    label: "니샷 중간 심도",
+    instruction:
+      "Knee Shot / KS, frame from knees upward, 45mm lens, medium depth of field, f/3.5, preserve movement and facial expression together"
+  },
+  {
+    id: "nine-zoom-mls-soft",
+    label: "MLS 소프트 배경",
+    instruction:
+      "Medium Long Shot / MLS, frame from upper thighs or knees upward, 50mm lens, moderate shallow depth of field, f/2.8, balanced action and dialogue framing"
+  },
+  {
+    id: "nine-zoom-ms-portrait",
+    label: "미디엄 인물 심도",
+    instruction:
+      "Medium Shot / MS, waist-up framing, 65mm portrait lens feeling, shallow depth of field, f/2.4, subject clearly separated from the background"
+  },
+  {
+    id: "nine-zoom-mcu-bokeh",
+    label: "MCU 보케",
+    instruction:
+      "Medium Close-Up / MCU, chest-up framing, 85mm portrait lens, shallow depth of field, f/1.8, creamy bokeh while keeping facial features sharp"
+  },
+  {
+    id: "nine-zoom-cu-shallow",
+    label: "클로즈업 얕은 심도",
+    instruction:
+      "Close-Up / CU, face-centered framing, 100mm portrait lens, very shallow depth of field, f/1.6, emotional face focus with smooth background blur"
+  },
+  {
+    id: "nine-zoom-bcu-ultra-shallow",
+    label: "빅 클로즈업 초얕은 심도",
+    instruction:
+      "Big Close-Up / BCU, part of the face fills the frame, 120mm lens compression, extremely shallow depth of field, f/1.4, intense micro-expression emphasis"
+  },
+  {
+    id: "nine-zoom-ecu-detail",
+    label: "ECU 디테일",
+    instruction:
+      "Extreme Close-Up / ECU, isolate eyes, lips, hand, or a symbolic detail from the reference, macro lens feeling, f/2.8, crisp detail with falloff blur"
+  },
+  {
+    id: "nine-zoom-low-wide",
+    label: "로우 와이드",
+    instruction:
+      "Low-angle Wide Shot, camera below eye level with full figure dominance, 24mm lens, deep-to-medium depth of field, f/4, dramatic scale and presence"
+  },
+  {
+    id: "nine-zoom-telephoto-compressed",
+    label: "망원 압축",
+    instruction:
+      "Telephoto portrait compression, medium close framing, 135mm lens feeling, shallow depth of field, f/2, compressed background and elegant subject separation"
+  }
+];
+
+function getRandomNineZoomViews(): ViewSpec[] {
+  const shuffled = [...NINE_ZOOM_VIEW_POOL];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled.slice(0, 9).map((view, index) => ({
+    ...view,
+    id: `${view.id}-${index + 1}`,
+    label: `9ZOOM ${index + 1} · ${view.label}`
+  }));
+}
+
+const NINE_ANGLE_VIEW_POOL: ViewSpec[] = [
+  {
+    id: "nine-angle-eye-level",
+    label: "아이레벨",
+    instruction:
+      "Eye-level camera angle, neutral human perspective, stable front three-quarter view, keep shot size around medium or full shot"
+  },
+  {
+    id: "nine-angle-high",
+    label: "하이앵글",
+    instruction:
+      "High angle view looking down at the subject, camera above eye level, preserve identity and styling, keep framing readable"
+  },
+  {
+    id: "nine-angle-low",
+    label: "로우앵글",
+    instruction:
+      "Low angle view looking up at the subject, camera below eye level, stronger presence and scale, avoid distortion of the face"
+  },
+  {
+    id: "nine-angle-bird",
+    label: "버드아이",
+    instruction:
+      "Bird's-eye view from directly above or near-top-down, composition clearly shows the subject from above while preserving recognizable design"
+  },
+  {
+    id: "nine-angle-worm",
+    label: "웜아이",
+    instruction:
+      "Worm's-eye view from very low near the ground, dramatic upward perspective, keep anatomy believable and subject recognizable"
+  },
+  {
+    id: "nine-angle-dutch",
+    label: "더치앵글",
+    instruction:
+      "Dutch angle with a deliberate tilted horizon, dynamic diagonal composition, preserve the same subject and visual style"
+  },
+  {
+    id: "nine-angle-profile",
+    label: "사이드 프로파일",
+    instruction:
+      "Side profile camera angle, subject seen from the left or right side, clear silhouette and facial profile, stable medium framing"
+  },
+  {
+    id: "nine-angle-back",
+    label: "후면",
+    instruction:
+      "Back view camera angle, subject seen from behind with recognizable outfit, hair, silhouette, and environment continuity"
+  },
+  {
+    id: "nine-angle-over-shoulder",
+    label: "오버숄더",
+    instruction:
+      "Over-the-shoulder angle, camera placed behind one shoulder looking toward the subject or scene, cinematic perspective"
+  },
+  {
+    id: "nine-angle-three-quarter",
+    label: "3/4 앵글",
+    instruction:
+      "Three-quarter camera angle, subject turned slightly from front, balanced depth and readable facial features"
+  },
+  {
+    id: "nine-angle-front-symmetry",
+    label: "정면 대칭",
+    instruction:
+      "Straight-on frontal camera angle, centered symmetrical composition, stable eye-level perspective, identity clearly visible"
+  },
+  {
+    id: "nine-angle-canted-close",
+    label: "캔티드 근접",
+    instruction:
+      "Slight canted close camera angle, subtle tilted perspective with intimate framing, keep facial identity sharp and undistorted"
+  }
+];
+
+function getRandomNineAngleViews(): ViewSpec[] {
+  const shuffled = [...NINE_ANGLE_VIEW_POOL];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled.slice(0, 9).map((view, index) => ({
+    ...view,
+    id: `${view.id}-${index + 1}`,
+    label: `9앵글 ${index + 1} · ${view.label}`
+  }));
+}
+
+const NINE_SHOT_SIZE_VIEWS: ViewSpec[] = [
+  {
+    id: "nine-shot-els",
+    label: "ELS",
+    instruction:
+      "Extreme Long Shot / ELS, the subject is very small and the environment dominates the frame, neutral eye-level or three-quarter camera angle"
+  },
+  {
+    id: "nine-shot-wide",
+    label: "와이드샷",
+    instruction:
+      "Long Shot / Wide Shot, full body visible with generous surrounding space, neutral camera angle, clear subject-environment relationship"
+  },
+  {
+    id: "nine-shot-full",
+    label: "풀샷",
+    instruction:
+      "Full Shot / FS, head-to-toe full body framing, neutral camera angle, outfit, posture, and silhouette clearly visible"
+  },
+  {
+    id: "nine-shot-knee",
+    label: "니샷",
+    instruction:
+      "Knee Shot / KS, frame from knees upward, neutral camera angle, movement and facial expression both readable"
+  },
+  {
+    id: "nine-shot-mls",
+    label: "MLS",
+    instruction:
+      "Medium Long Shot / MLS, frame from upper thighs or knees upward, neutral camera angle, balanced action and expression"
+  },
+  {
+    id: "nine-shot-ms",
+    label: "미디엄샷",
+    instruction:
+      "Medium Shot / MS, waist-up framing, neutral eye-level camera angle, dialogue/interview style composition"
+  },
+  {
+    id: "nine-shot-mcu",
+    label: "MCU",
+    instruction:
+      "Medium Close-Up / MCU, chest-up framing, neutral camera angle, facial expression and spoken emotion emphasized"
+  },
+  {
+    id: "nine-shot-cu",
+    label: "클로즈업",
+    instruction:
+      "Close-Up / CU, face-centered framing, neutral camera angle, emotional reaction and facial details emphasized"
+  },
+  {
+    id: "nine-shot-ecu",
+    label: "ECU",
+    instruction:
+      "Extreme Close-Up / ECU, isolate eyes, lips, hands, or one symbolic detail from the reference subject, neutral camera angle"
+  }
+];
+
+function getRandomNineShotSizeViews(): ViewSpec[] {
+  const shuffled = [...NINE_SHOT_SIZE_VIEWS];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled.map((view, index) => ({
+    ...view,
+    id: `${view.id}-${index + 1}`,
+    label: `9화각 ${index + 1} · ${view.label}`
+  }));
+}
+
+const ACTION9_VIEWS: ViewSpec[] = [
+  {
+    id: "action9-kick-hit",
+    label: "액션9 1 · 발차기 명중",
+    instruction:
+      "Low-angle Wide Shot / Full Shot of a powerful kick landing on an opponent or threat, full body visible, camera below hip height, impact point and opponent reaction readable, motion blur and force lines visible, original equipment, condition, and background preserved"
+  },
+  {
+    id: "action9-thrust-attack",
+    label: "액션9 2 · 찌르기/돌진",
+    instruction:
+      "Over-the-shoulder or compressed telephoto Medium Long Shot / MLS of a direct thrust or lunging attack toward an opponent or target, camera aligned behind the attacking shoulder, clear attack trajectory line, weapon/tool/hand/gear follows what exists in the reference"
+  },
+  {
+    id: "action9-dodge",
+    label: "액션9 3 · 회피",
+    instruction:
+      "Dutch-angle Medium Wide Shot of the subject dodging an incoming strike, projectile, blade, fist, or environmental threat, body twisted diagonally away from danger, opponent or attack path visible, tilted horizon amplifies instability"
+  },
+  {
+    id: "action9-parry",
+    label: "액션9 4 · 패링",
+    instruction:
+      "Tight Medium Shot / MCU of a precise parry or block at the exact moment of contact, frame centered on the collision point between existing gear, arm, tool, or weapon, face and hands both readable, sparks/debris/force lines allowed if consistent"
+  },
+  {
+    id: "action9-near-miss",
+    label: "액션9 5 · 아슬아슬한 회피",
+    instruction:
+      "Dramatic Close-Up / CU with slight Dutch angle of a near-miss dodge, the attack passes extremely close to the face, body, clothing, or equipment at the edge of frame, shallow depth, visible tension and grazing motion"
+  },
+  {
+    id: "action9-impact-damage",
+    label: "액션9 6 · 큰 충격 데미지",
+    instruction:
+      "Low-angle Wide Shot of a heavy impact damage moment, camera near ground level, subject or opponent struck with visible shockwave, debris, fabric tension, gear strain, or environmental damage, background scale reinforces impact"
+  },
+  {
+    id: "action9-clean-hit",
+    label: "액션9 7 · 명중 순간",
+    instruction:
+      "Cinematic Medium Shot / Medium Close-Up of the exact split-second a clean hit connects, contact point placed near the rule-of-thirds focus, opponent/threat reaction and the subject's follow-through visible in the same frame"
+  },
+  {
+    id: "action9-counter",
+    label: "액션9 8 · 카운터 공격",
+    instruction:
+      "Diagonal Full Shot / Medium Long Shot of a counterattack immediately after blocking or dodging, camera set at a three-quarter low angle, defensive motion and offensive strike readable in one frame, strong diagonal composition"
+  },
+  {
+    id: "action9-ecu-detail",
+    label: "액션9 9 · 필수 ECU 디테일",
+    instruction:
+      "Mandatory dramatic Extreme Close-Up / ECU, macro-style framing of combat contact: eyes locking, clenched hand, weapon edge, gear scraping, fabric tearing, bloodless damage mark, spark, or impact detail, intense tension and very shallow focus"
+  }
+];
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
+
+function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): string | null {
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? null;
+}
+
+function getRecordPromptText(record?: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
+}
+
+type PresetApiImage = {
+  id?: string;
+  imageUrl?: string;
+  base64Image?: string | null;
+};
+
+function getHistorySignature(records: GeneratedImageDocument[]): string {
+  return records
+    .map(record => `${record.id}:${record.updatedAt ?? record.createdAt ?? ""}`)
+    .join("|");
 }
 
 interface RunBatchOptions {
@@ -261,6 +598,7 @@ interface RunBatchOptions {
   batchLabel: string;
   basePrompt: string;
   singleViewGuideline: string;
+  commonViewGuideline?: string;
   negativePrompt: string;
   referenceImageForRequest: string | null;
   uniqueGalleryReferences: string[];
@@ -277,14 +615,16 @@ interface RunBatchOptions {
     record: GeneratedImageDocument,
     options?: { promoteToReference?: boolean; broadcast?: boolean }
   ) => void;
+  mergeLocalRecords?: (records: GeneratedImageDocument[]) => void;
   referenceRecord: GeneratedImageDocument | null;
   referenceMetadata: { referenceId?: string | null };
   fallbackCandidate: GeneratedImageDocument | null;
-  user: ReturnType<typeof useAuth>["user"];
-  shouldUseFirestore: boolean;
+  user: { uid: string } | null;
+  imageGenOptions: GenerationOptionsValue;
   onProgress?: (view: ViewSpec, index: number, total: number) => void;
   onResult?: (view: ViewSpec, index: number, total: number, outcome: "success" | "error") => void;
   interRequestDelayMs?: number;
+  concurrencyLimit?: number;
   cancelRef?: MutableRefObject<boolean>;
   onCancelled?: () => void;
 }
@@ -295,6 +635,7 @@ async function runBatchSequence(options: RunBatchOptions) {
     batchLabel,
     basePrompt,
     singleViewGuideline,
+    commonViewGuideline = "Keep design consistent with the supplied references. Background must be pure white, even lighting.",
     negativePrompt,
     referenceImageForRequest,
     uniqueGalleryReferences,
@@ -308,128 +649,164 @@ async function runBatchSequence(options: RunBatchOptions) {
     apertureLabel,
     effectiveCameraAngle,
     mergeLocalRecord,
+    mergeLocalRecords,
     referenceRecord,
     referenceMetadata,
     fallbackCandidate,
     user,
-    shouldUseFirestore,
+    imageGenOptions,
     onProgress,
     onResult,
     interRequestDelayMs = 1500,
+    concurrencyLimit = 10,
     cancelRef,
     onCancelled
   } = options;
 
   const targetDimensions = shouldApplyAspectRatio ? getAspectRatioDimensions(aspectRatioValue) : null;
+  const chunkSize = Math.max(1, Math.floor(concurrencyLimit));
 
   setPending(true);
   let successCount = 0;
   let cancelled = false;
 
-  try {
-    for (let index = 0; index < views.length; index++) {
-      if (cancelRef?.current) {
-        cancelled = true;
-        onCancelled?.();
-        break;
-      }
+  const markCancelled = () => {
+    if (!cancelled) {
+      cancelled = true;
+      onCancelled?.();
+    }
+  };
 
-      const view = views[index];
-      onProgress?.(view, index, views.length);
+  const runView = async (
+    view: ViewSpec,
+    index: number
+  ): Promise<{ view: ViewSpec; index: number; records: GeneratedImageDocument[] }> => {
+    if (cancelRef?.current) {
+      markCancelled();
+      return { view, index, records: [] };
+    }
 
-      // Check cancel before starting API call
-      if (cancelRef?.current) {
-        cancelled = true;
-        onCancelled?.();
-        break;
-      }
+    onProgress?.(view, index, views.length);
 
-      const viewInstructionSegments = [
-        `${view.instruction}.`,
-        singleViewGuideline,
-        "Keep design consistent with the supplied references. Background must be pure white, even lighting."
-      ];
-      const viewPrompt = `${basePrompt}
+    if (cancelRef?.current) {
+      markCancelled();
+      return { view, index, records: [] };
+    }
+
+    const viewInstructionSegments = [
+      `${view.instruction}.`,
+      singleViewGuideline,
+      commonViewGuideline
+    ];
+    const viewPrompt = `${basePrompt}
 ${viewInstructionSegments.join(" ")}`;
 
-      const generationOptions: Record<string, unknown> = {
-        action: actionLabel,
-        model: targetModel,
-        outputMimeType: "image/png",
-        characterView: view.id,
-        characterViewLabel: view.label
-      };
-      if (referenceImageForRequest) {
-        generationOptions.referenceImageUrl = referenceImageForRequest;
-      }
-      if (shouldApplyAspectRatio) {
-        generationOptions.aspectRatio = aspectRatioValue;
-      }
-      if (uniqueGalleryReferences.length) {
-        generationOptions.referenceGallery = uniqueGalleryReferences;
-      }
-      if (targetDimensions) {
-        generationOptions.dimensions = targetDimensions;
-      }
+    const generationOptions: Record<string, unknown> = {
+      action: actionLabel,
+      model: targetModel,
+      characterView: view.id,
+      characterViewLabel: view.label,
+      quality: imageGenOptions.quality,
+      imageSize: imageGenOptions.size,
+      format: imageGenOptions.format,
+      moderation: imageGenOptions.moderation,
+      count: imageGenOptions.count
+    };
+    if (referenceImageForRequest) {
+      generationOptions.referenceImageUrl = referenceImageForRequest;
+    }
+    if (shouldApplyAspectRatio) {
+      generationOptions.aspectRatio = aspectRatioValue;
+    }
+    if (uniqueGalleryReferences.length) {
+      generationOptions.referenceGallery = uniqueGalleryReferences;
+    }
+    if (targetDimensions) {
+      generationOptions.dimensions = targetDimensions;
+    }
 
-      let result;
-      try {
-        result = await callGenerateApi({
-          prompt: basePrompt,
-          refinedPrompt: viewPrompt,
-          negativePrompt,
-          mode: PRESET_ACTION_MODE,
-          camera: cameraPayload,
-          options: generationOptions
-        });
-      } catch (error) {
-        console.error("preset view request failed", view.id, error);
-        toast.error(`${view.label} 뷰 생성 실패`, {
-          description: "네트워크 환경을 확인한 후 다시 시도해주세요."
-        });
-        onResult?.(view, index, views.length, "error");
-        if (cancelRef?.current) {
-          cancelled = true;
-          onCancelled?.();
-          break;
-        }
-        continue;
+    let result;
+    try {
+      result = await callGenerateApi({
+        prompt: basePrompt,
+        refinedPrompt: viewPrompt,
+        negativePrompt,
+        mode: PRESET_ACTION_MODE,
+        camera: cameraPayload,
+        options: generationOptions
+      });
+    } catch (error) {
+      console.error("preset view request failed", view.id, error);
+      toast.error(`${view.label} 뷰 생성 실패`, {
+        description: "네트워크 환경을 확인한 후 다시 시도해주세요."
+      });
+      onResult?.(view, index, views.length, "error");
+      if (cancelRef?.current) {
+        markCancelled();
       }
+      return { view, index, records: [] };
+    }
 
-      if (!result.ok) {
-        toast.error(`${view.label} 뷰 생성 실패`, {
-          description: result.reason ?? "잠시 후 다시 시도해주세요."
-        });
-        onResult?.(view, index, views.length, "error");
-        if (cancelRef?.current) {
-          cancelled = true;
-          onCancelled?.();
-          break;
-        }
-        continue;
+    if (!result.ok) {
+      toast.error(`${view.label} 뷰 생성 실패`, {
+        description: result.reason ?? "잠시 후 다시 시도해주세요."
+      });
+      onResult?.(view, index, views.length, "error");
+      if (cancelRef?.current) {
+        markCancelled();
       }
+      return { view, index, records: [] };
+    }
 
-      const baseImage = result.base64Image ?? result.imageUrl;
-      if (!baseImage) {
-        toast.error(`${view.label} 뷰 생성 실패`, {
-          description: "이미지 데이터를 찾을 수 없습니다."
-        });
-        onResult?.(view, index, views.length, "error");
-        if (cancelRef?.current) {
-          cancelled = true;
-          onCancelled?.();
-          break;
-        }
-        continue;
+    const responseImages = Array.isArray(result.images) ? (result.images as PresetApiImage[]) : [];
+    const generatedImages =
+      responseImages.length > 0
+        ? responseImages
+            .map((image, imageIndex) => ({
+              id:
+                typeof image.id === "string" && image.id.length > 0
+                  ? image.id
+                  : getLocalImageId(image.imageUrl) ?? `${actionLabel}-${view.id}-${imageIndex + 1}`,
+              imageUrl: image.imageUrl ?? image.base64Image ?? null
+            }))
+            .filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl))
+        : [
+            {
+              id:
+                typeof result.id === "string" && result.id.length > 0
+                  ? result.id
+                  : getLocalImageId(result.imageUrl ?? result.base64Image) ?? `${actionLabel}-${view.id}`,
+              imageUrl: result.imageUrl ?? result.base64Image ?? null
+            }
+          ].filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl));
+
+    if (!generatedImages.length) {
+      toast.error(`${view.label} 뷰 생성 실패`, {
+        description: "이미지 데이터를 찾을 수 없습니다."
+      });
+      onResult?.(view, index, views.length, "error");
+      if (cancelRef?.current) {
+        markCancelled();
       }
+      return { view, index, records: [] };
+    }
 
-      let storedImageUrl = baseImage;
-      const beforeUrl = referenceImageForRequest ?? undefined;
+    const beforeUrl = referenceImageForRequest ?? undefined;
+    const referenceSourceId = referenceRecord
+      ? referenceMetadata.referenceId ?? (referenceRecord.id !== REFERENCE_IMAGE_DOC_ID ? referenceRecord.id : null)
+      : fallbackCandidate?.id ?? null;
 
-      const referenceSourceId = referenceRecord
-        ? referenceMetadata.referenceId ?? (referenceRecord.id !== REFERENCE_IMAGE_DOC_ID ? referenceRecord.id : null)
-        : fallbackCandidate?.id ?? null;
+    const now = new Date().toISOString();
+    const newRecords: GeneratedImageDocument[] = [];
+    for (const [imageIndex, generated] of generatedImages.entries()) {
+      const storedImageUrl = generated.imageUrl;
 
+      const serverImageId = generated.id || getLocalImageId(storedImageUrl);
+      const recordId =
+        serverImageId ||
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${actionLabel}-${view.id}-${Date.now()}-${imageIndex + 1}`);
       const metadataPayload: Record<string, unknown> = {
         action: `${actionLabel}-${view.id}`,
         referenceId: referenceSourceId,
@@ -439,28 +816,20 @@ ${viewInstructionSegments.join(" ")}`;
         cameraAngle: effectiveCameraAngle,
         aspectRatio: aspectRatioLabel,
         sequenceIndex: index + 1,
-        sequenceTotal: views.length
+        sequenceTotal: views.length,
+        copyIndex: imageIndex + 1,
+        copyTotal: generatedImages.length,
+        fileId: serverImageId ?? recordId,
+        generationOptions: {
+          quality: imageGenOptions.quality,
+          size: imageGenOptions.size,
+          format: imageGenOptions.format,
+          moderation: imageGenOptions.moderation,
+          count: imageGenOptions.count
+        }
       };
 
-      if (shouldUseFirestore && user) {
-        try {
-          const blob = storedImageUrl.startsWith("data:")
-            ? await dataUrlToBlob(storedImageUrl)
-            : await fetch(storedImageUrl).then(res => res.blob());
-          const uploadResult = await uploadUserImage(user.uid, `${actionLabel}-${view.id}-${Date.now()}`, blob);
-          storedImageUrl = uploadResult.url;
-        } catch (error) {
-          console.error("preset upload error", error);
-        }
-      }
-
-      const now = new Date().toISOString();
-      const recordId =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${actionLabel}-${view.id}-${Date.now()}`;
-
-      const newRecord: GeneratedImageDocument = {
+      newRecords.push({
         id: recordId,
         userId: user?.uid ?? "local",
         mode: PRESET_ACTION_MODE,
@@ -488,40 +857,73 @@ ${viewInstructionSegments.join(" ")}`;
         model: targetModel,
         createdAt: now,
         updatedAt: now
-      };
+      });
+    }
 
-      // NOTE: 서버(/api/generate)에서 이미 Firestore에 저장하므로 클라이언트에서 중복 저장하지 않음
-      console.log(`[Preset] Skipping Firestore save (already saved by server): ${recordId}`);
+    if (cancelRef?.current) {
+      markCancelled();
+    }
 
-      console.log(`[Preset] Adding to local records: ${recordId}`);
-      mergeLocalRecord(newRecord, { promoteToReference: false, broadcast: false });
-      successCount += 1;
-      onResult?.(view, index, views.length, "success");
+    return { view, index, records: newRecords };
+  };
 
+  try {
+    for (let chunkStart = 0; chunkStart < views.length; chunkStart += chunkSize) {
       if (cancelRef?.current) {
-        cancelled = true;
-        onCancelled?.();
+        markCancelled();
         break;
       }
 
-      if (interRequestDelayMs > 0 && index < views.length - 1) {
+      const chunk = views.slice(chunkStart, chunkStart + chunkSize);
+      const results = await Promise.all(
+        chunk.map((view, offset) => runView(view, chunkStart + offset))
+      );
+
+      const sortedResults = results.sort((a, b) => a.index - b.index);
+      const chunkRecords = sortedResults.flatMap(result => result.records);
+
+      if (chunkRecords.length) {
+        for (const newRecord of chunkRecords) {
+          console.log(`[Preset] Adding to local records: ${newRecord.id}`);
+        }
+        if (mergeLocalRecords) {
+          mergeLocalRecords(chunkRecords);
+        } else {
+          for (const newRecord of chunkRecords) {
+            mergeLocalRecord(newRecord, { promoteToReference: false, broadcast: false });
+          }
+        }
+      }
+
+      for (const result of sortedResults) {
+        if (!result.records.length) {
+          continue;
+        }
+        successCount += result.records.length;
+        onResult?.(result.view, result.index, views.length, "success");
+      }
+
+      if (cancelRef?.current) {
+        markCancelled();
+        break;
+      }
+
+      if (interRequestDelayMs > 0 && chunkStart + chunkSize < views.length) {
         await new Promise(resolve => setTimeout(resolve, interRequestDelayMs));
         if (cancelRef?.current) {
-          cancelled = true;
-          onCancelled?.();
+          markCancelled();
           break;
         }
       }
     }
-
-    if (cancelled) {
-      toast.info(`${batchLabel} 작업을 중지했습니다.`);
-    } else if (successCount === 0) {
-      toast.error(`${batchLabel} 생성에 실패했습니다.`);
-    } else {
-      toast.success(`${batchLabel} ${successCount}장 생성 완료`);
-    }
   } finally {
+    if (cancelled) {
+      toast.info(`${batchLabel} 작업을 중지했습니다.`, { id: PRESET_BATCH_PROGRESS_TOAST_ID });
+    } else if (successCount === 0) {
+      toast.error(`${batchLabel} 생성에 실패했습니다.`, { id: PRESET_BATCH_PROGRESS_TOAST_ID });
+    } else {
+      toast.success(`${batchLabel} ${successCount}장 생성 완료`, { id: PRESET_BATCH_PROGRESS_TOAST_ID });
+    }
     setPending(false);
     if (cancelRef) {
       cancelRef.current = false;
@@ -531,7 +933,7 @@ ${viewInstructionSegments.join(" ")}`;
 
 
 export function PresetsShell() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const router = useRouter();
   const { records, loading } = useGeneratedImages();
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
@@ -544,9 +946,13 @@ export function PresetsShell() {
   const [referenceImageUploading, setReferenceImageUploading] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [historyVisibleCount, setHistoryVisibleCount] = useState(INITIAL_HISTORY_VISIBLE_COUNT);
+  const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
   const cancelRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const historySyncSourceRef = useRef<string | null>(null);
+  const persistedHistorySignatureRef = useRef<string | null>(null);
   const lastUidRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -570,6 +976,7 @@ export function PresetsShell() {
       setLocalRecords([]);
       setSelectedImageId(null);
       setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+      persistedHistorySignatureRef.current = getHistorySignature([]);
       broadcastReferenceUpdate(null, "presets");
     }
 
@@ -600,6 +1007,7 @@ export function PresetsShell() {
   const openPreview = (record: GeneratedImageDocument) => {
     setSelectedImageId(record.id);
     setPreviewRecord(record);
+    previewZoom.reset();
   };
 
   useEffect(() => {
@@ -613,9 +1021,12 @@ export function PresetsShell() {
         const parsed = JSON.parse(raw) as GeneratedImageDocument[];
         if (Array.isArray(parsed)) {
           const uid = user?.uid ?? null;
-          const filtered = uid ? parsed.filter(record => record.userId === uid) : [];
+          const filtered = uid ? parsed.filter(record => !record.userId || record.userId === uid) : parsed;
+          persistedHistorySignatureRef.current = getHistorySignature(filtered);
           setLocalRecords(filtered);
         }
+      } else {
+        persistedHistorySignatureRef.current = getHistorySignature([]);
       }
     } catch (error) {
       console.warn("Failed to read local history", error);
@@ -701,7 +1112,7 @@ export function PresetsShell() {
 
       const currentUid = user?.uid ?? null;
       const incoming = Array.isArray(detail.records)
-        ? detail.records.filter(record => record.userId && record.userId === currentUid)
+        ? detail.records.filter(record => !record.userId || record.userId === currentUid)
         : [];
       if (!incoming.length) {
         return;
@@ -726,96 +1137,63 @@ export function PresetsShell() {
   }, [user?.uid]);
 
   const mergedRecords = useMemo(() => {
-    console.log(`[Preset Merge] localRecords count: ${localRecords.length}, Firestore records count: ${records.length}`);
-
-    // Debug: Show first 3 IDs from each source
-    if (localRecords.length > 0) {
-      console.log('[Preset Merge] Local IDs:', localRecords.slice(0, 3).map(r => ({
-        id: r.id,
-        createdAt: r.createdAt,
-        hasTimestamp: !!r.createdAt
-      })));
-    }
-    if (records.length > 0) {
-      console.log('[Preset Merge] Firestore IDs:', records.slice(0, 3).map(r => ({
-        id: r.id,
-        createdAt: r.createdAt,
-        hasTimestamp: !!r.createdAt
-      })));
-    }
-
     const merged = mergeHistoryRecords(localRecords, records);
-    console.log(`[Preset Merge] After merge: ${merged.length} records`);
 
     const uid = user?.uid ?? null;
-    const filtered = uid ? merged.filter(record => record.userId === uid) : [];
-    console.log(`[Preset Merge] After userId filter: ${filtered.length} records`);
-
-    return filtered;
+    // 단일 사용자 도구라 userId 필터를 풀어준다.
+    return uid ? merged.filter(record => !record.userId || record.userId === uid) : merged;
   }, [localRecords, records, user?.uid]);
 
   const historyRecords = useMemo(() => {
-    const filtered = mergedRecords.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID);
-    console.log('[Preset History] Total records after filtering reference:', filtered.length);
-
-    // Check for visual duplicates (same imageUrl)
-    const urlGroups = new Map<string, number>();
-    filtered.forEach(record => {
-      const url = record.imageUrl || record.thumbnailUrl || 'no-url';
-      urlGroups.set(url, (urlGroups.get(url) || 0) + 1);
-    });
-    const duplicateUrls = Array.from(urlGroups.entries()).filter(([url, count]) => count > 1);
-    if (duplicateUrls.length > 0) {
-      console.warn('[Preset History] Found records with duplicate imageUrls:', duplicateUrls);
-    }
-
-    return filtered;
+    return mergedRecords.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID);
   }, [mergedRecords]);
 
-  const historyRecordsLimited = useMemo(() => {
-    const limited = historyRecords.slice(0, TILE_LIMIT);
-    console.log('[Preset History] Displaying', limited.length, 'records (limit:', TILE_LIMIT, ')');
-    return limited;
-  }, [historyRecords]);
+  const visibleHistoryRecords = useMemo(
+    () => historyRecords.slice(0, historyVisibleCount),
+    [historyRecords, historyVisibleCount]
+  );
+  const hasMoreHistoryRecords = historyVisibleCount < historyRecords.length;
   const emptyHistoryMessage = user ? "아직 생성된 이미지가 없습니다." : "로그인하여 생성 기록을 확인하세요.";
 
   useEffect(() => {
     if (!historyHydrated || typeof window === "undefined") {
       return;
     }
+    const nextSignature = getHistorySignature(localRecords);
+    if (persistedHistorySignatureRef.current === nextSignature) {
+      return;
+    }
     try {
-      const historySnapshot = historyRecords.slice(0, 50);
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(historySnapshot));
+      // 머지 패턴: 다른 페이지가 추가한 record를 덮어쓰지 않는다.
+      const merged = persistRecordsMerge(localRecords);
+      persistedHistorySignatureRef.current = nextSignature;
       if (historySyncSourceRef.current && historySyncSourceRef.current !== "presets") {
         historySyncSourceRef.current = null;
       } else {
-        broadcastHistoryUpdate(historySnapshot, "presets");
+        broadcastHistoryUpdate(merged, "presets");
       }
     } catch (error) {
       console.warn("Failed to persist local history", error);
     }
-  }, [historyHydrated, historyRecords]);
+  }, [historyHydrated, localRecords]);
 
-  const previewImageUrl =
-    previewRecord?.imageUrl ?? previewRecord?.originalImageUrl ?? previewRecord?.thumbnailUrl ?? null;
-  const previewPromptLabel =
-    previewRecord?.promptMeta?.refinedPrompt ??
-    previewRecord?.promptMeta?.rawPrompt ??
-    (previewRecord?.metadata?.characterViewLabel as string | undefined) ??
-    "";
+  const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
+  const previewPromptText = getRecordPromptText(previewRecord);
+  const previewLabel = previewPromptText || (previewRecord?.metadata?.characterViewLabel as string | undefined) || "";
+  const previewZoomPercent = Math.round(previewZoom.scale * 100);
 
   useEffect(() => {
-    if (!historyRecordsLimited.length) {
+    if (!historyRecords.length) {
       setSelectedImageId(null);
       return;
     }
 
     if (!selectedImageId) {
-      setSelectedImageId(historyRecordsLimited[0].id);
-    } else if (!historyRecordsLimited.some(record => record.id === selectedImageId)) {
-      setSelectedImageId(historyRecordsLimited[0].id);
+      setSelectedImageId(historyRecords[0].id);
+    } else if (!historyRecords.some(record => record.id === selectedImageId)) {
+      setSelectedImageId(historyRecords[0].id);
     }
-  }, [historyRecordsLimited, selectedImageId]);
+  }, [historyRecords, selectedImageId]);
 
   useEffect(() => {
     if (previewRecord && !historyRecords.some(record => record.id === previewRecord.id)) {
@@ -837,7 +1215,7 @@ type ReferenceImageState = {
     return mergedRecords.find(record => record.metadata?.isReference === true) ?? null;
   }, [mergedRecords]);
 
-  const derivedReferenceImageUrl = referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
+  const derivedReferenceImageUrl = getRecordGeneratedImageUrl(referenceRecord);
 
   const [referenceImageState, setReferenceImageState] = useState<ReferenceImageState>({
     url: null,
@@ -852,6 +1230,12 @@ type ReferenceImageState = {
     }));
   }, []);
   const hasReference = Boolean(referenceImageState.url ?? derivedReferenceImageUrl);
+  const resolveReferenceImageForRequest = useCallback(() => {
+    const selectedRecord = selectedImageId
+      ? historyRecords.find(record => record.id === selectedImageId)
+      : null;
+    return referenceImageState.url ?? derivedReferenceImageUrl ?? getRecordGeneratedImageUrl(selectedRecord);
+  }, [derivedReferenceImageUrl, historyRecords, referenceImageState.url, selectedImageId]);
 
   const mergeLocalRecord = useCallback(
     (
@@ -875,6 +1259,24 @@ type ReferenceImageState = {
     },
     [setLocalRecords]
   );
+
+  const mergeLocalRecords = useCallback((recordsToMerge: GeneratedImageDocument[]) => {
+    if (!recordsToMerge.length) {
+      return;
+    }
+
+    setLocalRecords(prev => {
+      const referenceEntry = prev.find(item => item.id === REFERENCE_IMAGE_DOC_ID) ?? null;
+      const incomingIds = new Set(recordsToMerge.map(record => record.id));
+      let others = prev.filter(item => item.id !== REFERENCE_IMAGE_DOC_ID && !incomingIds.has(item.id));
+
+      for (const record of recordsToMerge) {
+        others = [record, ...others];
+      }
+
+      return referenceEntry ? [referenceEntry, ...others] : others;
+    });
+  }, [setLocalRecords]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -928,36 +1330,6 @@ type ReferenceImageState = {
     });
   }, [derivedReferenceImageUrl]);
 
-
-  const persistReferenceEntry = async (entry: GeneratedImageDocument, nowIso: string) => {
-    if (!user || !shouldUseFirestore) {
-      return;
-    }
-
-    const imageUrl = entry.imageUrl ?? entry.originalImageUrl;
-    if (!imageUrl) {
-      return;
-    }
-
-    try {
-      await saveGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID, {
-        mode: entry.mode,
-        status: entry.status,
-        promptMeta: entry.promptMeta,
-        imageUrl,
-        thumbnailUrl: entry.thumbnailUrl ?? imageUrl,
-        originalImageUrl: entry.originalImageUrl ?? imageUrl,
-        metadata: { ...(entry.metadata ?? {}), isReference: true },
-        model: entry.model,
-        costCredits: entry.costCredits,
-        createdAtIso: entry.createdAt ?? nowIso,
-        updatedAtIso: nowIso
-      });
-    } catch (error) {
-      console.error("기준 이미지 동기화 실패", error);
-    }
-  };
-
   const promoteReferenceImage = async (
     imageUrl: string,
     { recordId, metadata }: { recordId?: string; metadata?: Record<string, unknown> } = {}
@@ -986,10 +1358,7 @@ type ReferenceImageState = {
       updatedAt: now
     };
 
-  const referenceEntry = mergeLocalRecord(baseRecord, { promoteToReference: true });
-  if (referenceEntry) {
-    await persistReferenceEntry(referenceEntry, now);
-  }
+  mergeLocalRecord(baseRecord, { promoteToReference: true });
   setSelectedImageId(id);
 };
 
@@ -997,21 +1366,9 @@ type ReferenceImageState = {
     setReferenceImageUploading(true);
     try {
       const dataUrl = await readFileAsDataURL(file);
-      let storedUrl = dataUrl;
+      const storedUrl = dataUrl;
 
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `preset-reference-${Date.now()}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error("reference upload error", error);
-          toast.error("기준 이미지 업로드에 실패했습니다.");
-          return;
-        }
-      }
-
-      const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
+      const previousReferenceUrl = referenceImageState.url ?? getRecordGeneratedImageUrl(referenceRecord);
       setReferenceImageOverride(storedUrl);
 
       try {
@@ -1034,15 +1391,6 @@ type ReferenceImageState = {
     if (!referenceRecord) {
       toast.info("삭제할 기준 이미지가 없습니다.");
       return;
-    }
-
-    if (user && shouldUseFirestore) {
-      try {
-        await deleteGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID);
-        await deleteUserImage(user.uid, REFERENCE_IMAGE_DOC_ID);
-      } catch (error) {
-        console.warn("기준 이미지 삭제 실패", error);
-      }
     }
 
     setLocalRecords(prev => prev.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID));
@@ -1070,19 +1418,7 @@ type ReferenceImageState = {
 
     try {
       const dataUrl = await readFileAsDataURL(file);
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `preset-reference-slot-${slotId}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error("reference slot upload error", error);
-          toast.error("참조 이미지를 업로드하지 못했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       setReferenceSlots(prev =>
         prev.map(item =>
@@ -1123,7 +1459,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
+    const previousReferenceUrl = referenceImageState.url ?? getRecordGeneratedImageUrl(referenceRecord);
     setReferenceImageOverride(slot.imageUrl);
 
     try {
@@ -1155,16 +1491,14 @@ type ReferenceImageState = {
       return;
     }
 
-    const now = new Date().toISOString();
-    const newUrl = candidate.imageUrl ?? candidate.originalImageUrl ?? null;
-    const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
+    const newUrl = getRecordGeneratedImageUrl(candidate);
+    const previousReferenceUrl = referenceImageState.url ?? getRecordGeneratedImageUrl(referenceRecord);
     if (newUrl) {
       setReferenceImageOverride(newUrl);
     }
 
     try {
       mergeLocalRecord(candidate, { promoteToReference: true });
-      await persistReferenceEntry(candidate, now);
     } catch (error) {
       console.error("preset history reference select error", error);
       if (newUrl) {
@@ -1198,19 +1532,10 @@ type ReferenceImageState = {
       return [updatedRecord, ...prev];
     });
 
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-        });
-      } catch (error) {
-        console.warn("favorite update error", error);
-      }
-    }
   };
 
   const handleDownloadRecord = async (record: GeneratedImageDocument) => {
-    const url = record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl;
+    const url = getRecordGeneratedImageUrl(record);
     if (!url) {
       toast.error("다운로드할 이미지를 찾을 수 없습니다.");
       return;
@@ -1232,9 +1557,101 @@ type ReferenceImageState = {
       return;
     }
 
+    // 로컬 라우트는 그대로 다운로드, 외부 URL만 /api/download 프록시 경유.
+    if (url.startsWith("/api/") || url.startsWith("/")) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes('?') ? '&' : '?'}alt=media`;
     const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(filename)}`;
     window.location.assign(downloadUrl);
+  };
+
+  const handleDeleteRecord = async (recordId: string) => {
+    const target = historyRecords.find(record => record.id === recordId);
+    if (!target) {
+      toast.error("삭제할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
+
+    const metadataFileId = (target.metadata as { fileId?: unknown } | undefined)?.fileId;
+    const localImageId =
+      getLocalImageId(target.imageUrl) ??
+      getLocalImageId(target.thumbnailUrl) ??
+      getLocalImageId(target.originalImageUrl) ??
+      (typeof metadataFileId === "string" ? metadataFileId : null) ??
+      recordId;
+
+    if (
+      target.imageUrl?.startsWith("/api/images/") ||
+      target.thumbnailUrl?.startsWith("/api/images/") ||
+      target.originalImageUrl?.startsWith("/api/images/")
+    ) {
+      try {
+        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
+      } catch (error) {
+        console.warn("[Presets] Failed to delete local image file", error);
+      }
+    }
+
+    if (previewRecord?.id === recordId) {
+      setPreviewRecord(null);
+      previewZoom.reset();
+    }
+
+    toast.success("이미지가 삭제되었습니다.");
+  };
+
+  const closePreviewRecord = () => {
+    setPreviewRecord(null);
+    previewZoom.reset();
+  };
+
+  const handleCopyPreviewPrompt = async () => {
+    if (!previewPromptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(previewPromptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch (error) {
+      console.error("preset prompt copy error", error);
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  };
+
+  const handleSetPreviewAsReference = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    await handleSetReferenceFromHistory(previewRecord.id);
+  };
+
+  const handleDownloadPreviewRecord = () => {
+    if (!previewRecord) {
+      return;
+    }
+    void handleDownloadRecord(previewRecord);
+  };
+
+  const handleDeletePreviewRecord = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    const recordId = previewRecord.id;
+    closePreviewRecord();
+    await handleDeleteRecord(recordId);
   };
 
   const handlePresetCharacterSet = async () => {
@@ -1243,11 +1660,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1267,21 +1680,23 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "character",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 5000
           });
         }
@@ -1298,11 +1713,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1322,22 +1733,256 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "view-360",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 5000
+          });
+        }
+      });
+    } finally {
+      cancelRef.current = false;
+      setCancelRequested(false);
+    }
+  };
+
+  const handlePreset9Zoom = async () => {
+    if (!referenceRecord) {
+      toast.error("먼저 기준 이미지를 설정해주세요.");
+      return;
+    }
+
+    const referenceImageForRequest = resolveReferenceImageForRequest();
+    const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
+    const nineZoomImageGenOptions: GenerationOptionsValue = { ...imageGenOptions, count: 1 };
+
+    cancelRef.current = false;
+    setCancelRequested(false);
+
+    try {
+      await runBatchSequence({
+        views: getRandomNineZoomViews(),
+        batchLabel: "9ZOOM",
+        basePrompt:
+          "High fidelity camera coverage study of the supplied reference subject. Generate a new image from the same identity, wardrobe, color design, and visual style.",
+        singleViewGuideline:
+          "Change only camera distance, lens perspective, framing, and depth of field according to the requested shot. Preserve the subject identity and core design exactly.",
+        commonViewGuideline:
+          "Use the supplied reference as the identity anchor. Preserve the original scene, wardrobe, color palette, and art direction when possible; do not convert this into a character sheet or white-background lineup.",
+        negativePrompt: `${CHARACTER_NEGATIVE_ENFORCEMENT}, identity swap, different character, duplicate person, extra limbs, deformed face, random outfit change, unrelated background, text, watermark`,
+        referenceImageForRequest,
+        uniqueGalleryReferences,
+        aspectRatioValue,
+        aspectRatioLabel,
+        shouldApplyAspectRatio,
+        actionLabel: "9zoom",
+        targetModel: "gpt-image-2",
+        setPending: setBatchPending,
+        cameraPayload,
+        apertureLabel,
+        effectiveCameraAngle: cameraAngle,
+        mergeLocalRecord,
+        mergeLocalRecords,
+        referenceRecord,
+        referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
+        fallbackCandidate: historyRecords[0] ?? null,
+        user,
+        imageGenOptions: nineZoomImageGenOptions,
+        interRequestDelayMs: 1000,
+        cancelRef,
+        onCancelled: () => setCancelRequested(false),
+        onProgress: (view, index, total) => {
+          toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
+            duration: 4000
+          });
+        }
+      });
+    } finally {
+      cancelRef.current = false;
+      setCancelRequested(false);
+    }
+  };
+
+  const handlePreset9Angle = async () => {
+    if (!referenceRecord) {
+      toast.error("먼저 기준 이미지를 설정해주세요.");
+      return;
+    }
+
+    const referenceImageForRequest = resolveReferenceImageForRequest();
+    const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
+    const nineAngleImageGenOptions: GenerationOptionsValue = { ...imageGenOptions, count: 1 };
+
+    cancelRef.current = false;
+    setCancelRequested(false);
+
+    try {
+      await runBatchSequence({
+        views: getRandomNineAngleViews(),
+        batchLabel: "9앵글",
+        basePrompt:
+          "High fidelity camera angle study of the supplied reference subject. Generate a new image from the same identity, wardrobe, color design, and visual style.",
+        singleViewGuideline:
+          "Change only the camera angle and viewpoint according to the requested angle. Keep shot size relatively stable around medium or full framing unless the angle requires minor adjustment.",
+        commonViewGuideline:
+          "Use the supplied reference as the identity anchor. Preserve the original scene, wardrobe, color palette, and art direction when possible; do not change the subject into a different character.",
+        negativePrompt: `${CHARACTER_NEGATIVE_ENFORCEMENT}, identity swap, different character, duplicate person, extra limbs, deformed face, random outfit change, unrelated background, text, watermark`,
+        referenceImageForRequest,
+        uniqueGalleryReferences,
+        aspectRatioValue,
+        aspectRatioLabel,
+        shouldApplyAspectRatio,
+        actionLabel: "9angle",
+        targetModel: "gpt-image-2",
+        setPending: setBatchPending,
+        cameraPayload,
+        apertureLabel,
+        effectiveCameraAngle: cameraAngle,
+        mergeLocalRecord,
+        mergeLocalRecords,
+        referenceRecord,
+        referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
+        fallbackCandidate: historyRecords[0] ?? null,
+        user,
+        imageGenOptions: nineAngleImageGenOptions,
+        interRequestDelayMs: 1000,
+        cancelRef,
+        onCancelled: () => setCancelRequested(false),
+        onProgress: (view, index, total) => {
+          toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
+            duration: 4000
+          });
+        }
+      });
+    } finally {
+      cancelRef.current = false;
+      setCancelRequested(false);
+    }
+  };
+
+  const handlePreset9ShotSize = async () => {
+    if (!referenceRecord) {
+      toast.error("먼저 기준 이미지를 설정해주세요.");
+      return;
+    }
+
+    const referenceImageForRequest = resolveReferenceImageForRequest();
+    const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
+    const nineShotImageGenOptions: GenerationOptionsValue = { ...imageGenOptions, count: 1 };
+
+    cancelRef.current = false;
+    setCancelRequested(false);
+
+    try {
+      await runBatchSequence({
+        views: getRandomNineShotSizeViews(),
+        batchLabel: "9화각",
+        basePrompt:
+          "High fidelity shot-size coverage study of the supplied reference subject. Generate a new image from the same identity, wardrobe, color design, and visual style.",
+        singleViewGuideline:
+          "Change only the shot size and framing distance according to the requested shot. Keep camera angle stable, preferably neutral eye-level or front three-quarter.",
+        commonViewGuideline:
+          "Use the supplied reference as the identity anchor. Preserve the original scene, wardrobe, color palette, and art direction when possible; do not change the subject into a different character.",
+        negativePrompt: `${CHARACTER_NEGATIVE_ENFORCEMENT}, identity swap, different character, duplicate person, extra limbs, deformed face, random outfit change, unrelated background, text, watermark`,
+        referenceImageForRequest,
+        uniqueGalleryReferences,
+        aspectRatioValue,
+        aspectRatioLabel,
+        shouldApplyAspectRatio,
+        actionLabel: "9shot",
+        targetModel: "gpt-image-2",
+        setPending: setBatchPending,
+        cameraPayload,
+        apertureLabel,
+        effectiveCameraAngle: cameraAngle,
+        mergeLocalRecord,
+        mergeLocalRecords,
+        referenceRecord,
+        referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
+        fallbackCandidate: historyRecords[0] ?? null,
+        user,
+        imageGenOptions: nineShotImageGenOptions,
+        interRequestDelayMs: 1000,
+        cancelRef,
+        onCancelled: () => setCancelRequested(false),
+        onProgress: (view, index, total) => {
+          toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
+            duration: 4000
+          });
+        }
+      });
+    } finally {
+      cancelRef.current = false;
+      setCancelRequested(false);
+    }
+  };
+
+  const handlePresetAction9 = async () => {
+    if (!referenceRecord) {
+      toast.error("먼저 기준 이미지를 설정해주세요.");
+      return;
+    }
+
+    const referenceImageForRequest = resolveReferenceImageForRequest();
+    const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
+    const action9ImageGenOptions: GenerationOptionsValue = { ...imageGenOptions, count: 1 };
+
+    cancelRef.current = false;
+    setCancelRequested(false);
+
+    try {
+      await runBatchSequence({
+        views: ACTION9_VIEWS,
+        batchLabel: "액션9",
+        basePrompt:
+          "High fidelity combat action coverage study of the supplied reference subject. Generate intense fight-scene images from the same identity, equipment, current condition, background, lighting, color design, and visual style.",
+        singleViewGuideline:
+          "Create direct physical conflict, contact, attack trajectory, defensive reaction, or near-contact danger in every frame. Change only the combat action and requested shot/framing; keep all existing gear, props, clothing, damage/state, background elements, and scene atmosphere grounded in the reference.",
+        commonViewGuideline:
+          "Use the supplied reference as the identity and scene anchor. The scene must not be an isolated solo pose: include an opponent, threat, incoming attack, impact contact, parry contact, or visible attack path. Preserve the exact equipment and visible state from the reference; do not invent unrelated gear, do not change the location, and do not reset the subject condition.",
+        negativePrompt: `${CHARACTER_NEGATIVE_ENFORCEMENT}, isolated pose, standing alone, passive pose, empty action, no contact, no opponent, no threat, no impact, no attack trajectory, identity swap, different character, missing equipment, invented unrelated equipment, changed background, clean reset of damaged or worn state, duplicate person, extra limbs, deformed face, text, watermark`,
+        referenceImageForRequest,
+        uniqueGalleryReferences,
+        aspectRatioValue,
+        aspectRatioLabel,
+        shouldApplyAspectRatio,
+        actionLabel: "action9",
+        targetModel: "gpt-image-2",
+        setPending: setBatchPending,
+        cameraPayload,
+        apertureLabel,
+        effectiveCameraAngle: cameraAngle,
+        mergeLocalRecord,
+        mergeLocalRecords,
+        referenceRecord,
+        referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
+        fallbackCandidate: historyRecords[0] ?? null,
+        user,
+        imageGenOptions: action9ImageGenOptions,
+        interRequestDelayMs: 1000,
+        cancelRef,
+        onCancelled: () => setCancelRequested(false),
+        onProgress: (view, index, total) => {
+          toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
+            duration: 4000
           });
         }
       });
@@ -1353,11 +1998,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1378,22 +2019,24 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "photo-dump",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         interRequestDelayMs: 1200,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 5000
           });
         }
@@ -1410,11 +2053,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1441,22 +2080,24 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "teal-orange",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         interRequestDelayMs: 0,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 3000
           });
         }
@@ -1473,11 +2114,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1498,22 +2135,24 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "photo-dump-dynamic",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         interRequestDelayMs: 1200,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 5000
           });
         }
@@ -1530,11 +2169,7 @@ type ReferenceImageState = {
       return;
     }
 
-    const referenceImageForRequest =
-    referenceRecord.imageUrl ??
-    referenceRecord.originalImageUrl ??
-    referenceImageState.url ??
-    (historyRecords.find(record => record.id === selectedImageId)?.originalImageUrl ?? historyRecords.find(record => record.id === selectedImageId)?.imageUrl) ?? null;
+    const referenceImageForRequest = resolveReferenceImageForRequest();
 
     const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
 
@@ -1555,22 +2190,24 @@ type ReferenceImageState = {
         aspectRatioLabel,
         shouldApplyAspectRatio,
         actionLabel: "emotion-preset",
-        targetModel: "gemini-2.5-flash-image-preview",
+        targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
         mergeLocalRecord,
+        mergeLocalRecords,
         referenceRecord,
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        shouldUseFirestore,
+        imageGenOptions,
         interRequestDelayMs: 1000,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: (view, index, total) => {
           toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+            id: PRESET_BATCH_PROGRESS_TOAST_ID,
             duration: 4000
           });
         }
@@ -1640,6 +2277,7 @@ type ReferenceImageState = {
       </div>
 
       <div className="flex min-h-screen flex-col gap-8 bg-background p-6">
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card>
           <CardHeader>
@@ -1757,6 +2395,18 @@ type ReferenceImageState = {
               <Button className="h-20 text-lg" onClick={() => void handlePresetView360()} disabled={batchPending}>
                 <Stars className="mr-2 h-5 w-5" /> 360도 뷰
               </Button>
+              <Button className="h-20 text-lg" onClick={() => void handlePreset9Zoom()} disabled={batchPending}>
+                <ZoomIn className="mr-2 h-5 w-5" /> 9ZOOM
+              </Button>
+              <Button className="h-20 text-lg" onClick={() => void handlePreset9Angle()} disabled={batchPending}>
+                <Stars className="mr-2 h-5 w-5" /> 9앵글
+              </Button>
+              <Button className="h-20 text-lg" onClick={() => void handlePreset9ShotSize()} disabled={batchPending}>
+                <ImageIcon className="mr-2 h-5 w-5" /> 9화각
+              </Button>
+              <Button className="h-20 text-lg" onClick={() => void handlePresetAction9()} disabled={batchPending}>
+                <Zap className="mr-2 h-5 w-5" /> 액션9
+              </Button>
               <Button className="h-20 text-lg" onClick={() => void handlePresetPhotoDump()} disabled={batchPending}>
                 <Zap className="mr-2 h-5 w-5" /> 포토 덤프 (26컷)
               </Button>
@@ -1788,14 +2438,16 @@ type ReferenceImageState = {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">최근 생성 기록</h2>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {loading ? "기록 동기화 중" : `${historyRecordsLimited.length}개 표시 중`}
+            {loading
+              ? "기록 동기화 중"
+              : `${Math.min(historyVisibleCount, historyRecords.length)} / ${historyRecords.length}개 표시 중`}
             <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
               스튜디오 열기
             </Button>
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-          {historyRecordsLimited.map(record => {
+          {visibleHistoryRecords.map(record => {
             const imageUrl = record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl;
             const recordLabel =
               (record.metadata?.characterViewLabel as string | undefined) ??
@@ -1876,49 +2528,149 @@ type ReferenceImageState = {
               </div>
             );
           })}
-          {historyRecordsLimited.length === 0 && (
+          {visibleHistoryRecords.length === 0 && (
             <div className="col-span-full flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
               {emptyHistoryMessage}
             </div>
           )}
         </div>
+        {hasMoreHistoryRecords ? (
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              onClick={() => setHistoryVisibleCount(count => count + HISTORY_VISIBLE_INCREMENT)}
+            >
+              더 보기
+            </Button>
+          </div>
+        ) : null}
       </div>
       </div>
       {previewRecord ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setPreviewRecord(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+          onClick={closePreviewRecord}
         >
           <div
-            className="relative h-full w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl border border-white/20 bg-black/90 shadow-lg"
+            className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
             onClick={event => event.stopPropagation()}
           >
             <button
               type="button"
-              className="absolute right-4 top-4 rounded-full bg-white/20 px-3 py-1 text-xs text-white backdrop-blur"
+              className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
               onClick={event => {
                 event.stopPropagation();
-                setPreviewRecord(null);
+                closePreviewRecord();
               }}
             >
               닫기
             </button>
-            {previewImageUrl ? (
-              <Image
-                src={previewImageUrl}
-                alt={previewPromptLabel || "preview"}
-                fill
-                className="object-contain"
-                unoptimized={previewImageUrl.startsWith('data:')}
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm text-white/80">이미지를 불러올 수 없습니다.</div>
-            )}
-            {previewPromptLabel ? (
-              <div className="absolute inset-x-0 bottom-0 bg-black/70 px-4 py-3 text-xs text-white/90 line-clamp-2">
-                {previewPromptLabel}
+            <div className="flex min-h-0 flex-col bg-black">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">원본 이미지</p>
+                  <p className="truncate text-xs text-white/60">
+                    {previewRecord.model} · {new Date(previewRecord.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="mr-14 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomOut()}
+                    disabled={previewZoom.scale <= MIN_IMAGE_ZOOM}
+                  >
+                    축소
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.reset()}
+                    disabled={previewZoom.scale === 1}
+                  >
+                    {previewZoomPercent}%
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomIn()}
+                    disabled={previewZoom.scale >= MAX_IMAGE_ZOOM}
+                  >
+                    확대
+                  </Button>
+                </div>
               </div>
-            ) : null}
+              <div
+                {...previewZoom.bind}
+                className={cn(
+                  "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+                  previewZoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+                )}
+                title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+              >
+                {previewImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewImageUrl}
+                    alt={previewLabel || "preview"}
+                    className="max-h-full max-w-full object-contain will-change-transform"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${previewZoom.transform.panX}px, ${previewZoom.transform.panY}px) scale(${previewZoom.transform.scale})`,
+                      transformOrigin: "center center"
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+                )}
+              </div>
+            </div>
+            <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+              <div className="space-y-1 pr-10 lg:pr-0">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+                <h2 className="text-base font-semibold text-foreground">프롬프트와 액션</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => void handleSetPreviewAsReference()} disabled={!previewImageUrl || batchPending}>
+                  기준이미지 등록
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleCopyPreviewPrompt()} disabled={!previewPromptText}>
+                  프롬프트 복사
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDownloadPreviewRecord} disabled={!previewImageUrl}>
+                  다운로드
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()} disabled={batchPending}>
+                  삭제
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+                <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+                  {previewPromptText || "저장된 프롬프트가 없습니다."}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모드</p>
+                  <p className="uppercase">{previewRecord.mode}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모델</p>
+                  <p>{previewRecord.model}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">파일</p>
+                  <p>{previewImageUrl?.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+                </div>
+                {(previewRecord.metadata as any)?.characterViewLabel ? (
+                  <div className="rounded-lg border bg-background/60 p-2">
+                    <p className="font-medium text-foreground">프리셋</p>
+                    <p>{(previewRecord.metadata as any).characterViewLabel}</p>
+                  </div>
+                ) : null}
+              </div>
+            </aside>
           </div>
         </div>
       ) : null}

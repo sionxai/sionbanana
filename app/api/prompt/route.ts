@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env";
 import { describeAspectRatioForPrompt } from "@/lib/aspect";
 import { CAMERA_MODE_PROMPT_GUIDELINE } from "@/components/studio/camera-config";
+import { callCodexResponses, CodexResponseError } from "@/lib/codex-fetch";
+import { CodexAuthError } from "@/lib/codex-oauth";
 
 const requestSchema = z.object({
   basePrompt: z.string().min(1),
@@ -22,98 +23,81 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const apiKey = serverEnv.OPENAI_API_KEY;
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({ ok: false, reason: "OPENAI_API_KEY is not configured." }),
-      { status: 500 }
-    );
-  }
-
   try {
     const payload = requestSchema.parse(await request.json());
-
     const instructions = buildPromptInstruction(payload);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.7,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an assistant that transforms user prompts for AI image generation. Return concise JSON describing the resulting prompt."
-          },
-          {
-            role: "user",
-            content: instructions
-          }
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "prompt_response",
-            schema: {
-              type: "object",
-              properties: {
-                finalPrompt: { type: "string" },
-                summary: { type: "string" },
-                cameraNotes: { type: "string" }
-              },
-              required: ["finalPrompt"],
-              additionalProperties: false
-            }
-          }
-        }
-      })
+    const result = await callCodexResponses({
+      mode: "text",
+      input: [
+        {
+          role: "developer",
+          content:
+            "You are an assistant that transforms user prompts for AI image generation. Return ONLY a JSON object with keys finalPrompt (string, required), summary (string, optional), and cameraNotes (string, optional). No markdown, no commentary."
+        },
+        { role: "user", content: instructions }
+      ],
+      reasoningEffort: "none",
+      logTag: "api/prompt"
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("OpenAI API error", response.status, errorText);
-      return new Response(
-        JSON.stringify({ ok: false, reason: "Failed to reach OpenAI API." }),
-        { status: 500 }
-      );
-    }
-
-    const data = await response.json();
-    const message = data?.choices?.[0]?.message?.content;
+    const message = result.text?.trim();
     if (!message) {
-      return new Response(
-        JSON.stringify({ ok: false, reason: "OpenAI API returned no content." }),
-        { status: 500 }
-      );
+      return jsonResponse({ ok: false, reason: "Codex 응답이 비어 있습니다." }, 502);
     }
 
+    const cleaned = stripJsonFence(message);
     let parsed: { finalPrompt: string; summary?: string; cameraNotes?: string };
     try {
-      parsed = JSON.parse(message);
+      parsed = JSON.parse(cleaned);
     } catch (error) {
-      console.error("Failed to parse OpenAI response", message, error);
-      return new Response(
-        JSON.stringify({ ok: false, reason: "OpenAI 응답을 해석하지 못했습니다." }),
-        { status: 500 }
+      console.error("Failed to parse Codex response", cleaned, error);
+      return jsonResponse(
+        { ok: false, reason: "Codex 응답을 해석하지 못했습니다." },
+        502
       );
     }
 
-    return new Response(
-      JSON.stringify({ ok: true, ...parsed }),
-      { status: 200 }
-    );
+    if (!parsed.finalPrompt) {
+      return jsonResponse({ ok: false, reason: "finalPrompt가 비어 있습니다." }, 502);
+    }
+
+    return jsonResponse({ ok: true, ...parsed }, 200);
   } catch (error) {
+    if (error instanceof CodexAuthError) {
+      return jsonResponse({ ok: false, reason: error.message, code: error.code }, 401);
+    }
+    if (error instanceof CodexResponseError) {
+      console.error("/api/prompt Codex error", error.status, error.body.slice(0, 500));
+      return jsonResponse(
+        { ok: false, reason: `Codex 호출 실패 (${error.status})` },
+        error.status === 401 ? 401 : 502
+      );
+    }
+    if (error instanceof z.ZodError) {
+      return jsonResponse({ ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues }, 400);
+    }
     console.error("/api/prompt error", error);
-    return new Response(
-      JSON.stringify({ ok: false, reason: "프롬프트 생성 중 오류가 발생했습니다." }),
-      { status: 500 }
-    );
+    return jsonResponse({ ok: false, reason: "프롬프트 생성 중 오류가 발생했습니다." }, 500);
   }
+}
+
+function jsonResponse(body: unknown, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+}
+
+function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("```")) {
+    return trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+  }
+  return trimmed;
 }
 
 function buildPromptInstruction(payload: z.infer<typeof requestSchema>) {

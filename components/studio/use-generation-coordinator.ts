@@ -11,28 +11,24 @@ interface GenerationGuard {
 }
 
 const initialSnapshot: GenerationSnapshot = {
-  activeRequestId: null,
+  activeRequestIds: [],
   lastFinishedRequestId: null,
   phase: "idle"
 };
 
 export function useGenerationCoordinator() {
   const nextIdRef = useRef<number>(1);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortMapRef = useRef<Map<number, AbortController>>(new Map());
   const [snapshot, dispatch] = useReducer(genReducer, initialSnapshot);
 
   const start = useCallback((): GenerationGuard => {
-    abortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
-
     const requestId = nextIdRef.current++;
+    abortMapRef.current.set(requestId, controller);
     dispatch({ type: "START", requestId });
 
     const cleanup = () => {
-      if (abortRef.current === controller) {
-        abortRef.current = null;
-      }
+      abortMapRef.current.delete(requestId);
     };
 
     return {
@@ -55,6 +51,7 @@ export function useGenerationCoordinator() {
   }, []);
 
   const isGenerating = selectors.isGenerating(snapshot);
+  const inflightCount = selectors.inflightCount(snapshot);
   const showSuccessFor = useCallback(
     (requestId: number | null) => selectors.showSuccess(snapshot, requestId),
     [snapshot]
@@ -63,6 +60,7 @@ export function useGenerationCoordinator() {
   return {
     snapshot,
     isGenerating,
+    inflightCount,
     showSuccessFor,
     start
   };

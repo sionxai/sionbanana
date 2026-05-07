@@ -1,28 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
+import { GenerationProgressIndicator } from "@/components/studio/generation-progress-indicator";
+import {
+  GenerationOptionsPanel,
+  DEFAULT_GENERATION_OPTIONS,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
 import { SketchCanvas } from "@/components/studio/sketch-canvas";
 import { DragHandle } from "@/components/studio/drag-handle";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { useResizable } from "@/hooks/use-resizable";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
-import { callGenerateApi } from "@/hooks/use-generate-image";
+import { callGenerateApi, GENERATE_TIMEOUT_MS } from "@/hooks/use-generate-image";
 import { toast } from "sonner";
-import { useAuth } from "@/components/providers/auth-provider";
-import { deleteUserImage, uploadUserImage } from "@/lib/firebase/storage";
-import {
-  deleteGeneratedImageDoc,
-  saveGeneratedImageDoc,
-  updateGeneratedImageDoc
-} from "@/lib/firebase/firestore";
-import { shouldUseFirestore } from "@/lib/env";
+// 로컬 단일 사용자 환경 — 인증 stub
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 import {
   APERTURE_DEFAULT,
   APERTURE_MAX,
@@ -74,7 +77,7 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, type HistorySyncPayload } from "@/components/studio/history-sync";
+import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, removeRecordFromLocalStorage, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 
 async function readFileAsDataURL(file: File): Promise<string> {
@@ -92,6 +95,38 @@ async function readFileAsDataURL(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function getLocalImageIdFromUrl(value?: string | null): string | null {
+  if (!value || !value.startsWith("/api/images/")) {
+    return null;
+  }
+  const pathOnly = value.split(/[?#]/)[0];
+  const id = pathOnly.slice("/api/images/".length);
+  return /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
+}
+
+function getLocalImageIdForRecord(record: GeneratedImageDocument): string | null {
+  return getLocalImageIdFromUrl(record.imageUrl) ?? getLocalImageIdFromUrl(record.thumbnailUrl);
+}
+
+async function deleteLocalImageFile(record: GeneratedImageDocument): Promise<boolean> {
+  const fileId = getLocalImageIdForRecord(record);
+  if (!fileId) {
+    return false;
+  }
+  const response = await fetch(`/api/images/${fileId}`, { method: "DELETE" });
+  return response.ok;
+}
+
+function getRecordGeneratedImageUrl(record: GeneratedImageDocument | null): string {
+  // originalImageUrl is used as the "before/reference" image for diff records.
+  // For previewing a generated history item, prefer the generated image itself.
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? "";
+}
+
+function getRecordPromptText(record: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
 
 interface NormalizedCameraSettings {
@@ -154,9 +189,39 @@ const ZOOM_PROMPT_MAP: Record<string, string> = {
   줌인: "tight zoomed-in framing that highlights facial detail",
   줌아웃: "zoomed-out framing that reveals the environment",
   확대: "an extreme close-up magnification",
+  "익스트림 롱샷": "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  "롱샷 / 와이드샷": "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  풀샷: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  니샷: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  "미디엄 롱샷": "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  미디엄샷: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  "미디엄 클로즈업": "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  클로즈업: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  "빅 클로즈업": "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  "익스트림 클로즈업": "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture",
   zoomin: "tight zoomed-in framing that highlights facial detail",
   zoomout: "zoomed-out framing that reveals the environment",
-  magnify: "an extreme close-up magnification"
+  magnify: "an extreme close-up magnification",
+  extremelongshot: "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  els: "an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation",
+  longshot: "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  wideshot: "a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment",
+  fullshot: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  fs: "a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement",
+  kneeshot: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  ks: "a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression",
+  mediumlongshot: "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  mls: "a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action",
+  mediumshot: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  ms: "a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes",
+  mediumcloseup: "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  mcu: "a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion",
+  closeup: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  cu: "a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion",
+  bigcloseup: "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  bcu: "a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions",
+  extremecloseup: "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture",
+  ecu: "an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture"
 };
 
 function sanitizePromptKey(value?: string | null) {
@@ -243,13 +308,17 @@ ${trimmedGuidance}`.trim();
 }
 
 function applyCameraPromptDirectives(
-  _promptText: string | null | undefined,
+  promptText: string | null | undefined,
   guidance: string | null
 ): string {
   const trimmedGuidance = guidance?.trim();
-  return trimmedGuidance && trimmedGuidance.length
-    ? trimmedGuidance
-    : CAMERA_MODE_DEFAULT_DIRECTIVE;
+  const base = (promptText ?? "").trim();
+
+  if (trimmedGuidance && trimmedGuidance.length) {
+    return combinePromptWithGuidance(base, trimmedGuidance);
+  }
+
+  return base || CAMERA_MODE_DEFAULT_DIRECTIVE;
 }
 
 const LIGHTING_CATEGORY_ORDER: LightingPresetCategory[] = [
@@ -361,7 +430,7 @@ type ReferenceImageState = {
 };
 
 function StudioShellInner() {
-  const { user } = useAuth();
+  const { user } = useLocalUser();
   const { buildLightingInstruction, buildPoseInstruction } = usePresetLibrary();
   const lastUidRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -390,13 +459,79 @@ function StudioShellInner() {
   });
 const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
 const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
+const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+  // 디스크(data/images/)에 있지만 localStorage에는 없는 record를 fallback으로 채워주는 list.
+  // 같은 id가 localRecords/records에 있으면 mergeHistoryRecords가 알아서 secondary skip.
+  const [diskRecords, setDiskRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
     Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
   );
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
+
+  // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
+  // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
+  // 앞부분 텍스트는 보존한다. 사용자가 카테고리 부분을 직접 편집해 ref와 어긋나면
+  // basePrompt를 건드리지 않고 새 결과를 끝에 누적해 사용자 의도를 존중한다.
+  const lastCategoryGuidanceRef = useRef<string>("");
+
+  useEffect(() => {
+    const parts: string[] = [];
+
+    const lighting = buildLightingInstruction(lightingSelections);
+    if (lighting) parts.push(lighting);
+
+    const pose = buildPoseInstruction(poseSelections);
+    if (pose) parts.push(pose);
+
+    const cam: string[] = [];
+    if (cameraAngle && cameraAngle !== DEFAULT_CAMERA_ANGLE) cam.push(`Camera angle: ${cameraAngle}`);
+    if (aperture !== APERTURE_DEFAULT) cam.push(`Aperture: ${formatAperture(aperture)}`);
+    if (subjectDirection && subjectDirection !== DEFAULT_SUBJECT_DIRECTION) cam.push(`Subject direction: ${subjectDirection}`);
+    if (cameraDirection && cameraDirection !== DEFAULT_CAMERA_DIRECTION) cam.push(`Camera direction: ${cameraDirection}`);
+    if (zoomLevel && zoomLevel !== DEFAULT_ZOOM_LEVEL) cam.push(`Zoom: ${zoomLevel}`);
+    if (cam.length) parts.push(cam.join("; "));
+
+    const newGuidance = parts.length ? parts.join("\n\n") : "";
+    const oldGuidance = lastCategoryGuidanceRef.current;
+
+    if (newGuidance === oldGuidance) {
+      return;
+    }
+
+    lastCategoryGuidanceRef.current = newGuidance;
+
+    setPrompt(currentPrompt => {
+      let basePrompt = currentPrompt;
+
+      if (oldGuidance) {
+        if (basePrompt.endsWith(`\n\n${oldGuidance}`)) {
+          basePrompt = basePrompt.slice(0, basePrompt.length - oldGuidance.length - 2);
+        } else if (basePrompt === oldGuidance) {
+          basePrompt = "";
+        }
+      }
+
+      if (!newGuidance) {
+        return basePrompt;
+      }
+      return basePrompt ? `${basePrompt}\n\n${newGuidance}` : newGuidance;
+    });
+  }, [
+    lightingSelections,
+    poseSelections,
+    cameraAngle,
+    aperture,
+    subjectDirection,
+    cameraDirection,
+    zoomLevel,
+    buildLightingInstruction,
+    buildPoseInstruction
+  ]);
+
   const [gptLoading, setGptLoading] = useState(false);
   const [lastPromptDetails, setLastPromptDetails] = useState<PromptDetails | null>(null);
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
@@ -406,7 +541,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   const pendingSelectedImageIdRef = useRef<string | null>(null);
   const [selectedRecordOverride, setSelectedRecordOverride] = useState<GeneratedImageDocument | null>(null);
   const [freshlyGeneratedRecord, setFreshlyGeneratedRecord] = useState<GeneratedImageDocument | null>(null);
-  const { snapshot: generationSnapshot, isGenerating, showSuccessFor, start: startGeneration } = useGenerationCoordinator();
+  const { snapshot: generationSnapshot, isGenerating, inflightCount, showSuccessFor, start: startGeneration } = useGenerationCoordinator();
   const [currentRequestId, setCurrentRequestId] = useState<number | null>(null);
   const [activeGuard, setActiveGuard] = useState<{ requestId: number; onSuccess: (recordId: string) => void; onError: (message?: string) => void; timeoutId?: NodeJS.Timeout } | null>(null);
 
@@ -548,7 +683,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
           if (!slot.imageUrl) return true;
           if (!currentUid) return false;
           const url = slot.imageUrl;
-          return url.startsWith("data:") || url.includes(`/users/${currentUid}/`);
+          return url.startsWith("data:") || url.startsWith("/api/images/") || url.includes(`/users/${currentUid}/`);
         });
 
         const ensured = normalizedFiltered.length
@@ -574,7 +709,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         const parsed = JSON.parse(raw) as GeneratedImageDocument[];
         if (Array.isArray(parsed)) {
           const uid = user?.uid ?? null;
-          const filtered = uid ? parsed.filter(record => record.userId === uid) : [];
+          const filtered = uid ? parsed.filter(record => !record.userId || record.userId === uid) : parsed;
           setLocalRecords(filtered);
         }
       }
@@ -615,7 +750,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
 
       const currentUid = user?.uid ?? null;
       const incoming = Array.isArray(detail.records)
-        ? detail.records.filter(r => r.userId && r.userId === currentUid)
+        ? detail.records.filter(r => !r.userId || r.userId === currentUid)
         : [];
       if (!incoming.length) {
         return;
@@ -639,11 +774,48 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
     return () => window.removeEventListener(HISTORY_SYNC_EVENT, handler as EventListener);
   }, [user?.uid]);
 
+  // 디스크 스캔 — 마운트 시 한 번. localStorage가 비어 있어도 디스크에 있는
+  // 이미지 파일을 fallback record로 history에 표시한다.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDisk() {
+      try {
+        const res = await fetch("/api/images");
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok?: boolean; items?: Array<{ id: string; ext: string; bucket: string; createdAtIso: string; size: number }> };
+        if (cancelled || !data.ok || !Array.isArray(data.items)) return;
+        const uid = user?.uid ?? "local";
+        const fallbackRecords: GeneratedImageDocument[] = data.items.map(item => ({
+          id: item.id,
+          userId: uid,
+          mode: "create",
+          promptMeta: { rawPrompt: "", refinedPrompt: "" },
+          status: "completed",
+          imageUrl: `/api/images/${item.id}`,
+          model: "gpt-image-2",
+          createdAt: item.createdAtIso,
+          updatedAt: item.createdAtIso
+        }));
+        setDiskRecords(fallbackRecords);
+      } catch {
+        // 디스크 스캔 실패는 silent — localStorage만으로도 동작
+      }
+    }
+    loadDisk();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
   const mergedRecords = useMemo(() => {
-    const merged = mergeHistoryRecords(localRecords, records);
+    // primary(localRecords)와 secondary(records=Firestore stub)를 먼저 머지하고,
+    // 마지막에 디스크 fallback을 tertiary로 더해 둔다. 같은 id는 mergeHistoryRecords가 skip.
+    const localMerged = mergeHistoryRecords(localRecords, records);
+    const merged = mergeHistoryRecords(localMerged, diskRecords);
     const uid = user?.uid ?? null;
-    return uid ? merged.filter(record => record.userId === uid) : [];
-  }, [localRecords, records, user?.uid]);
+    if (!uid) return merged;
+    return merged.filter(record => !record.userId || record.userId === uid);
+  }, [localRecords, records, diskRecords, user?.uid]);
 
   const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
 
@@ -662,18 +834,10 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   }, [records]);
 
   useEffect(() => {
-    if (!historyHydrated || typeof window === "undefined") {
-      return;
-    }
-    // DISABLED: localStorage persistence to avoid quota issues
-    // Firestore is the primary storage, localStorage is no longer used
-    // Just clear it if it exists to free up space
-    try {
-      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
-    } catch (error) {
-      console.warn("Failed to clear localStorage", error);
-    }
-  }, [historyHydrated]);
+    if (!historyHydrated || typeof window === "undefined") return;
+    // localStorage는 단일 진실 원천. 자기 state로 통째 덮어쓰지 않고 항상 머지로 저장.
+    persistRecordsMerge(localRecords);
+  }, [historyHydrated, localRecords]);
 
   useEffect(() => {
     if (!historyRecords.length) {
@@ -911,48 +1075,8 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
     updatedAt: now
   };
 
-  const referenceEntry = mergeLocalRecord(baseRecord, { promoteToReference: true });
-  if (referenceEntry) {
-    await persistReferenceEntry(referenceEntry, now);
-  }
+  mergeLocalRecord(baseRecord, { promoteToReference: true });
 };
-
-  const persistReferenceEntry = useCallback(
-    async (entry: GeneratedImageDocument, nowIso: string) => {
-      if (!user || !shouldUseFirestore) {
-        return;
-      }
-
-      const imageUrl = entry.imageUrl ?? entry.originalImageUrl;
-      if (!imageUrl) {
-        console.warn("기준 이미지 URL을 찾을 수 없어 동기화를 건너뜁니다.");
-        return;
-      }
-
-      const originalImageUrl = entry.originalImageUrl ?? imageUrl;
-      const thumbnailUrl = entry.thumbnailUrl ?? imageUrl;
-
-      try {
-        await saveGeneratedImageDoc(user.uid, REFERENCE_IMAGE_DOC_ID, {
-          mode: entry.mode,
-          status: entry.status,
-          promptMeta: entry.promptMeta,
-          imageUrl,
-          thumbnailUrl,
-          originalImageUrl,
-          metadata: { ...(entry.metadata ?? {}), isReference: true },
-          model: entry.model,
-          costCredits: entry.costCredits,
-          createdAtIso: entry.createdAt ?? nowIso,
-          updatedAtIso: nowIso
-        });
-      } catch (error) {
-        console.error("기준 이미지 동기화 실패", error);
-        toast.error("기준 이미지를 저장하는 중 문제가 발생했습니다.");
-      }
-    },
-    [user]
-  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -979,28 +1103,28 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       if (detail.record.userId && detail.record.userId !== currentUid) {
         return;
       }
-      const referenceEntry = mergeLocalRecord(detail.record, { promoteToReference: true, broadcast: false });
-      if (referenceEntry && user && shouldUseFirestore) {
-        void persistReferenceEntry(referenceEntry, new Date().toISOString());
-      }
+      mergeLocalRecord(detail.record, { promoteToReference: true, broadcast: false });
     };
 
     window.addEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
-  }, [mergeLocalRecord, persistReferenceEntry, selectImage, setLocalRecords, user]);
+  }, [mergeLocalRecord, selectImage, setLocalRecords, user]);
 
-  const handleGenerate = (action: "primary" | "remix") => {
+  const handleGenerate = (action: "primary" | "remix", promptOverride?: string) => {
+    const promptForGeneration = promptOverride?.trim() || prompt;
+    const refinedPromptForGeneration = promptOverride?.trim() ? "" : refinedPrompt;
+
     const execute = async () => {
       const guard = startGeneration();
       setCurrentRequestId(guard.requestId);
 
-      // Set up 30-second timeout fallback
+      // 이미지 생성은 오래 걸릴 수 있어 API 호출 timeout과 같은 값으로 둔다.
       const timeoutId = setTimeout(() => {
-        console.warn('Generation timeout after 30 seconds, forcing completion');
+        console.warn(`Generation timeout after ${GENERATE_TIMEOUT_MS / 1000} seconds, forcing completion`);
         guard.onError('Generation timeout - please try again');
         clearActiveGuard();
         setCurrentRequestId(null);
-      }, 30000);
+      }, GENERATE_TIMEOUT_MS);
 
       setActiveGuard({
         requestId: guard.requestId,
@@ -1009,9 +1133,11 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         timeoutId
       });
 
-      const fallbackCandidate = selectedRecord ?? historyRecords[0] ?? null;
+      // 자동 fallback 일체 제거 — 사용자가 명시 등록한 reference 슬롯만 사용.
+      // (selectedRecord/historyRecords[0] 자동 fallback X — 비어 있으면 비어 있는 채로)
       const primaryReferenceRecord = referenceRecord ?? null;
-      const referenceCandidate = primaryReferenceRecord ?? fallbackCandidate;
+      const fallbackCandidate = primaryReferenceRecord;
+      const referenceCandidate = primaryReferenceRecord;
 
 
       const normalizedCameraSettings = normalizeCameraSettings(
@@ -1043,8 +1169,6 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         primaryReferenceRecord?.imageUrl ??
         primaryReferenceRecord?.originalImageUrl ??
         referenceImageState.url ??
-        referenceCandidate?.originalImageUrl ??
-        referenceCandidate?.imageUrl ??
         null;
 
       const referenceMetadata = (referenceCandidate?.metadata ?? {}) as { referenceId?: string | null };
@@ -1055,12 +1179,12 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       const isLightingMode = activeMode === "lighting";
       const isPoseMode = activeMode === "pose";
 
-      const lightingGuidance = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
-      const poseGuidance = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+      const lightingGuidance = buildLightingInstruction(lightingSelections);
+      const poseGuidance = buildPoseInstruction(poseSelections);
       const applyLightingGuidanceTo = (value: string | null | undefined) =>
-        isLightingMode ? combinePromptWithGuidance(value, lightingGuidance) : value ?? "";
+        combinePromptWithGuidance(value, lightingGuidance);
       const applyPoseGuidanceTo = (value: string | null | undefined) =>
-        isPoseMode ? combinePromptWithGuidance(value, poseGuidance) : value ?? "";
+        combinePromptWithGuidance(value, poseGuidance);
 
       const hasCameraReference = Boolean(referenceImageForRequest || uniqueGalleryReferences.length);
       const cameraPromptFallback = buildCameraPrompt({ settings: normalizedCameraSettings });
@@ -1073,15 +1197,17 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             .join(", ")
         : negativePrompt;
 
-      const hasLightingInstruction = Boolean(isLightingMode && lightingGuidance && lightingGuidance?.trim().length);
-      const hasPoseInstruction = Boolean(isPoseMode && poseGuidance && poseGuidance?.trim().length);
+      const hasLightingInstruction = Boolean(lightingGuidance && lightingGuidance?.trim().length);
+      const hasPoseInstruction = Boolean(poseGuidance && poseGuidance?.trim().length);
+      const hasCameraInstruction = Boolean(cameraGuidance && cameraGuidance?.trim().length);
 
       if (
-        !prompt &&
-        !refinedPrompt &&
+        !promptForGeneration &&
+        !refinedPromptForGeneration &&
         !(isCameraMode && hasCameraPromptFallback) &&
-        !(isLightingMode && hasLightingInstruction) &&
-        !(isPoseMode && hasPoseInstruction)
+        !hasCameraInstruction &&
+        !hasLightingInstruction &&
+        !hasPoseInstruction
       ) {
         toast.error(
           isLightingMode
@@ -1096,20 +1222,16 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         return;
       }
 
-      const cameraOnlyPrompt = isCameraMode
-        ? applyCameraPromptDirectives(null, cameraGuidance)
-        : null;
-
       // Clean base prompt to avoid accumulated history
       const getCleanBasePrompt = (candidate: GeneratedImageDocument | null): string => {
         if (!candidate?.promptMeta) {
-          return hasCameraPromptFallback ? defaultCameraFallback : prompt;
+          return hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration;
         }
 
         // If rawPrompt is a system message, try to get actual user prompt
         const rawPrompt = candidate.promptMeta.rawPrompt;
         if (rawPrompt === "사용자 기준 이미지 업로드" || !rawPrompt || rawPrompt.trim().length === 0) {
-          return hasCameraPromptFallback ? defaultCameraFallback : prompt;
+          return hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration;
         }
 
         // Remove accumulated "Apply the following adjustments:" sections
@@ -1117,11 +1239,11 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         const cleanLines = lines.filter(line => !line.startsWith('Apply the following adjustments:'));
         const cleanPrompt = cleanLines.join('\n').trim();
 
-        return cleanPrompt || (hasCameraPromptFallback ? defaultCameraFallback : prompt);
+        return cleanPrompt || (hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration);
       };
 
       const basePromptForRemixRaw = getCleanBasePrompt(referenceCandidate);
-      const userPromptInput = refinedPrompt || prompt;
+      const userPromptInput = refinedPromptForGeneration || promptForGeneration;
       const hasUserPrompt = Boolean(userPromptInput && userPromptInput.trim().length);
       const defaultPromptFallback =
         isCameraMode
@@ -1132,15 +1254,9 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       let basePromptForRemix: string;
       let basePromptDefault: string;
 
-      if (isCameraMode) {
-        const effectiveCameraPrompt = cameraOnlyPrompt ?? CAMERA_MODE_DEFAULT_DIRECTIVE;
-        basePromptForRemix = effectiveCameraPrompt;
-        basePromptDefault = effectiveCameraPrompt;
-      } else {
-        const basePromptDefaultRaw = hasUserPrompt ? userPromptInput : defaultPromptFallback;
-        basePromptForRemix = combinePromptWithGuidance(basePromptForRemixRaw, cameraGuidance);
-        basePromptDefault = combinePromptWithGuidance(basePromptDefaultRaw, cameraGuidance);
-      }
+      const basePromptDefaultRaw = hasUserPrompt ? userPromptInput : defaultPromptFallback;
+      basePromptForRemix = basePromptForRemixRaw;
+      basePromptDefault = basePromptDefaultRaw;
 
       // Remove duplicate mode adjustments - they will be applied later in the new logic
       const basePrompt =
@@ -1149,13 +1265,13 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             ? basePromptForRemix
             : basePromptDefault
           : basePromptDefault;
-      const userInstruction = action === "remix" && !isCameraMode ? prompt : undefined;
+      const userInstruction = action === "remix" && !isCameraMode ? promptForGeneration : undefined;
 
       // Define rawPromptForRequest for API call
       const rawPromptForRequest = basePrompt;
 
-      const primaryModel = "imagen-3.0-generate-002";
-      const previewModel = "gemini-2.5-flash-image-preview";
+      const primaryModel = "gpt-image-2";
+      const previewModel = "gpt-image-2";
 
 
       // Build prompt components separately
@@ -1165,13 +1281,16 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       const hasLightingPresets = Object.values(lightingSelections).some(selections =>
         selections.length > 0 && !selections.every(s => s === "default")
       );
+      const effectiveCameraGuidance = isCameraMode
+        ? cameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+        : cameraGuidance;
 
       // Collect mode-specific adjustments (only from presets, not user input)
       const modeAdjustments = {
-        camera: (activeMode === "camera" && cameraGuidance) ? cameraGuidance : undefined,
-        pose: (isPoseMode && poseGuidance) ? poseGuidance : undefined,
+        camera: effectiveCameraGuidance ?? undefined,
+        pose: poseGuidance ?? undefined,
         // Only include lighting guidance if it's from preset selection, not user input
-        lighting: (isLightingMode && lightingGuidance && hasLightingPresets) ? lightingGuidance : undefined
+        lighting: (lightingGuidance && hasLightingPresets) ? lightingGuidance : undefined
       };
 
       // Build the prompt step by step
@@ -1179,7 +1298,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
 
       // Apply mode adjustments to base prompt
       if (modeAdjustments.camera) {
-        promptToSend = applyCameraPromptDirectives(promptToSend, cameraGuidance);
+        promptToSend = applyCameraPromptDirectives(promptToSend, modeAdjustments.camera);
       }
       if (modeAdjustments.pose) {
         promptToSend = applyPoseGuidanceTo(promptToSend);
@@ -1226,7 +1345,9 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
       }
 
       // Create new prompt details for history
-      const actualUserPrompt = action === "remix" ? prompt : (refinedPrompt || prompt);
+      const actualUserPrompt = action === "remix"
+        ? promptForGeneration
+        : (refinedPromptForGeneration || promptForGeneration);
       const newPromptDetails: PromptDetails = {
         basePrompt: actualUserPrompt || currentBasePrompt,
         userInstructions: currentUserInstructions.length > 0 ? currentUserInstructions : undefined,
@@ -1273,6 +1394,13 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         generationOptions.referenceGallery = uniqueGalleryReferences;
       }
 
+      // 좌하단 옵션 패널의 값 병합 (quality / size / format / moderation / count)
+      generationOptions.quality = imageGenOptions.quality;
+      generationOptions.imageSize = imageGenOptions.size;
+      generationOptions.format = imageGenOptions.format;
+      generationOptions.moderation = imageGenOptions.moderation;
+      generationOptions.count = imageGenOptions.count;
+
       try {
 
         const result = await callGenerateApi(
@@ -1298,12 +1426,16 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
           return;
         }
 
+        // 서버에서 디스크에 저장된 파일 id를 그대로 record id로 사용해야 디스크 파일과 record가 1:1로 매핑된다.
+        // 그래야 record 삭제 시 /api/images/<id> 파일도 함께 정리할 수 있다.
         const id =
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `local-${Date.now()}`;
+          (typeof result.id === "string" && result.id.length > 0)
+            ? result.id
+            : (typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `local-${Date.now()}`);
         const now = new Date().toISOString();
-        const baseImage = result.base64Image ?? result.imageUrl;
+        const baseImage = result.imageUrl ?? result.base64Image;
         if (!baseImage) {
           toast.error("이미지 데이터를 찾을 수 없습니다.");
           guard.onError("missing-image");
@@ -1339,10 +1471,10 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         if (promptCameraNotes) {
           metadataPayload.promptCameraNotes = promptCameraNotes;
         }
-        if (isLightingMode) {
+        if (lightingGuidance) {
           metadataPayload.lighting = cloneLightingSelections(lightingSelections);
         }
-        if (isPoseMode) {
+        if (poseGuidance) {
           metadataPayload.pose = clonePoseSelections(poseSelections);
         }
         if (uniqueGalleryReferences.length) {
@@ -1366,7 +1498,8 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
             referenceGallery: uniqueGalleryReferences,
-            ...(isLightingMode ? { lighting: cloneLightingSelections(lightingSelections) } : {})
+            ...(lightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
+            ...(poseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
           status: "completed",
           imageUrl: storedImageUrl,
@@ -1386,11 +1519,9 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
           updatedAt: now
         };
 
-        const promoteToReference = !hasReferenceDoc && action === "primary";
-        const referenceEntry = mergeLocalRecord(newRecord, { promoteToReference });
-        if (referenceEntry && promoteToReference) {
-          setReferenceImageOverride(storedImageUrl);
-        }
+        // 기준 이미지는 항상 비어 있는 게 디폴트. 첫 생성 결과를 자동으로 reference로 박지 않는다.
+        // 사용자가 history-panel에서 "기준이미지로 사용"을 누를 때만 promote.
+        mergeLocalRecord(newRecord, { promoteToReference: false });
 
         // Set freshly generated record for immediate display
         setFreshlyGeneratedRecord(newRecord);
@@ -1404,9 +1535,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         }
         guard.onSuccess(newRecord.id);
         selectImageAuto(id, newRecord);
-        if (referenceEntry) {
-          await persistReferenceEntry(referenceEntry, now);
-        }
+        // 자동 promote 비활성화 — 사용자가 history에서 명시 선택 시에만 reference로 등록.
         const comparisonTargetId = primaryReferenceRecord?.id && primaryReferenceRecord.id !== id
           ? primaryReferenceRecord.id
           : referenceCandidate?.id && referenceCandidate.id !== id
@@ -1435,40 +1564,12 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
   const handleReferenceUpload = async (file: File) => {
     try {
       const dataUrl = await readFileAsDataURL(file);
-      const now = new Date().toISOString();
       const recordId =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `upload-${Date.now()}`;
 
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, recordId, blob);
-          storedUrl = uploadResult.url;
-          await saveGeneratedImageDoc(user.uid, recordId, {
-            mode: "create",
-            status: "completed",
-            promptMeta: {
-              rawPrompt: "사용자 기준 이미지 업로드",
-              refinedPrompt: "사용자 기준 이미지 업로드"
-            },
-            imageUrl: storedUrl,
-            thumbnailUrl: storedUrl,
-            originalImageUrl: storedUrl,
-            metadata: { upload: true },
-            model: "reference-upload",
-            createdAtIso: now,
-            updatedAtIso: now
-          });
-        } catch (error) {
-          console.error(error);
-          toast.error("업로드한 이미지를 저장하는 중 오류가 발생했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
       setReferenceImageOverride(storedUrl);
@@ -1503,19 +1604,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
         targetSlot = newSlot;
       }
 
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `reference-slot-${targetSlot.id}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error(error);
-          toast.error("스케치를 저장하는 중 오류가 발생했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       // 참조 슬롯에 스케치 추가
       setReferenceSlots(prev =>
@@ -1525,6 +1614,10 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             : item
         )
       );
+      const filledAfter = referenceSlots.filter(slot => slot.imageUrl && slot.id !== targetSlot!.id).length + 1;
+      if (filledAfter >= 5) {
+        toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+      }
       toast.success("스케치를 참조 이미지로 추가했습니다.");
     } catch (error) {
       console.error(error);
@@ -1568,19 +1661,7 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
 
     try {
       const dataUrl = await readFileAsDataURL(file);
-      let storedUrl = dataUrl;
-
-      if (user && shouldUseFirestore) {
-        try {
-          const blob = await dataUrlToBlob(dataUrl);
-          const uploadResult = await uploadUserImage(user.uid, `reference-slot-${slotId}`, blob);
-          storedUrl = uploadResult.url;
-        } catch (error) {
-          console.error("reference slot upload error", error);
-          toast.error("참조 이미지를 업로드하지 못했습니다.");
-          return;
-        }
-      }
+      const storedUrl = dataUrl;
 
       setReferenceSlots(prev =>
         prev.map(item =>
@@ -1589,6 +1670,10 @@ const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
             : item
         )
       );
+      const filledAfter = referenceSlots.filter(item => item.imageUrl && item.id !== slotId).length + 1;
+      if (filledAfter >= 5) {
+        toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+      }
       toast.success("참조 이미지를 추가했습니다.");
     } catch (error) {
       console.error("reference slot upload error", error);
@@ -1733,12 +1818,15 @@ const runViewBatch = async ({
       cameraPayload.zoom ?? DEFAULT_ZOOM_LEVEL
     );
     const batchCameraGuidance = buildCameraAdjustmentInstruction(normalizedBatchCameraSettings);
-    const batchLightingGuidance = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
+    const effectiveBatchCameraGuidance = isCameraMode
+      ? batchCameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+      : batchCameraGuidance;
+    const batchLightingGuidance = buildLightingInstruction(lightingSelections);
     const applyBatchLighting = (value: string | null | undefined) =>
-      isLightingMode ? combinePromptWithGuidance(value, batchLightingGuidance) : value ?? "";
-    const batchPoseGuidance = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+      combinePromptWithGuidance(value, batchLightingGuidance);
+    const batchPoseGuidance = buildPoseInstruction(poseSelections);
     const applyBatchPose = (value: string | null | undefined) =>
-      isPoseMode ? combinePromptWithGuidance(value, batchPoseGuidance) : value ?? "";
+      combinePromptWithGuidance(value, batchPoseGuidance);
 
     const effectivePromptFallback = isCameraMode
       ? CAMERA_MODE_DEFAULT_DIRECTIVE
@@ -1751,12 +1839,9 @@ const runViewBatch = async ({
       ? basePromptDefault
       : effectivePromptFallback;
 
-    const rawPromptWithLighting = isLightingMode ? applyBatchLighting(rawPromptBase) : rawPromptBase;
-    const rawPromptWithPose = isPoseMode ? applyBatchPose(rawPromptWithLighting) : rawPromptWithLighting;
-
-    const rawPromptForRequest = isCameraMode
-      ? applyCameraPromptDirectives(null, batchCameraGuidance)
-      : rawPromptWithPose;
+    const rawPromptWithLighting = applyBatchLighting(rawPromptBase);
+    const rawPromptWithPose = applyBatchPose(rawPromptWithLighting);
+    const rawPromptForRequest = applyCameraPromptDirectives(rawPromptWithPose, effectiveBatchCameraGuidance);
 
     const negativePromptToSend = negativePrompt && negativePrompt.trim().length
       ? `${negativePrompt}, ${negativePromptEnforcement}`
@@ -1824,12 +1909,15 @@ ${viewInstruction}`;
         }
 
         if (isCameraMode) {
-          viewPrompt = applyCameraPromptDirectives(null, cameraGuidance);
+          viewPrompt = applyCameraPromptDirectives(
+            viewPrompt,
+            cameraGuidance ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+          );
         }
-        if (isLightingMode && batchLightingGuidance) {
+        if (batchLightingGuidance) {
           viewPrompt = applyBatchLighting(viewPrompt);
         }
-        if (isPoseMode && batchPoseGuidance) {
+        if (batchPoseGuidance) {
           viewPrompt = applyBatchPose(viewPrompt);
         }
 
@@ -1890,7 +1978,7 @@ ${viewInstruction}`;
             ? crypto.randomUUID()
             : `${actionLabel}-${view.id}-${Date.now()}`;
         const now = new Date().toISOString();
-        const baseImage = result.base64Image ?? result.imageUrl;
+        const baseImage = result.imageUrl ?? result.base64Image;
         if (!baseImage) {
           toast.error(`${view.label} 뷰 생성 실패`, {
             description: "이미지 데이터를 찾을 수 없습니다."
@@ -1929,10 +2017,10 @@ ${viewInstruction}`;
         };
         metadataPayload.sequenceIndex = index + 1;
         metadataPayload.sequenceTotal = total;
-        if (isLightingMode) {
+        if (batchLightingGuidance) {
           metadataPayload.lighting = cloneLightingSelections(lightingSelections);
         }
-        if (isPoseMode) {
+        if (batchPoseGuidance) {
           metadataPayload.pose = clonePoseSelections(poseSelections);
         }
         if (uniqueGalleryReferences.length) {
@@ -1961,7 +2049,9 @@ ${viewInstruction}`;
             negativePrompt: negativePromptToSend,
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
-            referenceGallery: uniqueGalleryReferences
+            referenceGallery: uniqueGalleryReferences,
+            ...(batchLightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
+            ...(batchPoseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
           status: "completed",
           imageUrl: storedImageUrl,
@@ -2255,7 +2345,6 @@ ${viewInstruction}`;
       return;
     }
 
-    const now = new Date().toISOString();
     const newUrl = candidate.imageUrl ?? candidate.originalImageUrl ?? null;
     const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
     if (newUrl) {
@@ -2263,10 +2352,7 @@ ${viewInstruction}`;
     }
 
     try {
-      const referenceEntry = mergeLocalRecord(candidate, { promoteToReference: true });
-      if (referenceEntry) {
-        await persistReferenceEntry(referenceEntry, now);
-      }
+      mergeLocalRecord(candidate, { promoteToReference: true });
     } catch (error) {
       console.error("history reference select error", error);
       if (newUrl) {
@@ -2322,16 +2408,6 @@ ${viewInstruction}`;
     }
   }
 
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-        });
-      } catch (error) {
-        console.warn("Failed to update favorite flag", error);
-      }
-    }
-
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
@@ -2367,6 +2443,17 @@ ${viewInstruction}`;
         return;
       }
 
+      // 로컬 라우트는 그대로 다운로드, 외부 URL만 /api/download 프록시 경유.
+      if (url.startsWith("/api/") || url.startsWith("/")) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${target.id}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
       const mediaUrl = url.includes("alt=media") ? url : `${url}${url.includes('?') ? '&' : '?'}alt=media`;
       const downloadUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(
         `${target.id}.png`
@@ -2389,21 +2476,18 @@ ${viewInstruction}`;
     }
 
     setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    setDiskRecords(prev => prev.filter(record => record.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
 
     if (selectedImageId === recordId) {
       const fallbackId = historyRecords.find(record => record.id !== recordId)?.id ?? null;
       selectImage(fallbackId);
     }
 
-    if (user && shouldUseFirestore) {
-      try {
-        await deleteGeneratedImageDoc(user.uid, recordId);
-        if (target.imageUrl) {
-          await deleteUserImage(user.uid, recordId);
-        }
-      } catch (error) {
-        console.warn("Failed to delete remote record", error);
-      }
+    try {
+      await deleteLocalImageFile(target);
+    } catch (error) {
+      console.warn("Failed to delete local image file", error);
     }
 
     toast.success("이미지를 삭제했습니다.");
@@ -2430,42 +2514,35 @@ ${viewInstruction}`;
 
     console.log(`[DeleteAll] Starting deletion of ${recordsToDelete.length} records`);
     console.log(`[DeleteAll] User ID: ${user.uid}`);
-    console.log(`[DeleteAll] shouldUseFirestore:`, shouldUseFirestore);
 
     try {
-      // Delete from Firestore first
-      if (shouldUseFirestore) {
-        console.log(`[DeleteAll] Deleting from Firestore...`);
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const record of recordsToDelete) {
-          try {
-            console.log(`[DeleteAll] Deleting Firestore doc: ${record.id}`);
-            await deleteGeneratedImageDoc(user.uid, record.id);
-
-            if (record.imageUrl && !record.imageUrl.startsWith('data:')) {
-              console.log(`[DeleteAll] Deleting Storage image: ${record.id}`);
-              await deleteUserImage(user.uid, record.id);
-            }
-
-            successCount++;
-            console.log(`[DeleteAll] Successfully deleted: ${record.id}`);
-          } catch (error) {
-            failCount++;
-            console.error(`[DeleteAll] Failed to delete record ${record.id}:`, error);
-          }
+      let localFileFailCount = 0;
+      for (const record of recordsToDelete) {
+        removeRecordFromLocalStorage(record.id);
+        if (!getLocalImageIdForRecord(record)) {
+          continue;
         }
-
-        console.log(`[DeleteAll] Deletion complete. Success: ${successCount}, Failed: ${failCount}`);
+        try {
+          const removed = await deleteLocalImageFile(record);
+          if (!removed) {
+            localFileFailCount++;
+          }
+        } catch (error) {
+          localFileFailCount++;
+          console.warn(`[DeleteAll] Failed to delete local image file ${record.id}:`, error);
+        }
       }
 
-      // Clear local state after Firestore deletion
       setLocalRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
+      setDiskRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
       selectImage(null);
+      broadcastHistoryUpdate(historyRecords.filter(r => r.id === REFERENCE_IMAGE_DOC_ID), "studio");
 
-      toast.success(`${recordsToDelete.length}개의 이미지를 삭제했습니다.`);
+      toast.success(
+        localFileFailCount > 0
+          ? `${recordsToDelete.length}개의 기록을 삭제했습니다. 파일 ${localFileFailCount}개는 정리하지 못했습니다.`
+          : `${recordsToDelete.length}개의 이미지를 삭제했습니다.`
+      );
     } catch (error) {
       console.error("[DeleteAll] Failed to delete all records:", error);
       toast.error("일부 이미지 삭제에 실패했습니다.");
@@ -2474,6 +2551,63 @@ ${viewInstruction}`;
 
   const handlePreviewRecord = (record: GeneratedImageDocument) => {
     setPreviewRecord(record);
+    previewZoom.reset();
+  };
+
+  const closePreviewRecord = () => {
+    setPreviewRecord(null);
+    previewZoom.reset();
+  };
+
+  const handleCopyPreviewPrompt = async () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!promptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(promptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  };
+
+  const handleRegeneratePreviewRecord = () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!previewRecord || !promptText) {
+      toast.error("재생성할 프롬프트가 없습니다.");
+      return;
+    }
+
+    setPrompt(promptText);
+    setRefinedPrompt("");
+    setLastPromptDetails(null);
+    selectImageAuto(previewRecord.id, previewRecord);
+    closePreviewRecord();
+    handleGenerate("primary", promptText);
+  };
+
+  const handleSetPreviewAsReference = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    await handleSetReferenceFromHistory(previewRecord.id);
+    closePreviewRecord();
+  };
+
+  const handleDeletePreviewRecord = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    const confirmed = window.confirm("이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다.");
+    if (!confirmed) {
+      return;
+    }
+    const recordId = previewRecord.id;
+    closePreviewRecord();
+    await handleDeleteRecord(recordId);
   };
 
   const handleHistorySelect = useCallback((id: string) => {
@@ -2535,6 +2669,7 @@ ${viewInstruction}`;
     setRefinedPrompt("");
     setNegativePrompt("");
     setLastPromptDetails(null);
+    lastCategoryGuidanceRef.current = "";
     toast.success("프리셋을 초기화했습니다.");
   };
 
@@ -2643,14 +2778,17 @@ ${viewInstruction}`;
 
     let basePromptForRequest = resolvedBasePrompt;
     const isCameraMode = activeMode === "camera";
-    const isLightingMode = activeMode === "lighting";
-    const isPoseMode = activeMode === "pose";
-    const lightingGuidanceForPrompt = isLightingMode ? buildLightingInstruction(lightingSelections) : null;
-    const poseGuidanceForPrompt = isPoseMode ? buildPoseInstruction(poseSelections) : null;
+    const lightingGuidanceForPrompt = buildLightingInstruction(lightingSelections);
+    const poseGuidanceForPrompt = buildPoseInstruction(poseSelections);
+    const effectiveCameraGuidanceForPrompt = isCameraMode
+      ? cameraGuidanceForPrompt ?? CAMERA_MODE_DEFAULT_DIRECTIVE
+      : cameraGuidanceForPrompt;
+    basePromptForRequest = applyCameraPromptDirectives(basePromptForRequest, effectiveCameraGuidanceForPrompt);
+    basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, lightingGuidanceForPrompt);
+    basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, poseGuidanceForPrompt);
     if (isCameraMode) {
-      basePromptForRequest = applyCameraPromptDirectives(basePromptForRequest, cameraGuidanceForPrompt);
       const finalPrompt = basePromptForRequest;
-      const cameraNotes = cameraGuidanceForPrompt ?? finalPrompt;
+      const cameraNotes = effectiveCameraGuidanceForPrompt ?? finalPrompt;
       setRefinedPrompt(finalPrompt);
       setLastPromptDetails({
         basePrompt: finalPrompt,
@@ -2659,13 +2797,6 @@ ${viewInstruction}`;
         timestamp: new Date().toISOString()
       });
       return { finalPrompt, summary: undefined, cameraNotes };
-    }
-
-    if (isLightingMode) {
-      basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, lightingGuidanceForPrompt);
-    }
-    if (isPoseMode) {
-      basePromptForRequest = combinePromptWithGuidance(basePromptForRequest, poseGuidanceForPrompt);
     }
 
     setGptLoading(true);
@@ -2736,13 +2867,6 @@ ${viewInstruction}`;
     const referenceId = referenceRecord.id ?? REFERENCE_IMAGE_DOC_ID;
 
     try {
-      if (user && shouldUseFirestore) {
-        await deleteGeneratedImageDoc(user.uid, referenceId);
-        await deleteUserImage(user.uid, referenceId).catch(error => {
-          console.warn("Failed to delete reference image from storage", error);
-        });
-      }
-
       // Remove from local records (including any record with isReference metadata)
       setLocalRecords(prev => prev.filter(record =>
         record.id !== REFERENCE_IMAGE_DOC_ID &&
@@ -2760,7 +2884,9 @@ ${viewInstruction}`;
             record.id !== referenceId &&
             record.metadata?.isReference !== true
           );
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+          // 머지 패턴 통과 안 시키고, 명시적으로 reference 관련 record 제거.
+          window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+          window.dispatchEvent(new Event("yesgem-history-refresh"));
         }
       } catch (error) {
         console.warn("Failed to update localStorage", error);
@@ -2831,8 +2957,21 @@ ${viewInstruction}`;
     }
   };
 
+  const activeReferenceCount = Array.from(
+    new Set([referenceImageUrl, ...collectReferenceGalleryUrls()].filter((url): url is string => Boolean(url)))
+  ).length;
+  const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
+  const previewPromptText = getRecordPromptText(previewRecord);
+  const previewZoomPercent = Math.round(previewZoom.scale * 100);
+
   return (
     <div className="flex h-full flex-1 flex-col">
+      <GenerationProgressIndicator
+        inflightCount={inflightCount}
+        referenceCount={activeReferenceCount}
+        size={imageGenOptions.size}
+      />
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       <div className="border-b bg-gradient-to-r from-background via-background to-background/95 shadow-sm">
         <div className="flex items-center justify-between px-8 py-5">
           <div className="flex flex-col gap-1">
@@ -2869,6 +3008,7 @@ ${viewInstruction}`;
                     <TabsTrigger
                       key={mode.id}
                       value={mode.id}
+                      onClick={() => setActiveMode(mode.id as GenerationMode)}
                       className={cn(
                         "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg",
                         "rounded-lg border border-transparent px-3 py-2 text-xs transition-all duration-200",
@@ -2889,26 +3029,25 @@ ${viewInstruction}`;
 
       <div
         ref={containerRef}
-        className="flex flex-1 gap-0 p-4 lg:flex-row flex-col"
+        className="flex flex-1 flex-col gap-0 p-4 pb-40 lg:flex-row lg:pb-4"
       >
         {/* Left Panel - Prompt Panel */}
         <div
           className={cn(
-            "flex-shrink-0 relative",
-            "lg:block hidden", // Hide on mobile, show on desktop
+            "relative w-full lg:flex-shrink-0 lg:w-[var(--left-panel-width)]",
             resizable.isCollapsed.left && "lg:hidden"
           )}
           style={{
-            width: `${resizable.leftWidth}px`
-          }}
+            "--left-panel-width": `${resizable.leftWidth}px`
+          } as CSSProperties}
         >
           {/* Panel Collapse Button */}
           <button
             onClick={resizable.toggleLeftPanel}
             className={cn(
-              "absolute top-4 -right-3 z-10 w-6 h-6 rounded-full",
+              "absolute top-4 -right-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
               "bg-background border border-border shadow-sm",
-              "flex items-center justify-center text-xs",
+              "items-center justify-center text-xs",
               "hover:bg-accent transition-colors"
             )}
             title="패널 접기"
@@ -2953,6 +3092,7 @@ ${viewInstruction}`;
               onGenerate={handleGenerate}
               onRefinePrompt={handleRefinePrompt}
               generating={isGenerating || characterBatchPending || view360BatchPending}
+              inflightCount={inflightCount}
             />
           )}
         </div>
@@ -2989,10 +3129,10 @@ ${viewInstruction}`;
 
         {/* Center Panel - Workspace Panel */}
         <div
-          className="flex-1 min-w-0 px-2"
+          className="w-full flex-1 min-w-0 px-2 lg:w-[var(--center-panel-width)]"
           style={{
-            width: `${resizable.centerWidth}px`
-          }}
+            "--center-panel-width": `${resizable.centerWidth}px`
+          } as CSSProperties}
         >
           <WorkspacePanel
           mode={activeMode}
@@ -3009,6 +3149,8 @@ ${viewInstruction}`;
           referenceImageUrl={referenceImageUrl}
           referenceImageKey={referenceImageState.signature}
           isGenerating={isGenerating}
+          generationReferenceCount={activeReferenceCount}
+          generationSize={imageGenOptions.size}
           showGenerationSuccess={showGenerationSuccess}
           successRecordId={successRecordId ?? undefined}
           promptDetails={lastPromptDetails}
@@ -3062,21 +3204,20 @@ ${viewInstruction}`;
         {/* Right Panel - History Panel */}
         <div
           className={cn(
-            "flex-shrink-0 relative",
-            "lg:block hidden", // Hide on mobile, show on desktop
+            "relative mt-4 w-full flex-shrink-0 lg:mt-0 lg:w-[var(--right-panel-width)]",
             resizable.isCollapsed.right && "lg:hidden"
           )}
           style={{
-            width: `${resizable.rightWidth}px`
-          }}
+            "--right-panel-width": `${resizable.rightWidth}px`
+          } as CSSProperties}
         >
           {/* Panel Collapse Button */}
           <button
             onClick={resizable.toggleRightPanel}
             className={cn(
-              "absolute top-4 -left-3 z-10 w-6 h-6 rounded-full",
+              "absolute top-4 -left-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
               "bg-background border border-border shadow-sm",
-              "flex items-center justify-center text-xs",
+              "items-center justify-center text-xs",
               "hover:bg-accent transition-colors"
             )}
             title="패널 접기"
@@ -3117,33 +3258,128 @@ ${viewInstruction}`;
 
       {previewRecord ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setPreviewRecord(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+          onClick={closePreviewRecord}
         >
-          <div className="relative h-full w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl border border-white/20 bg-black/90 shadow-lg">
+          <div
+            className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
+            onClick={event => event.stopPropagation()}
+          >
             <button
               type="button"
-              className="absolute right-4 top-4 rounded-full bg-white/20 px-3 py-1 text-xs text-white backdrop-blur"
+              className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
               onClick={event => {
                 event.stopPropagation();
-                setPreviewRecord(null);
+                closePreviewRecord();
               }}
             >
               닫기
             </button>
-            {previewRecord.imageUrl ? (
-              <img
-                src={previewRecord.imageUrl}
-                alt={previewRecord.promptMeta?.rawPrompt ?? "preview"}
-                className="h-full w-full object-contain"
-              />
-            ) : previewRecord.originalImageUrl ? (
-              <img
-                src={previewRecord.originalImageUrl}
-                alt={previewRecord.promptMeta?.rawPrompt ?? "preview"}
-                className="h-full w-full object-contain"
-              />
-            ) : null}
+            <div className="flex min-h-0 flex-col bg-black">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">원본 이미지</p>
+                  <p className="truncate text-xs text-white/60">
+                    {previewRecord.model} · {new Date(previewRecord.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="mr-14 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomOut()}
+                    disabled={previewZoom.scale <= MIN_IMAGE_ZOOM}
+                  >
+                    축소
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.reset()}
+                    disabled={previewZoom.scale === 1}
+                  >
+                    {previewZoomPercent}%
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomIn()}
+                    disabled={previewZoom.scale >= MAX_IMAGE_ZOOM}
+                  >
+                    확대
+                  </Button>
+                </div>
+              </div>
+              <div
+                {...previewZoom.bind}
+                className={cn(
+                  "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+                  previewZoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+                )}
+                title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+              >
+                {previewImageUrl ? (
+                  <img
+                    src={previewImageUrl}
+                    alt={previewPromptText || "preview"}
+                    className="max-h-full max-w-full object-contain will-change-transform"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${previewZoom.transform.panX}px, ${previewZoom.transform.panY}px) scale(${previewZoom.transform.scale})`,
+                      transformOrigin: "center center"
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+                )}
+              </div>
+            </div>
+            <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+              <div className="space-y-1 pr-10 lg:pr-0">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+                <h2 className="text-base font-semibold text-foreground">프롬프트와 액션</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={handleRegeneratePreviewRecord} disabled={!previewPromptText}>
+                  재생성
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleCopyPreviewPrompt} disabled={!previewPromptText}>
+                  프롬프트 복사
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleSetPreviewAsReference()} disabled={!previewImageUrl}>
+                  기준이미지 등록
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()}>
+                  삭제
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+                <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+                  {previewPromptText || "저장된 프롬프트가 없습니다."}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모드</p>
+                  <p className="uppercase">{previewRecord.mode}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모델</p>
+                  <p>{previewRecord.model}</p>
+                </div>
+                {previewRecord.promptMeta?.aspectRatio ? (
+                  <div className="rounded-lg border bg-background/60 p-2">
+                    <p className="font-medium text-foreground">비율</p>
+                    <p>{getAspectRatioLabel(previewRecord.promptMeta.aspectRatio)}</p>
+                  </div>
+                ) : null}
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">파일</p>
+                  <p>{previewImageUrl.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
       ) : null}
@@ -3157,9 +3393,4 @@ export function StudioShell() {
       <StudioShellInner />
     </PresetLibraryProvider>
   );
-}
-
-async function dataUrlToBlob(dataUrl: string) {
-  const response = await fetch(dataUrl);
-  return response.blob();
 }

@@ -1,14 +1,18 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env";
-import { MissingServiceAccountKeyError, getAdminAuth, getAdminDb, getAdminStorage } from "@/lib/firebase/admin";
-import { ADMIN_UID, PLANS } from "@/lib/constants";
-import { startOfNextMonthUTC } from "@/lib/entitlements";
 import type { GenerationMode } from "@/lib/types";
 import { describeAspectRatioForPrompt } from "@/lib/aspect";
 import { generateId } from "@/lib/utils";
+import {
+  callCodexResponses,
+  CodexResponseError,
+  type CodexContentPart,
+  type CodexImageOptions
+} from "@/lib/codex-fetch";
+import { CodexAuthError } from "@/lib/codex-oauth";
+import { saveImageBuffer, readImageById } from "@/lib/local/storage";
 
 const generationModes = [
   "create",
@@ -24,6 +28,65 @@ const generationModes = [
   "external"
 ] as const satisfies GenerationMode[];
 
+const DEFAULT_IMAGE_MIME = "image/png";
+const MAX_REFERENCE_IMAGES = 8;
+const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
+const MAX_REFERENCE_DATA_CHARS = Math.ceil((MAX_REFERENCE_BYTES * 4) / 3) + 1024;
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+
+const referenceObjectSchema = z
+  .object({
+    data: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional(),
+    mimeType: z.string().min(1).max(80).optional(),
+    url: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional()
+  })
+  .strict()
+  .refine(value => Boolean(value.data || value.url), {
+    message: "reference entry must include data or url"
+  });
+
+const referenceSourceSchema = z.union([
+  z.string().min(1).max(MAX_REFERENCE_DATA_CHARS),
+  referenceObjectSchema
+]);
+
+const generationOptionsSchema = z
+  .object({
+    action: z.string().min(1).max(80).optional(),
+    // 프론트 호환을 위해 받되 서버 모델 선택에는 사용하지 않는다.
+    model: z.string().min(1).max(80).optional(),
+    outputMimeType: z.literal("image/png").optional(),
+    characterView: z.string().min(1).max(80).optional(),
+    characterViewLabel: z.string().min(1).max(120).optional(),
+    batchItemId: z.string().min(1).max(160).optional(),
+    batchItemName: z.string().min(1).max(260).optional(),
+    dimensions: z
+      .object({
+        width: z.number().int().positive().max(8192),
+        height: z.number().int().positive().max(8192)
+      })
+      .strict()
+      .optional(),
+    lighting: z.record(z.array(z.string().min(1).max(120)).max(16)).optional(),
+    pose: z.record(z.array(z.string().min(1).max(120)).max(16)).optional(),
+    quality: z.enum(["low", "medium", "high", "auto"]).optional(),
+    imageSize: z.string().min(1).max(32).optional(),
+    aspectRatio: z.string().min(1).max(32).optional(),
+    format: z.enum(["png", "jpeg", "webp"]).optional(),
+    moderation: z.enum(["low", "auto"]).optional(),
+    count: z.union([z.literal(1), z.literal(2), z.literal(4)]).optional(),
+    referenceImage: referenceSourceSchema.optional(),
+    referenceImageUrl: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional(),
+    referenceGallery: z.array(referenceSourceSchema).max(MAX_REFERENCE_IMAGES).optional(),
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9_.:-]+$/, "idempotencyKey contains invalid characters")
+      .optional()
+  })
+  .strict();
+
 const requestSchema = z.object({
   prompt: z.string().min(1, "프롬프트를 입력해주세요."),
   refinedPrompt: z.string().optional(),
@@ -38,311 +101,316 @@ const requestSchema = z.object({
       zoom: z.string().optional()
     })
     .optional(),
-  options: z.record(z.any()).optional()
+  options: generationOptionsSchema.optional()
 });
 
-const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-2.5-flash-image-preview";
-const FALLBACK_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
-const IMAGE_MODEL_PREFIXES = ["imagen-"];
-const TEXT_RESPONSE_MIME_SET = new Set([
-  "text/plain",
-  "application/json",
-  "application/xml",
-  "application/yaml",
-  "text/x.enum"
-]);
-const DEFAULT_IMAGE_MIME = "image/png";
+type ReferenceSource = { data: string; mimeType?: string } | { url: string };
+type GeneratePayload = z.infer<typeof requestSchema>;
+type GenerateResult = { status: number; body: Record<string, unknown> };
 
-function filterLargeBase64FromOptions(options: Record<string, any>): Record<string, any> {
-  const filtered: Record<string, any> = {};
+type IdempotencyEntry = {
+  fingerprint: string;
+  expiresAt: number;
+  result?: GenerateResult;
+  promise?: Promise<GenerateResult>;
+};
 
-  for (const [key, value] of Object.entries(options)) {
-    if (typeof value === "string" && value.startsWith("data:") && value.length > 100000) {
-      // Replace large base64 data with a placeholder
-      filtered[key] = `[BASE64_DATA_FILTERED_${value.length}_BYTES]`;
-    } else if (Array.isArray(value)) {
-      // Check array elements for large base64 data
-      filtered[key] = value.map(item => {
-        if (typeof item === "string" && item.startsWith("data:") && item.length > 100000) {
-          return `[BASE64_DATA_FILTERED_${item.length}_BYTES]`;
-        }
-        return item;
-      });
-    } else {
-      filtered[key] = value;
+const idempotencyCache = new Map<string, IdempotencyEntry>();
+
+class ReferenceImageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReferenceImageError";
+  }
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
+  try {
+    const payload = requestSchema.parse(await request.json());
+    const result = await runGenerateWithIdempotency(request, payload);
+    return NextResponse.json(result.body, { status: result.status });
+  } catch (error) {
+    const result = generateErrorResult(error);
+    return NextResponse.json(result.body, { status: result.status });
+  }
+}
+
+async function runGenerateWithIdempotency(
+  request: NextRequest,
+  payload: GeneratePayload
+): Promise<GenerateResult> {
+  const key = payload.options?.idempotencyKey;
+  if (!key) {
+    return executeGenerate(request, payload);
+  }
+
+  const now = Date.now();
+  cleanupIdempotencyCache(now);
+  const fingerprint = createPayloadFingerprint(payload);
+  const existing = idempotencyCache.get(key);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      return {
+        status: 409,
+        body: { ok: false, reason: "같은 idempotencyKey가 다른 요청 본문과 재사용되었습니다." }
+      };
+    }
+    if (existing.result) {
+      return existing.result;
+    }
+    if (existing.promise) {
+      return existing.promise;
     }
   }
 
-  return filtered;
-}
-
-async function canGenerateAndConsume(uid: string) {
-  const ref = getAdminDb().collection("users").doc(uid);
-  const now = Timestamp.now();
-  let allowed = false;
-  let reason = "forbidden";
-
-  const normalizeTimestamp = (value: any): Timestamp | null => {
-    if (!value) {
-      return null;
-    }
-    if (value instanceof Timestamp) {
-      return value;
-    }
-    if (value instanceof Date) {
-      return Timestamp.fromDate(value);
-    }
-    if (typeof value === "string") {
-      const ms = Date.parse(value);
-      if (!Number.isNaN(ms)) {
-        return Timestamp.fromDate(new Date(ms));
-      }
-      return null;
-    }
-    if (typeof value === "object" && typeof (value as { toDate?: () => Date }).toDate === "function") {
-      try {
-        const date = (value as { toDate: () => Date }).toDate();
-        if (date instanceof Date && !Number.isNaN(date.getTime())) {
-          return Timestamp.fromDate(date);
-        }
-      } catch (error) {
-        console.warn("Failed to normalize timestamp", error);
-      }
-    }
-    return null;
-  };
-
-  await getAdminDb().runTransaction(async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) {
-      throw new Error("user doc missing");
-    }
-
-    const data = snap.data() as any;
-
-    // Admin: unlimited usage, no quota decrement (but still track usage)
-    const isAdmin = uid === ADMIN_UID || data.role === "admin";
-    if (isAdmin) {
-      allowed = true;
-      reason = "admin";
-      tx.update(ref, {
-        "usage.generatedImages": (data.usage?.generatedImages ?? 0) + 1,
-        "usage.lastGeneratedAt": FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
-      return;
-    }
-
-    if (!data.quota || typeof data.quota !== "object") {
-      data.quota = { imagesRemaining: 0, resetsAt: null };
-    }
-
-    const quotaResetAt = normalizeTimestamp(data.quota.resetsAt);
-    if (quotaResetAt && quotaResetAt.toMillis() <= now.toMillis()) {
-      const planId = (data.plan?.id as keyof typeof PLANS | undefined) ?? "guest";
-      const base = PLANS[planId] ?? PLANS.guest;
-      const resetTimestamp = startOfNextMonthUTC();
-      tx.update(ref, {
-        "quota.imagesRemaining": base.monthlyImages,
-        "quota.resetsAt": resetTimestamp
-      });
-      data.quota = {
-        imagesRemaining: base.monthlyImages,
-        resetsAt: resetTimestamp
-      };
-    } else if (quotaResetAt) {
-      data.quota.resetsAt = quotaResetAt;
-    }
-
-    const remain = typeof data.quota.imagesRemaining === "number" ? data.quota.imagesRemaining : 0;
-
-    const pass = data.tempPass && typeof data.tempPass === "object" ? data.tempPass : null;
-    const passExpiresAt = normalizeTimestamp(pass?.expiresAt);
-    if (pass && passExpiresAt && passExpiresAt.toMillis() > now.toMillis()) {
-      allowed = true;
-      reason = "tempPass";
-    } else {
-      const activated = Boolean(data.plan?.activated);
-      if (activated && remain > 0) {
-        allowed = true;
-        reason = "quota";
-        tx.update(ref, {
-          "quota.imagesRemaining": remain - 1,
-          "usage.generatedImages": (data.usage?.generatedImages ?? 0) + 1,
-          "usage.lastGeneratedAt": FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp()
-        });
-      }
-    }
+  const promise = executeGenerate(request, payload);
+  idempotencyCache.set(key, {
+    fingerprint,
+    expiresAt: now + IDEMPOTENCY_TTL_MS,
+    promise
   });
 
-  return { allowed, reason };
-}
-
-export async function POST(request: NextRequest) {
   try {
-    const authorization = request.headers.get("authorization") || "";
-    const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : null;
-    if (!token) {
-      return NextResponse.json({ ok: false, reason: "인증 토큰이 필요합니다." }, { status: 401 });
+    const result = await promise;
+    if (isCacheableGenerationResult(result)) {
+      idempotencyCache.set(key, {
+        fingerprint,
+        expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
+        result
+      });
+    } else {
+      idempotencyCache.delete(key);
     }
-
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const { allowed } = await canGenerateAndConsume(decoded.uid);
-    if (!allowed) {
-      return NextResponse.json({ ok: false, reason: "limit reached or not activated" }, { status: 403 });
-    }
-
-    const payload = requestSchema.parse(await request.json());
-    const apiKey = serverEnv.GEMINI_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          ok: false,
-          reason: "GEMINI_API_KEY 미설정",
-          imageUrl: "/samples/sample-ballerina-after.svg"
-        },
-        { status: 200 }
-      );
-    }
-
-    const requestedModel = typeof payload.options?.model === "string" ? payload.options.model : undefined;
-    const primaryModel = requestedModel ?? DEFAULT_MODEL;
-
-    let result = await callModel(primaryModel, payload, apiKey);
-
-    if (
-      !result.ok &&
-      result.status === 404 &&
-      isImageModel(primaryModel) &&
-      (!requestedModel || requestedModel === DEFAULT_MODEL)
-    ) {
-      const fallbackResult = await callModel(FALLBACK_IMAGE_MODEL, payload, apiKey);
-      if (fallbackResult.ok) {
-        return NextResponse.json({ ok: true, base64Image: fallbackResult.base64Image, model: fallbackResult.modelId, fallback: true });
-      }
-
-      const combinedReason = `${result.reason} (fallback 모델 ${FALLBACK_IMAGE_MODEL} 시도 실패: ${fallbackResult.reason})`;
-      result = {
-        ok: false,
-        reason: combinedReason,
-        status: fallbackResult.status ?? result.status,
-        modelId: primaryModel
-      };
-    }
-
-    if (result.ok) {
-      // Save successful generation to Firestore
-      const imageId = generateId();
-      const now = Timestamp.now();
-
-      try {
-        // Convert base64 to blob and upload to Firebase Storage
-        const base64DataUrl = result.base64Image;
-        // Extract base64 part from data URL (remove "data:image/png;base64," prefix)
-        const base64Data = base64DataUrl.split(',')[1];
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-
-        const bucket = getAdminStorage().bucket();
-        const fileName = `users/${decoded.uid}/images/${imageId}.png`;
-        const file = bucket.file(fileName);
-
-        await file.save(imageBuffer, {
-          metadata: {
-            contentType: 'image/png',
-            metadata: {
-              firebaseStorageDownloadTokens: crypto.randomUUID(), // Firebase download token
-            }
-          },
-        });
-
-        // Get signed URL (valid for 1 year)
-        // Use signed URL instead of makePublic() to avoid "Uniform bucket-level access" errors
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 365 * 24 * 60 * 60 * 1000, // 1 year
-        });
-
-        const publicUrl = signedUrl;
-
-        console.log(`🔍 Debug publicUrl: ${publicUrl} (length: ${publicUrl.length})`);
-        console.log(`🔍 Debug base64DataUrl length: ${base64DataUrl.length}`);
-        console.log(`🔍 Debug payload.options:`, JSON.stringify(payload.options).length, "bytes");
-
-        const imageDocData = {
-          mode: payload.mode,
-          status: "completed",
-          promptMeta: {
-            rawPrompt: payload.prompt,
-            refinedPrompt: payload.refinedPrompt || null,
-            negativePrompt: payload.negativePrompt || null,
-            aspectRatio: payload.options?.aspectRatio || "original"
-          },
-          imageUrl: publicUrl,
-          originalImageUrl: null,
-          thumbnailUrl: null,
-          diff: null,
-          metadata: filterLargeBase64FromOptions(payload.options || {}),
-          model: result.modelId,
-          costCredits: 1,
-          createdAt: now,
-          updatedAt: now,
-          createdAtIso: now.toDate().toISOString(),
-          updatedAtIso: now.toDate().toISOString()
-        };
-
-        console.log(`🔍 Debug imageDocData serialized length: ${JSON.stringify(imageDocData).length} bytes`);
-
-        await getAdminDb()
-          .collection("users")
-          .doc(decoded.uid)
-          .collection("images")
-          .doc(imageId)
-          .set(imageDocData);
-
-        console.log(`💾 Image saved to Storage and Firestore: ${publicUrl}`);
-      } catch (firestoreError) {
-        console.error("Failed to save image to Firestore:", firestoreError);
-        // Continue without failing the request
-      }
-
-      return NextResponse.json({ ok: true, base64Image: result.base64Image, model: result.modelId, id: imageId });
-    }
-
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: result.reason,
-        imageUrl: "/samples/sample-ballerina-after.svg"
-      },
-      { status: 200 }
-    );
+    return result;
   } catch (error) {
-    console.error("/api/generate error", error);
-    if (error instanceof MissingServiceAccountKeyError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          reason: "missing service account",
-          imageUrl: "/samples/sample-ballerina-after.svg"
-        },
-        { status: 200 }
-      );
-    }
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: error instanceof Error ? error.message : "알 수 없는 오류",
-        imageUrl: "/samples/sample-ballerina-after.svg"
-      },
-      { status: 200 }
-    );
+    idempotencyCache.delete(key);
+    throw error;
   }
 }
 
-function buildPrompt(payload: z.infer<typeof requestSchema>, hasReferenceImage: boolean) {
+async function executeGenerate(request: NextRequest, payload: GeneratePayload): Promise<GenerateResult> {
+  const referenceSettings = getReferenceImageSettings(payload.options);
+  const referenceParts: CodexContentPart[] = [];
+  const requestOrigin = request.nextUrl.origin;
+
+  const primary = await resolveReferenceSource(referenceSettings.primary, requestOrigin);
+  if (primary) {
+    referenceParts.push({
+      type: "input_image",
+      image_url: `data:${primary.mimeType};base64,${primary.data}`
+    });
+  }
+
+  for (const entry of referenceSettings.gallery) {
+    if (referenceParts.length >= MAX_REFERENCE_IMAGES) break;
+    const resolved = await resolveReferenceSource(entry, requestOrigin);
+    if (resolved) {
+      referenceParts.push({
+        type: "input_image",
+        image_url: `data:${resolved.mimeType};base64,${resolved.data}`
+      });
+    }
+  }
+
+  const promptText = buildPrompt(payload, referenceParts.length > 0);
+
+  const userContent: CodexContentPart[] = [
+    ...referenceParts,
+    { type: "input_text", text: promptText }
+  ];
+
+  const requestedSize = payload.options?.imageSize ?? payload.options?.aspectRatio;
+  const imageOptions: CodexImageOptions = {
+    quality: mapQuality(payload.options?.quality),
+    size: mapSize(requestedSize),
+    moderation: mapModeration(payload.options?.moderation),
+    output_format: mapFormat(payload.options?.format)
+  };
+
+  const count = clampCount(payload.options?.count);
+
+  const callOnce = () =>
+    callCodexResponses({
+      mode: "image",
+      input: [
+        {
+          role: "system",
+          content:
+            "You generate images for the user using the image_generation tool. Use the supplied prompt and any reference images. Do not narrate; just produce the image."
+        },
+        { role: "user", content: userContent }
+      ],
+      imageOptions,
+      logTag: "api/generate"
+    });
+
+  const settled = await Promise.allSettled(Array.from({ length: count }, () => callOnce()));
+  const allImages: Array<{ b64: string; mimeType: string; revisedPrompt?: string }> = [];
+  const errors: string[] = [];
+  const errorStatuses: number[] = [];
+  for (const entry of settled) {
+    if (entry.status === "fulfilled") {
+      for (const img of entry.value.images) {
+        allImages.push(img);
+      }
+    } else {
+      const reason = entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
+      errors.push(reason);
+      if (entry.reason instanceof CodexAuthError) {
+        errorStatuses.push(401);
+      } else if (entry.reason instanceof CodexResponseError) {
+        errorStatuses.push(mapCodexErrorStatus(entry.reason.status));
+      }
+    }
+  }
+
+  if (!allImages.length) {
+    return {
+      status: chooseFailureStatus(errorStatuses),
+      body: {
+        ok: false,
+        reason: errors[0] || "Codex가 이미지를 반환하지 않았습니다."
+      }
+    };
+  }
+
+  type Persisted = {
+    id: string;
+    imageUrl: string;
+    base64Image: null;
+    storagePath: string;
+    revisedPrompt: string | null;
+    mimeType: string;
+  };
+  const persistedSettled = await Promise.allSettled(
+    allImages.map(async (img): Promise<Persisted> => {
+      const id = generateId();
+      const buffer = Buffer.from(img.b64, "base64");
+      const saved = await saveImageBuffer(id, buffer, img.mimeType);
+      return {
+        id,
+        imageUrl: `/api/images/${id}`,
+        base64Image: null,
+        storagePath: saved.relativePath,
+        revisedPrompt: img.revisedPrompt ?? null,
+        mimeType: img.mimeType
+      };
+    })
+  );
+  const persisted: Persisted[] = [];
+  const persistErrors: string[] = [];
+  for (const entry of persistedSettled) {
+    if (entry.status === "fulfilled") persisted.push(entry.value);
+    else persistErrors.push(entry.reason instanceof Error ? entry.reason.message : String(entry.reason));
+  }
+  if (!persisted.length) {
+    console.error("/api/generate disk persistence failed for all images", persistErrors);
+    return {
+      status: 500,
+      body: {
+        ok: false,
+        reason: persistErrors[0] || "이미지를 디스크에 저장하지 못했습니다."
+      }
+    };
+  }
+
+  const primaryImage = persisted[0];
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      // 호환을 위해 첫 이미지를 최상위에 펼쳐 두고, 나머지는 images 배열로 제공
+      imageUrl: primaryImage.imageUrl,
+      base64Image: primaryImage.base64Image,
+      storagePath: primaryImage.storagePath,
+      model: "gpt-image-2",
+      id: primaryImage.id,
+      revisedPrompt: primaryImage.revisedPrompt,
+      images: persisted,
+      partial: errors.length > 0 ? errors : undefined
+    }
+  };
+}
+
+function generateErrorResult(error: unknown): GenerateResult {
+  if (error instanceof z.ZodError) {
+    return {
+      status: 400,
+      body: { ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues }
+    };
+  }
+  if (error instanceof CodexAuthError) {
+    return {
+      status: 401,
+      body: { ok: false, reason: error.message, code: error.code }
+    };
+  }
+  if (error instanceof ReferenceImageError) {
+    return {
+      status: 400,
+      body: { ok: false, reason: error.message }
+    };
+  }
+  if (error instanceof CodexResponseError) {
+    console.error("/api/generate Codex error", error.status, error.body.slice(0, 500));
+    return {
+      status: mapCodexErrorStatus(error.status),
+      body: {
+        ok: false,
+        reason: `Codex 호출 실패 (${error.status})`
+      }
+    };
+  }
+  console.error("/api/generate error", error);
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      reason: error instanceof Error ? error.message : "알 수 없는 오류"
+    }
+  };
+}
+
+function mapCodexErrorStatus(status: number): number {
+  if (status === 401 || status === 403 || status === 429) {
+    return status;
+  }
+  if (status >= 400 && status < 500) {
+    return 400;
+  }
+  return 502;
+}
+
+function chooseFailureStatus(statuses: number[]): number {
+  if (statuses.includes(401)) return 401;
+  if (statuses.includes(403)) return 403;
+  if (statuses.includes(429)) return 429;
+  return statuses[0] ?? 502;
+}
+
+function cleanupIdempotencyCache(now: number): void {
+  for (const [key, entry] of idempotencyCache.entries()) {
+    if (entry.expiresAt <= now && !entry.promise) {
+      idempotencyCache.delete(key);
+    }
+  }
+}
+
+function createPayloadFingerprint(payload: GeneratePayload): string {
+  const options = payload.options ? { ...payload.options } : undefined;
+  if (options) {
+    delete options.idempotencyKey;
+  }
+  return createHash("sha256")
+    .update(JSON.stringify({ ...payload, options }))
+    .digest("hex");
+}
+
+function isCacheableGenerationResult(result: GenerateResult): boolean {
+  return result.status >= 200 && result.status < 300 && result.body.ok === true;
+}
+
+function buildPrompt(payload: GeneratePayload, hasReferenceImage: boolean) {
   const segments = [payload.refinedPrompt || payload.prompt];
 
   if (payload.negativePrompt) {
@@ -393,252 +461,39 @@ function buildPrompt(payload: z.infer<typeof requestSchema>, hasReferenceImage: 
   return segments.join("\n");
 }
 
-
-
-interface GeminiResponse {
-  generatedImages?: Array<{
-    image?: {
-      mimeType?: string;
-      data?: string;
-    };
-    revisedPrompt?: string;
-  }>;
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-        inlineData?: {
-          mimeType?: string;
-          data?: string;
-        };
-      }>;
-    };
-  }>;
-  error?: {
-    message?: string;
-    status?: string;
-  };
-}
-
-type ModelResult = ModelSuccess | ModelError;
-
-interface ModelSuccess {
-  ok: true;
-  base64Image: string;
-  modelId: string;
-}
-
-interface ModelError {
-  ok: false;
-  reason: string;
-  status?: number;
-  modelId: string;
-}
-
-async function callModel(
-  modelId: string,
-  payload: z.infer<typeof requestSchema>,
-  apiKey: string
-): Promise<ModelResult> {
-  const referenceSettings = getReferenceImageSettings(payload.options);
-
-  const resolveReferenceSource = async (
-    entry: ReferenceSource | null
-  ): Promise<{ data: string; mimeType: string } | null> => {
-    if (!entry) {
-      return null;
-    }
-
-    if ('data' in entry) {
-      return { data: entry.data, mimeType: entry.mimeType ?? DEFAULT_IMAGE_MIME };
-    }
-
-    if ('url' in entry) {
-      try {
-        return await fetchImageAsBase64(entry.url);
-      } catch (error) {
-        console.warn("Failed to fetch reference image", error);
-        return null;
-      }
-    }
-
-    return null;
-  };
-
-  let referenceImage = await resolveReferenceSource(referenceSettings.primary);
-  const additionalReferences: Array<{ data: string; mimeType: string }> = [];
-
-  for (const entry of referenceSettings.gallery) {
-    const resolved = await resolveReferenceSource(entry);
-    if (resolved) {
-      additionalReferences.push(resolved);
-    }
-  }
-
-  if (!referenceImage && additionalReferences.length) {
-    referenceImage = additionalReferences.shift() ?? null;
-  }
-
-  const effectiveModelId = referenceImage && isImageModel(modelId) ? FALLBACK_IMAGE_MODEL : modelId;
-  const useImagenEndpoint = isImageModel(effectiveModelId) && !referenceImage;
-  const methodPath = useImagenEndpoint ? "generateImage" : "generateContent";
-  const url = `${GEMINI_ENDPOINT}/${effectiveModelId}:${methodPath}?key=${apiKey}`;
-
-  const promptText = buildPrompt(payload, Boolean(referenceImage || additionalReferences.length));
-
-  const requestedOutputMime = getRequestedOutputMime(payload.options?.outputMimeType, useImagenEndpoint);
-  const resolvedOutputMime = useImagenEndpoint ? requestedOutputMime ?? DEFAULT_IMAGE_MIME : undefined;
-  const generationConfig = buildGenerationConfig(
-    payload.options?.generationConfig,
-    useImagenEndpoint ? undefined : requestedOutputMime
-  );
-
-  const contentParts: Array<Record<string, unknown>> = [{ text: promptText }];
-  if (referenceImage) {
-    contentParts.push({
-      inlineData: {
-        mimeType: referenceImage.mimeType ?? DEFAULT_IMAGE_MIME,
-        data: referenceImage.data
-      }
-    });
-  }
-  for (const extraReference of additionalReferences) {
-    contentParts.push({
-      inlineData: {
-        mimeType: extraReference.mimeType ?? DEFAULT_IMAGE_MIME,
-        data: extraReference.data
-      }
-    });
-  }
-
-  const requestBody = useImagenEndpoint
-    ? removeUndefined({
-        prompt: { text: promptText },
-        negativePrompt: payload.negativePrompt ? { text: payload.negativePrompt } : undefined,
-        outputMimeType: resolvedOutputMime ?? DEFAULT_IMAGE_MIME,
-        aspectRatio: payload.options?.aspectRatio,
-        safetyFilterLevel: payload.options?.safetyFilterLevel,
-        numberOfImages: payload.options?.numberOfImages ?? 1
-      })
-    : removeUndefined({
-        contents: [
-          {
-            role: "user",
-            parts: contentParts
-          }
-        ],
-        safetySettings: payload.options?.safetySettings,
-        generationConfig
-      });
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Request timeout - 이미지 생성 요청이 시간 초과되었습니다.');
-    }
-    throw error;
-  }
-
-  if (!response.ok) {
-    const errorBody = await parseErrorBody(response);
-    const reason =
-      errorBody ??
-      (response.status === 404
-        ? `모델 "${modelId}" 을(를) 찾을 수 없습니다. Google AI Studio에서 모델 이름과 접근 권한을 다시 확인해주세요.`
-        : `Gemini API error: ${response.status}`);
-    console.error("Gemini API error", response.status, errorBody);
-    return { ok: false, reason, status: response.status, modelId: effectiveModelId };
-  }
-
-  const data = (await response.json()) as GeminiResponse;
-  const base64Image = extractBase64Image(data);
-
-  if (!base64Image) {
-    return {
-      ok: false,
-      reason: data.error?.message ?? data.error?.status ?? "이미지 데이터를 찾을 수 없습니다.",
-      modelId: effectiveModelId
-    };
-  }
-
-  return { ok: true, base64Image, modelId: effectiveModelId };
-}
-
-function extractBase64Image(response: GeminiResponse) {
-  for (const item of response.generatedImages ?? []) {
-    const mime = item.image?.mimeType ?? "image/png";
-    if (item.image?.data) {
-      return `data:${mime};base64,${item.image.data}`;
-    }
-  }
-
-  for (const candidate of response.candidates ?? []) {
-    for (const part of candidate.content?.parts ?? []) {
-      if (part.inlineData?.mimeType?.startsWith("image/")) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
-      if (part.text?.startsWith("data:image")) {
-        return part.text;
-      }
-    }
-  }
-  return null;
-}
-
-type ReferenceSource = { data: string; mimeType?: string } | { url: string };
-
 function getReferenceImageSettings(options: unknown): {
   primary: ReferenceSource | null;
   gallery: ReferenceSource[];
 } {
   const normalizeStringEntry = (value: string): ReferenceSource | null => {
-    if (!value) {
-      return null;
-    }
+    const trimmed = value.trim();
+    if (!trimmed) return null;
 
-    if (value.startsWith("data:")) {
-      const commaIndex = value.indexOf(',');
-      if (commaIndex === -1) {
-        return null;
-      }
-      const header = value.slice(5, commaIndex);
-      const dataPart = value.slice(commaIndex + 1);
-      const parts = header.split(';');
+    if (trimmed.startsWith("data:")) {
+      const commaIndex = trimmed.indexOf(",");
+      if (commaIndex === -1) return null;
+      const header = trimmed.slice(5, commaIndex);
+      const dataPart = trimmed.slice(commaIndex + 1);
+      const parts = header.split(";");
       const mimeType = parts[0] || DEFAULT_IMAGE_MIME;
       const isBase64 = parts.some(part => part.toLowerCase() === "base64");
       if (!isBase64) {
         console.warn("Data URL reference image provided without base64 encoding; skipping.");
         return null;
       }
+      if (!isAllowedImageMime(mimeType) || estimatedBase64Bytes(dataPart) > MAX_REFERENCE_BYTES) {
+        console.warn("Data URL reference image is not an allowed image or exceeds the size limit; skipping.");
+        return null;
+      }
       return { data: dataPart, mimeType };
     }
 
-    return { url: value };
+    return { url: trimmed };
   };
 
   const normalizeEntry = (entry: unknown): ReferenceSource | null => {
-    if (!entry) {
-      return null;
-    }
-
-    if (typeof entry === "string") {
-      return normalizeStringEntry(entry);
-    }
+    if (!entry) return null;
+    if (typeof entry === "string") return normalizeStringEntry(entry);
 
     if (typeof entry === "object") {
       const objectEntry = entry as Record<string, unknown>;
@@ -647,15 +502,15 @@ function getReferenceImageSettings(options: unknown): {
       const url = typeof objectEntry.url === "string" ? objectEntry.url : undefined;
 
       if (data) {
-        if (data.startsWith("data:")) {
-          return normalizeStringEntry(data);
+        if (data.startsWith("data:")) return normalizeStringEntry(data);
+        if (!isAllowedImageMime(mimeType ?? DEFAULT_IMAGE_MIME) || estimatedBase64Bytes(data) > MAX_REFERENCE_BYTES) {
+          console.warn("Reference image data is not an allowed image or exceeds the size limit; skipping.");
+          return null;
         }
         return { data, mimeType };
       }
 
-      if (url) {
-        return normalizeStringEntry(url);
-      }
+      if (url) return normalizeStringEntry(url);
     }
 
     return null;
@@ -683,65 +538,155 @@ function getReferenceImageSettings(options: unknown): {
   return { primary, gallery };
 }
 
-async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch reference image (${response.status})`);
-  }
+async function resolveReferenceSource(
+  entry: ReferenceSource | null,
+  requestOrigin: string
+): Promise<{ data: string; mimeType: string } | null> {
+  if (!entry) return null;
 
-  const arrayBuffer = await response.arrayBuffer();
-  const mimeType = response.headers.get("content-type") ?? DEFAULT_IMAGE_MIME;
-  const data = Buffer.from(arrayBuffer).toString("base64");
-
-  return { data, mimeType };
-}
-
-async function parseErrorBody(response: Response) {
-  try {
-    const cloneForJson = response.clone();
-    const data = await cloneForJson.json();
-    return data.error?.message ?? JSON.stringify(data);
-  } catch (jsonError) {
-    try {
-      const text = await response.text();
-      return text || null;
-    } catch (textError) {
-      console.error("Failed to parse Gemini error body", jsonError, textError);
+  if ("data" in entry) {
+    const mimeType = entry.mimeType ?? DEFAULT_IMAGE_MIME;
+    if (!isAllowedImageMime(mimeType) || estimatedBase64Bytes(entry.data) > MAX_REFERENCE_BYTES) {
       return null;
     }
-  }
-}
-
-function removeUndefined<T extends Record<string, unknown>>(obj: T): T {
-  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
-}
-
-function isImageModel(modelId: string) {
-  return IMAGE_MODEL_PREFIXES.some(prefix => modelId.startsWith(prefix) || modelId.includes(`/${prefix}`));
-}
-
-function getRequestedOutputMime(mime: unknown, isImagenRequest: boolean) {
-  if (typeof mime !== "string") {
-    return undefined;
+    return { data: entry.data, mimeType };
   }
 
-  if (isImagenRequest) {
-    return mime.startsWith("image/") ? mime : undefined;
+  if ("url" in entry) {
+    try {
+      return await fetchImageAsBase64(entry.url, requestOrigin);
+    } catch (error) {
+      throw new ReferenceImageError(error instanceof Error ? error.message : "Reference image를 읽을 수 없습니다.");
+    }
   }
 
-  return TEXT_RESPONSE_MIME_SET.has(mime) ? mime : undefined;
+  return null;
 }
 
-function buildGenerationConfig(rawConfig: unknown, requestedOutputMime: string | undefined) {
-  const baseConfig =
-    rawConfig && typeof rawConfig === "object"
-      ? { ...(rawConfig as Record<string, unknown>) }
-      : {};
-
-  if (requestedOutputMime && TEXT_RESPONSE_MIME_SET.has(requestedOutputMime)) {
-    baseConfig.responseMimeType = requestedOutputMime;
+async function fetchImageAsBase64(url: string, requestOrigin: string): Promise<{ data: string; mimeType: string }> {
+  // 보안 정책: server-side에서 임의 URL을 fetch하면 SSRF/내부망 접근/대용량 메모리 공격이 가능하다.
+  // 따라서 이 함수가 다루는 URL은 우리 로컬 라우트(/api/images/<id>)만 허용.
+  // data: URL은 호출자가 normalizeStringEntry에서 미리 분해하므로 여기까지 오지 않는다.
+  const id = extractLocalImageId(url, requestOrigin);
+  const result = await readImageById(id);
+  if (!result) throw new Error(`Reference image not found locally: ${id}`);
+  if (!isAllowedImageMime(result.mimeType)) {
+    throw new Error(`Reference image has unsupported mime type: ${result.mimeType}`);
+  }
+  if (result.bytes > MAX_REFERENCE_BYTES) {
+    throw new Error("Reference image exceeds 25MB limit");
   }
 
-  const cleaned = removeUndefined(baseConfig);
-  return Object.keys(cleaned).length ? cleaned : undefined;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  await new Promise<void>((resolve, reject) => {
+    result.stream.on("data", (chunk: string | Buffer) => {
+      const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      total += buf.byteLength;
+      if (total > MAX_REFERENCE_BYTES) {
+        reject(new Error("Reference image exceeds 25MB limit"));
+        return;
+      }
+      chunks.push(buf);
+    });
+    result.stream.on("end", () => resolve());
+    result.stream.on("error", err => reject(err));
+  });
+  const data = Buffer.concat(chunks).toString("base64");
+  return { data, mimeType: result.mimeType };
+}
+
+function extractLocalImageId(value: string, requestOrigin: string): string {
+  let parsed: URL;
+  try {
+    parsed = value.startsWith("/") ? new URL(value, requestOrigin) : new URL(value);
+  } catch {
+    throw new Error("Reference URL이 허용되지 않습니다. 로컬 /api/images/<id> 또는 data URL만 사용 가능합니다.");
+  }
+
+  if (parsed.origin !== requestOrigin) {
+    throw new Error("Reference URL origin이 현재 앱 origin과 다릅니다.");
+  }
+
+  const match = parsed.pathname.match(/^\/api\/images\/([A-Za-z0-9_\-]+)$/);
+  if (!match) {
+    throw new Error("Reference URL path가 허용되지 않습니다. /api/images/<id>만 사용할 수 있습니다.");
+  }
+  return match[1];
+}
+
+function isAllowedImageMime(mimeType: string): boolean {
+  return mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
+}
+
+function estimatedBase64Bytes(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const padding = trimmed.endsWith("==") ? 2 : trimmed.endsWith("=") ? 1 : 0;
+  return Math.ceil((trimmed.length * 3) / 4) - padding;
+}
+
+// 명시적인 픽셀 크기 또는 종횡비 별칭을 모두 받아준다.
+const SIZE_ALIASES: Record<string, string> = {
+  "1:1": "1024x1024",
+  "16:9": "1824x1024",
+  "9:16": "1024x1824",
+  "4:3": "1360x1024",
+  "3:4": "1024x1360",
+  "3:2": "1536x1024",
+  "2:3": "1024x1536",
+  "2k-1:1": "2048x2048",
+  "2k-16:9": "2048x1152",
+  "2k-9:16": "1152x2048",
+  "4k-16:9": "3824x2160",
+  "4k-9:16": "2160x3824",
+  original: "1024x1024",
+  "": "1024x1024"
+};
+
+const ALLOWED_PIXEL_SIZES = new Set([
+  "1024x1024",
+  "1536x1024",
+  "1024x1536",
+  "1360x1024",
+  "1024x1360",
+  "1824x1024",
+  "1024x1824",
+  "2048x2048",
+  "2048x1152",
+  "1152x2048",
+  "3824x2160",
+  "2160x3824"
+]);
+
+function mapSize(input: unknown): CodexImageOptions["size"] {
+  if (typeof input !== "string") return "1024x1024";
+  const trimmed = input.trim();
+  if (trimmed === "auto") return "auto";
+  if (SIZE_ALIASES[trimmed]) return SIZE_ALIASES[trimmed];
+  const normalized = trimmed.replace(/[^0-9x]/gi, "").toLowerCase();
+  if (ALLOWED_PIXEL_SIZES.has(normalized)) return normalized;
+  return "1024x1024";
+}
+
+function mapQuality(quality: unknown): CodexImageOptions["quality"] {
+  if (quality === "low" || quality === "medium" || quality === "high" || quality === "auto") {
+    return quality;
+  }
+  return "medium";
+}
+
+function mapModeration(value: unknown): CodexImageOptions["moderation"] {
+  return value === "auto" ? "auto" : "low";
+}
+
+function mapFormat(value: unknown): CodexImageOptions["output_format"] | undefined {
+  if (value === "png" || value === "jpeg" || value === "webp") return value;
+  return undefined;
+}
+
+function clampCount(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(4, Math.floor(n)));
 }
