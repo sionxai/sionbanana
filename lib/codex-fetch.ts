@@ -8,8 +8,8 @@ export { CodexAuthError };
 const CODEX_RESPONSES_ENDPOINT =
   process.env.CODEX_RESPONSES_ENDPOINT || "https://chatgpt.com/backend-api/codex/responses";
 
-export const DEFAULT_TEXT_MODEL = process.env.DEFAULT_TEXT_MODEL || "gpt-5.4-mini";
-export const DEFAULT_IMAGE_MODEL = process.env.DEFAULT_IMAGE_MODEL || "gpt-5.4-mini";
+export const DEFAULT_TEXT_MODEL = process.env.DEFAULT_TEXT_MODEL || "gpt-5.5";
+export const DEFAULT_IMAGE_MODEL = process.env.DEFAULT_IMAGE_MODEL || "gpt-5.5";
 
 export type CodexContentPart =
   | { type: "input_text"; text: string }
@@ -131,6 +131,10 @@ export async function callCodexResponses(options: CodexCallOptions): Promise<Cod
     requestBody.response_format = options.responseFormat;
   }
 
+  if (options.logTag) {
+    console.log(`[${options.logTag}] codex request: model=${requestBody.model}, tools=${tools ? "image_generation" : "none"}`);
+  }
+
   const response = await fetch(CODEX_RESPONSES_ENDPOINT, {
     method: "POST",
     headers: {
@@ -247,6 +251,9 @@ async function parseCodexStream(
     }
 
     if (event === "response.failed" || payload.type === "response.failed") {
+      if (logTag) {
+        console.error(`[${logTag}] response.failed payload:`, JSON.stringify(payload).slice(0, 1500));
+      }
       const message =
         ((payload.response as Record<string, unknown>)?.error as Record<string, unknown>)?.message ??
         "응답이 실패했습니다.";

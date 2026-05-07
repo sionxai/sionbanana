@@ -11,6 +11,12 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DiffSlider } from "@/components/studio/diff-slider";
+import {
+  DEFAULT_GENERATION_OPTIONS,
+  GenerationOptionsPanel,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import type { AspectRatioPreset, GenerationMode } from "@/lib/types";
 import {
@@ -32,18 +38,16 @@ import { callGenerateApi } from "@/hooks/use-generate-image";
 import { cn } from "@/lib/utils";
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
-import { uploadUserImage } from "@/lib/firebase/storage";
-import { saveGeneratedImageDoc } from "@/lib/firebase/firestore";
-import { shouldUseFirestore } from "@/lib/env";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
-import { mergeHistoryRecords, broadcastHistoryUpdate, persistRecordsMerge } from "@/components/studio/history-sync";
+import { mergeHistoryRecords, broadcastHistoryUpdate, persistRecordsMerge, removeRecordFromLocalStorage } from "@/components/studio/history-sync";
 import { PresetLibraryProvider } from "@/components/studio/preset-library-context";
-import { deleteUserImage } from "@/lib/firebase/storage";
-import { deleteGeneratedImageDoc, updateGeneratedImageDoc } from "@/lib/firebase/firestore";
 
 const MAX_BATCH_ITEMS = 30;
+const BATCH_GENERATE_CONCURRENCY = 10;
+const INITIAL_HISTORY_VISIBLE_COUNT = 36;
+const HISTORY_VISIBLE_INCREMENT = 36;
 
 const BATCH_MODES: Array<{
   id: GenerationMode | "presets";
@@ -75,9 +79,39 @@ interface BatchItem {
   status: "대기" | "진행 중" | "완료" | "실패";
   result?: {
     image?: string;
+    fileId?: string;
+    images?: Array<{ id: string; image: string }>;
     completedAt?: string;
   };
   errorMessage?: string;
+}
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
+
+function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): string | null {
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? null;
+}
+
+function getRecordPromptText(record?: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
+}
+
+function BatchDiffItem({ beforeSrc, afterSrc }: { beforeSrc: string; afterSrc?: string }) {
+  const { transform, bind, isPanning } = useImagePanZoom();
+  return (
+    <DiffSlider
+      beforeSrc={beforeSrc}
+      afterSrc={afterSrc}
+      labelBefore="원본"
+      labelAfter="결과"
+      transform={transform}
+      panZoomBind={bind}
+      isPanning={isPanning}
+    />
+  );
 }
 
 function BatchStudioShellInner() {
@@ -113,6 +147,7 @@ function BatchStudioShellInner() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProcessingIndex, setCurrentProcessingIndex] = useState<number>(-1);
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 });
+  const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
 
   // 로컬 스토리지 키
   const BATCH_STORAGE_KEY = 'batch-studio-items';
@@ -122,6 +157,9 @@ function BatchStudioShellInner() {
   const { records, loading } = useGeneratedImages();
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
+  const [historyVisibleCount, setHistoryVisibleCount] = useState(INITIAL_HISTORY_VISIBLE_COUNT);
+  const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   // 페이지 이동 시 상태 지속성을 위한 로컬 스토리지 동기화
   useEffect(() => {
@@ -156,7 +194,15 @@ function BatchStudioShellInner() {
     !record.id.startsWith('reference-slot-')
   ), [mergedRecords]);
 
-  const historyRecordsLimited = useMemo(() => historyRecords.slice(0, 30), [historyRecords]);
+  const filteredHistoryRecords = useMemo(
+    () => historyRecords.filter(record => historyView === "all" || record.metadata?.favorite),
+    [historyRecords, historyView]
+  );
+  const visibleHistoryRecords = useMemo(
+    () => filteredHistoryRecords.slice(0, historyVisibleCount),
+    [filteredHistoryRecords, historyVisibleCount]
+  );
+  const hasMoreHistoryRecords = historyVisibleCount < filteredHistoryRecords.length;
 
   // 액션 핸들러 함수들
   const handleToggleFavorite = async (recordId: string) => {
@@ -183,33 +229,12 @@ function BatchStudioShellInner() {
       return [updatedRecord, ...prev];
     });
 
-    if (user && shouldUseFirestore) {
-      try {
-        await updateGeneratedImageDoc(user.uid, recordId, {
-          metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-        });
-
-        // 다른 페이지에 변경사항 브로드캐스트
-        broadcastHistoryUpdate(mergedRecords.map(record =>
-          record.id === recordId ? updatedRecord : record
-        ), "batch-studio");
-      } catch (error) {
-        console.error("즐겨찾기 업데이트 실패:", error);
-        toast.error("즐겨찾기 상태를 변경하는 중 오류가 발생했습니다.");
-        // 오류 시 로컬 상태 롤백
-        setLocalRecords(prev => prev.map(record =>
-          record.id === recordId ? target : record
-        ));
-        return;
-      }
-    }
-
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
   const handleDownloadRecord = async (recordId: string) => {
     const target = mergedRecords.find(record => record.id === recordId);
-    const url = target?.imageUrl ?? target?.originalImageUrl;
+    const url = getRecordGeneratedImageUrl(target);
     if (!target || !url) {
       toast.error("다운로드할 이미지를 찾을 수 없습니다.");
       return;
@@ -256,19 +281,15 @@ function BatchStudioShellInner() {
       return;
     }
 
-    if (user && shouldUseFirestore) {
+    setLocalRecords(prev => prev.filter(record => record.id !== recordId));
+    removeRecordFromLocalStorage(recordId);
+    const localImageId = getLocalImageId(target.imageUrl) ?? recordId;
+    if (target.imageUrl?.startsWith("/api/images/")) {
       try {
-        await deleteGeneratedImageDoc(user.uid, recordId);
-        if (target.imageUrl && !target.imageUrl.startsWith("data:")) {
-          await deleteUserImage(user.uid, recordId);
-        }
+        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
       } catch (error) {
-        console.error(error);
-        toast.error("이미지를 삭제하는 중 오류가 발생했습니다.");
-        return;
+        console.warn("[BatchStudio] Failed to delete local image file", error);
       }
-    } else {
-      setLocalRecords(prev => prev.filter(record => record.id !== recordId));
     }
 
     toast.success("이미지가 삭제되었습니다.");
@@ -278,6 +299,51 @@ function BatchStudioShellInner() {
     // 배치 생성에서는 기준이미지 등록 기능을 비활성화하거나 간단하게 처리
     toast.info("배치 생성에서는 기준이미지 등록 기능을 지원하지 않습니다.");
   };
+
+  const handlePreviewRecord = useCallback((record: GeneratedImageDocument) => {
+    setPreviewRecord(record);
+    previewZoom.reset();
+  }, [previewZoom]);
+
+  const closePreviewRecord = useCallback(() => {
+    setPreviewRecord(null);
+    previewZoom.reset();
+  }, [previewZoom]);
+
+  const handleCopyPreviewPrompt = useCallback(async () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!promptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(promptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  }, [previewRecord]);
+
+  const handleDownloadPreviewRecord = useCallback(() => {
+    if (!previewRecord) {
+      return;
+    }
+    void handleDownloadRecord(previewRecord.id);
+  }, [previewRecord]);
+
+  const handleDeletePreviewRecord = useCallback(async () => {
+    if (!previewRecord) {
+      return;
+    }
+    const confirmed = window.confirm("이 이미지를 삭제하시겠습니까?");
+    if (!confirmed) {
+      return;
+    }
+    const recordId = previewRecord.id;
+    closePreviewRecord();
+    await handleDeleteRecord(recordId);
+  }, [closePreviewRecord, previewRecord]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -554,17 +620,20 @@ function BatchStudioShellInner() {
     toast.success(`${completedItems.length}개의 변형 이미지를 다운로드합니다.`);
   };
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerateSequentialLegacy = useCallback(async () => {
+    const rawPrompt = prompt.trim();
+    const refinedPromptText = refinedPrompt.trim();
+    const effectivePrompt = refinedPromptText || rawPrompt;
+
     console.log("🚀 [Batch Generate] 변형 생성 시작!", {
-      prompt: prompt.trim(),
-      refinedPrompt: refinedPrompt.trim(),
+      prompt: rawPrompt,
+      refinedPrompt: refinedPromptText,
       batchItemsCount: batchItems.length,
       isProcessing,
       activeMode
     });
 
-    const basePrompt = refinedPrompt.trim() || prompt.trim();
-    if (!basePrompt) {
+    if (!effectivePrompt) {
       console.warn("⚠️ [Batch Generate] 프롬프트가 비어있음");
       toast.error("프롬프트를 입력해주세요.");
       return;
@@ -645,7 +714,12 @@ function BatchStudioShellInner() {
         referenceImage: dataUrl,
         aspectRatio,
         batchItemId: item.id,
-        batchItemName: item.name
+        batchItemName: item.name,
+        quality: imageGenOptions.quality,
+        imageSize: imageGenOptions.size,
+        format: imageGenOptions.format,
+        moderation: imageGenOptions.moderation,
+        count: imageGenOptions.count
       };
 
       if (Object.keys(lightingPayload).length > 0) {
@@ -657,7 +731,9 @@ function BatchStudioShellInner() {
 
       try {
         console.log(`🚀 [Batch Generate] API 호출 시작: ${item.name}`, {
-          prompt: basePrompt,
+          prompt: rawPrompt,
+          refinedPrompt: refinedPromptText,
+          effectivePrompt,
           mode: activeMode,
           hasCamera: !!cameraPayload,
           hasLighting: Object.keys(lightingPayload).length > 0,
@@ -665,8 +741,8 @@ function BatchStudioShellInner() {
         });
 
         const response = await callGenerateApi({
-          prompt: basePrompt,
-          refinedPrompt: refinedPrompt.trim() || undefined,
+          prompt: rawPrompt || effectivePrompt,
+          refinedPrompt: refinedPromptText || undefined,
           negativePrompt: negativePrompt.trim() || undefined,
           mode: activeMode,
           camera: cameraPayload,
@@ -678,7 +754,7 @@ function BatchStudioShellInner() {
           reason: response.reason,
           hasBase64Image: !!response.base64Image,
           hasImageUrl: !!response.imageUrl,
-          model: (response as any).model || "gemini-nano-banana"
+          model: (response as any).model || "gpt-image-2"
         });
 
         if (!response.ok) {
@@ -715,8 +791,28 @@ function BatchStudioShellInner() {
           continue;
         }
 
-        const base64 = response.imageUrl ?? response.base64Image;
-        if (!base64) {
+        const generatedImages =
+          Array.isArray(response.images) && response.images.length > 0
+            ? response.images
+                .map((image, imageIndex) => ({
+                  id:
+                    typeof image.id === "string" && image.id.length > 0
+                      ? image.id
+                      : getLocalImageId(image.imageUrl) ?? `${item.id}-${imageIndex + 1}`,
+                  image: image.imageUrl ?? image.base64Image ?? null
+                }))
+                .filter((image): image is { id: string; image: string } => Boolean(image.image))
+            : [
+                {
+                  id:
+                    typeof response.id === "string" && response.id.length > 0
+                      ? response.id
+                      : getLocalImageId(response.imageUrl ?? response.base64Image) ?? item.id,
+                  image: response.imageUrl ?? response.base64Image ?? null
+                }
+              ].filter((image): image is { id: string; image: string } => Boolean(image.image));
+        const primaryImage = generatedImages[0];
+        if (!primaryImage) {
           const errorMsg = "이미지 데이터를 찾을 수 없습니다.";
           console.error(`❌ [Batch Generate] 이미지 데이터 없음: ${item.name}`, {
             hasBase64: !!response.base64Image,
@@ -745,87 +841,23 @@ function BatchStudioShellInner() {
 
         console.log(`✅ [Batch Generate] 성공: ${item.name}`);
 
-        // Firebase에 저장 (백그라운드에서 비동기로 처리)
-        let finalImageUrl = base64;
-
-        // Firebase 저장을 백그라운드에서 처리하고 메인 루프는 계속 진행
-        if (user && shouldUseFirestore) {
-          // 백그라운드에서 Firebase 저장 (await 없이)
-          Promise.resolve().then(async () => {
-            try {
-              console.log(`💾 [Batch Generate] Firebase 저장 시작 (백그라운드): ${item.name}`);
-
-              // 30초 타임아웃 설정 (큰 이미지 고려)
-              const uploadWithTimeout = Promise.race([
-                (async () => {
-                  const fetchResponse = await fetch(base64);
-                  const blob = await fetchResponse.blob();
-                  const recordId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  const uploadResult = await uploadUserImage(user.uid, recordId, blob);
-
-                  const promptMeta: any = { rawPrompt: basePrompt };
-                  if (refinedPrompt.trim()) promptMeta.refinedPrompt = refinedPrompt.trim();
-                  if (negativePrompt.trim()) promptMeta.negativePrompt = negativePrompt.trim();
-
-                  const metadata: any = {
-                    batchItem: true,
-                    batchItemName: item.name,
-                    batchItemId: item.id,
-                    camera: cameraPayload,
-                    aspectRatio
-                  };
-                  if (Object.keys(lightingPayload).length > 0) metadata.lighting = lightingPayload;
-                  if (Object.keys(posePayload).length > 0) metadata.pose = posePayload;
-
-                  const firestorePayload: any = {
-                    mode: activeMode,
-                    status: "completed",
-                    promptMeta,
-                    imageUrl: uploadResult.url,
-                    thumbnailUrl: uploadResult.url,
-                    originalImageUrl: dataUrl,
-                    metadata,
-                    model: (response as any).model || "gemini-nano-banana" || "gemini-unknown",
-                    createdAtIso: new Date().toISOString(),
-                    updatedAtIso: new Date().toISOString()
-                  };
-                  if (response.costCredits !== undefined) firestorePayload.costCredits = response.costCredits;
-
-                  await saveGeneratedImageDoc(user.uid, recordId, firestorePayload);
-                  console.log(`💾 [Batch Generate] Firebase 저장 완료 (백그라운드): ${item.name} -> ${recordId}`);
-                })(),
-                new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error('Firebase 업로드 타임아웃 (30초)')), 30000)
-                )
-              ]);
-
-              await uploadWithTimeout;
-            } catch (firebaseError) {
-              const errorMsg = firebaseError instanceof Error ? firebaseError.message : "Firebase 저장 오류";
-              // Firebase 저장 실패는 조용히 처리 (배치 생성 자체는 성공했으므로)
-              if (errorMsg.includes('타임아웃')) {
-                console.log(`⏱️ [Batch Generate] ${item.name} Firebase 업로드 시간 초과 (로컬 결과는 정상)`);
-              } else {
-                console.warn(`⚠️ [Batch Generate] ${item.name} Firebase 저장 실패: ${errorMsg}`);
-              }
-            }
-          });
-        } else {
-          console.log(`⚠️ [Batch Generate] Firebase 미설정 - 로컬에만 저장: ${item.name}`);
-        }
+        const finalImageUrl = primaryImage.image;
+        const generatedRecordId = primaryImage.id;
 
         setBatchItems(prev => {
           const updated = prev.map(upload =>
             upload.id === item.id
-              ? {
-                  ...upload,
-                  status: "완료" as const,
-                  result: {
-                    image: finalImageUrl,
-                    completedAt: new Date().toISOString()
-                  },
-                  errorMessage: undefined
-                }
+	              ? {
+	                  ...upload,
+	                  status: "완료" as const,
+	                  result: {
+	                    image: finalImageUrl,
+	                    fileId: generatedRecordId,
+	                    images: generatedImages,
+	                    completedAt: new Date().toISOString()
+	                  },
+	                  errorMessage: undefined
+	                }
               : upload
           );
 
@@ -835,43 +867,69 @@ function BatchStudioShellInner() {
               item.status === "완료" && item.result?.image
             );
 
-            // base64 이미지를 제외하고 메타데이터만 저장
-            const itemsToSave = completedItems.map(({ file, result, ...rest }) => ({
-              ...rest,
-              result: {
-                completedAt: result?.completedAt,
-                // 이미지 데이터는 저장하지 않음 (용량 절약)
-              }
-            }));
+	            // base64 이미지를 제외하고 메타데이터만 저장
+	            const itemsToSave = completedItems.map(({ file, result, ...rest }) => ({
+	              ...rest,
+	              result: {
+	                completedAt: result?.completedAt,
+	                fileId: result?.fileId,
+	                images: result?.images,
+	                // 이미지 데이터는 저장하지 않음 (용량 절약)
+	              }
+	            }));
 
-            localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(itemsToSave));
-            console.log(`💾 [Batch Storage] ${completedItems.length}개 완료된 항목 저장 완료 (이미지 제외)`);
+	            localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(itemsToSave));
+	            console.log(`💾 [Batch Storage] ${completedItems.length}개 완료된 항목 저장 완료 (이미지 제외)`);
 
-            // 로컬 통합 히스토리에 누적 — base64 잔재는 제외하고 디스크 URL(/api/images/<id>)만 저장.
-            const historyRecords: GeneratedImageDocument[] = completedItems
-              .filter(item => item.result?.image && !item.result.image.startsWith('data:'))
-              .map(item => ({
-                id: item.id,
-                userId: user?.uid ?? "local",
-                mode: 'remix' as const,
-                status: 'completed' as const,
-                imageUrl: item.result?.image || '',
-                thumbnailUrl: item.result?.image || '',
-                originalImageUrl: item.src,
-                promptMeta: {
-                  rawPrompt: '배치 변형 생성',
-                  refinedPrompt: item.name
-                },
-                metadata: {
-                  batchItem: true,
-                  batchItemName: item.name
-                },
-                model: 'gpt-image-2',
-                createdAt: item.result?.completedAt || new Date().toISOString(),
-                updatedAt: item.result?.completedAt || new Date().toISOString(),
-                createdAtIso: item.result?.completedAt || new Date().toISOString(),
-                updatedAtIso: item.result?.completedAt || new Date().toISOString()
-              }));
+	            // 로컬 통합 히스토리에 누적 — base64 잔재는 제외하고 디스크 URL(/api/images/<id>)만 저장.
+	            const historyRecords: GeneratedImageDocument[] = completedItems.flatMap(item => {
+	              const itemImages =
+	                item.result?.images?.length
+	                  ? item.result.images
+	                  : item.result?.image
+	                    ? [{ id: item.result.fileId ?? getLocalImageId(item.result.image) ?? item.id, image: item.result.image }]
+	                    : [];
+	              return itemImages
+	                .filter(image => !image.image.startsWith("data:"))
+	                .map((image, imageIndex) => ({
+	                  id: image.id,
+	                  userId: user?.uid ?? "local",
+	                  mode: "remix" as const,
+	                  status: "completed" as const,
+	                  imageUrl: image.image,
+	                  thumbnailUrl: image.image,
+	                  originalImageUrl: item.src,
+	                  promptMeta: {
+	                    rawPrompt: rawPrompt || effectivePrompt,
+	                    refinedPrompt: refinedPromptText || effectivePrompt,
+	                    negativePrompt: negativePrompt.trim() || undefined,
+	                    camera: cameraPayload,
+	                    aspectRatio,
+	                    lighting: Object.keys(lightingPayload).length > 0 ? lightingPayload : undefined,
+	                    pose: Object.keys(posePayload).length > 0 ? posePayload : undefined
+	                  },
+	                  metadata: {
+	                    batchItem: true,
+	                    batchItemName: item.name,
+	                    batchItemId: item.id,
+	                    batchCopyIndex: imageIndex + 1,
+	                    batchCopyTotal: itemImages.length,
+	                    fileId: image.id,
+	                    generationOptions: {
+	                      quality: imageGenOptions.quality,
+	                      size: imageGenOptions.size,
+	                      format: imageGenOptions.format,
+	                      moderation: imageGenOptions.moderation,
+	                      count: imageGenOptions.count
+	                    }
+	                  },
+	                  model: "gpt-image-2",
+	                  createdAt: item.result?.completedAt || new Date().toISOString(),
+	                  updatedAt: item.result?.completedAt || new Date().toISOString(),
+	                  createdAtIso: item.result?.completedAt || new Date().toISOString(),
+	                  updatedAtIso: item.result?.completedAt || new Date().toISOString()
+	                }));
+	            });
 
             if (historyRecords.length) {
               setLocalRecords(prev => {
@@ -960,10 +1018,351 @@ function BatchStudioShellInner() {
     poseSelections,
     prompt,
     refinedPrompt,
-    subjectDirection,
-    batchItems,
-    zoomLevel,
+	    subjectDirection,
+	    batchItems,
+	    imageGenOptions,
+	    zoomLevel,
     isProcessing
+  ]);
+
+  const handleGenerate = useCallback(async () => {
+    const rawPrompt = prompt.trim();
+    const refinedPromptText = refinedPrompt.trim();
+    const effectivePrompt = refinedPromptText || rawPrompt;
+
+    if (!effectivePrompt) {
+      toast.error("프롬프트를 입력해주세요.");
+      return;
+    }
+    if (batchItems.length === 0) {
+      toast.info("업로드된 이미지가 없습니다.");
+      return;
+    }
+    if (isProcessing) {
+      toast.info("이미 변환 작업이 진행 중입니다.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setCurrentProcessingIndex(-1);
+    setProcessingProgress({ current: 0, total: batchItems.length });
+    setBatchItems(prev =>
+      prev.map(item => ({
+        ...item,
+        status: "대기",
+        result: undefined,
+        errorMessage: undefined
+      }))
+    );
+
+    const cameraPayload = {
+      angle: cameraAngle,
+      aperture: formatAperture(aperture),
+      subjectDirection,
+      cameraDirection,
+      zoom: zoomLevel
+    };
+    const lightingPayload = Object.fromEntries(
+      Object.entries(lightingSelections).filter(([, values]) => values.length > 0)
+    );
+    const posePayload = Object.fromEntries(
+      Object.entries(poseSelections).filter(([, values]) => values.some(value => value !== "default"))
+    );
+    const items = batchItems.slice();
+    let processedCount = 0;
+    let completedCount = 0;
+    let failedCount = 0;
+
+    type BatchGenerateItemResult =
+      | {
+          itemId: string;
+          status: "completed";
+          image: string;
+          fileId: string;
+          images: Array<{ id: string; image: string }>;
+          completedAt: string;
+          historyRecords: GeneratedImageDocument[];
+        }
+      | {
+          itemId: string;
+          status: "failed";
+          errorMessage: string;
+          historyRecords: [];
+        };
+
+    const persistCompletedBatchItems = (updatedItems: BatchItem[]) => {
+      try {
+        const completedItems = updatedItems.filter(item => item.status === "완료" && item.result?.image);
+        const itemsToSave = completedItems.map(({ file, result, ...rest }) => ({
+          ...rest,
+          result: {
+            completedAt: result?.completedAt,
+            fileId: result?.fileId,
+            images: result?.images
+          }
+        }));
+
+        localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(itemsToSave));
+      } catch (error) {
+        if (error instanceof Error && error.name === "QuotaExceededError") {
+          console.error("❌ [Batch Storage] 로컬 스토리지 용량 초과:", error.message);
+          try {
+            localStorage.removeItem(BATCH_STORAGE_KEY);
+          } catch (cleanupError) {
+            console.error("❌ [Batch Storage] 데이터 정리 실패:", cleanupError);
+          }
+        } else {
+          console.error("❌ [Batch Storage] 배치 아이템 저장 실패:", error);
+        }
+      }
+    };
+
+    const applyBatchResults = (results: BatchGenerateItemResult[]) => {
+      const resultMap = new Map(results.map(result => [result.itemId, result]));
+      const historyRecords = results.flatMap(result => result.historyRecords);
+
+      setBatchItems(prev => {
+        const updated = prev.map(item => {
+          const result = resultMap.get(item.id);
+          if (!result) return item;
+          if (result.status === "completed") {
+            return {
+              ...item,
+              status: "완료" as const,
+              result: {
+                image: result.image,
+                fileId: result.fileId,
+                images: result.images,
+                completedAt: result.completedAt
+              },
+              errorMessage: undefined
+            };
+          }
+          return {
+            ...item,
+            status: "실패" as const,
+            result: undefined,
+            errorMessage: result.errorMessage
+          };
+        });
+        persistCompletedBatchItems(updated);
+        return updated;
+      });
+
+      if (historyRecords.length) {
+        setLocalRecords(prev => {
+          const existingIds = new Set(prev.map(record => record.id));
+          const additions = historyRecords.filter(record => !existingIds.has(record.id));
+          return additions.length ? [...additions, ...prev] : prev;
+        });
+        const merged = persistRecordsMerge(historyRecords);
+        broadcastHistoryUpdate(merged, "batch");
+      }
+    };
+
+    const runItem = async (item: BatchItem, index: number): Promise<BatchGenerateItemResult> => {
+      const dataUrl = await readFileAsDataURL(item.file).catch(error => {
+        console.error("failed to read file", error);
+        toast.error(`${item.name} 읽기에 실패했습니다.`);
+        return null;
+      });
+
+      if (!dataUrl) {
+        return {
+          itemId: item.id,
+          status: "failed",
+          errorMessage: "파일을 읽을 수 없습니다.",
+          historyRecords: []
+        };
+      }
+
+      const generationOptions: Record<string, unknown> = {
+        referenceImage: dataUrl,
+        aspectRatio,
+        batchItemId: item.id,
+        batchItemName: item.name,
+        quality: imageGenOptions.quality,
+        imageSize: imageGenOptions.size,
+        format: imageGenOptions.format,
+        moderation: imageGenOptions.moderation,
+        count: imageGenOptions.count
+      };
+      if (Object.keys(lightingPayload).length > 0) generationOptions.lighting = lightingPayload;
+      if (Object.keys(posePayload).length > 0) generationOptions.pose = posePayload;
+
+      try {
+        console.log(`🚀 [Batch Generate] API 호출 시작: ${index + 1}/${items.length} - ${item.name}`);
+        const response = await callGenerateApi({
+          prompt: rawPrompt || effectivePrompt,
+          refinedPrompt: refinedPromptText || undefined,
+          negativePrompt: negativePrompt.trim() || undefined,
+          mode: activeMode,
+          camera: cameraPayload,
+          options: generationOptions
+        });
+
+        if (!response.ok) {
+          const errorMessage = response.reason || "알 수 없는 오류가 발생했습니다.";
+          toast.error(`${item.name} 변환 실패`, { description: errorMessage });
+          return {
+            itemId: item.id,
+            status: "failed",
+            errorMessage,
+            historyRecords: []
+          };
+        }
+
+        const generatedImages =
+          Array.isArray(response.images) && response.images.length > 0
+            ? response.images
+                .map((image, imageIndex) => ({
+                  id:
+                    typeof image.id === "string" && image.id.length > 0
+                      ? image.id
+                      : getLocalImageId(image.imageUrl) ?? `${item.id}-${imageIndex + 1}`,
+                  image: image.imageUrl ?? image.base64Image ?? null
+                }))
+                .filter((image): image is { id: string; image: string } => Boolean(image.image))
+            : [
+                {
+                  id:
+                    typeof response.id === "string" && response.id.length > 0
+                      ? response.id
+                      : getLocalImageId(response.imageUrl ?? response.base64Image) ?? item.id,
+                  image: response.imageUrl ?? response.base64Image ?? null
+                }
+              ].filter((image): image is { id: string; image: string } => Boolean(image.image));
+
+        const primaryImage = generatedImages[0];
+        if (!primaryImage) {
+          const errorMessage = "이미지 데이터를 찾을 수 없습니다.";
+          toast.error(`${item.name} 변환 실패`, { description: errorMessage });
+          return {
+            itemId: item.id,
+            status: "failed",
+            errorMessage,
+            historyRecords: []
+          };
+        }
+
+        const completedAt = new Date().toISOString();
+        const historyRecords: GeneratedImageDocument[] = generatedImages
+          .filter(image => !image.image.startsWith("data:"))
+          .map((image, imageIndex) => ({
+            id: image.id,
+            userId: user?.uid ?? "local",
+            mode: "remix" as const,
+            status: "completed" as const,
+            imageUrl: image.image,
+            thumbnailUrl: image.image,
+            originalImageUrl: item.src,
+            promptMeta: {
+              rawPrompt: rawPrompt || effectivePrompt,
+              refinedPrompt: refinedPromptText || effectivePrompt,
+              negativePrompt: negativePrompt.trim() || undefined,
+              camera: cameraPayload,
+              aspectRatio,
+              lighting: Object.keys(lightingPayload).length > 0 ? lightingPayload : undefined,
+              pose: Object.keys(posePayload).length > 0 ? posePayload : undefined
+            },
+            metadata: {
+              batchItem: true,
+              batchItemName: item.name,
+              batchItemId: item.id,
+              batchCopyIndex: imageIndex + 1,
+              batchCopyTotal: generatedImages.length,
+              fileId: image.id,
+              generationOptions: {
+                quality: imageGenOptions.quality,
+                size: imageGenOptions.size,
+                format: imageGenOptions.format,
+                moderation: imageGenOptions.moderation,
+                count: imageGenOptions.count
+              }
+            },
+            model: response.model || "gpt-image-2",
+            createdAt: completedAt,
+            updatedAt: completedAt,
+            createdAtIso: completedAt,
+            updatedAtIso: completedAt
+          }));
+
+        return {
+          itemId: item.id,
+          status: "completed",
+          image: primaryImage.image,
+          fileId: primaryImage.id,
+          images: generatedImages,
+          completedAt,
+          historyRecords
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류";
+        toast.error(`${item.name} 변환 실패`, { description: errorMessage });
+        return {
+          itemId: item.id,
+          status: "failed",
+          errorMessage,
+          historyRecords: []
+        };
+      }
+    };
+
+    try {
+      for (let chunkStart = 0; chunkStart < items.length; chunkStart += BATCH_GENERATE_CONCURRENCY) {
+        const chunk = items.slice(chunkStart, chunkStart + BATCH_GENERATE_CONCURRENCY);
+        const chunkIds = new Set(chunk.map(item => item.id));
+        setCurrentProcessingIndex(chunkStart);
+        setBatchItems(prev =>
+          prev.map(item =>
+            chunkIds.has(item.id)
+              ? { ...item, status: "진행 중", result: undefined, errorMessage: undefined }
+              : item
+          )
+        );
+
+        const results = await Promise.all(
+          chunk.map((item, offset) => runItem(item, chunkStart + offset))
+        );
+        applyBatchResults(results);
+
+        processedCount += results.length;
+        completedCount += results.filter(result => result.status === "completed").length;
+        failedCount += results.filter(result => result.status === "failed").length;
+        setProcessingProgress({ current: processedCount, total: items.length });
+
+        if (chunkStart + BATCH_GENERATE_CONCURRENCY < items.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    } finally {
+      setIsProcessing(false);
+      setCurrentProcessingIndex(-1);
+      setProcessingProgress({ current: 0, total: 0 });
+
+      if (completedCount > 0) {
+        toast.success(`배치 변형 생성 완료: ${completedCount}개 성공, ${failedCount}개 실패`);
+      } else {
+        toast.error("배치 변형 생성 실패: 모든 이미지 처리에 실패했습니다.");
+      }
+    }
+  }, [
+    activeMode,
+    aperture,
+    aspectRatio,
+    batchItems,
+    cameraAngle,
+    cameraDirection,
+    imageGenOptions,
+    isProcessing,
+    lightingSelections,
+    negativePrompt,
+    poseSelections,
+    prompt,
+    refinedPrompt,
+    subjectDirection,
+    user,
+    zoomLevel
   ]);
 
   const results = useMemo(
@@ -1001,9 +1400,13 @@ function BatchStudioShellInner() {
   const completedCount = results.filter(item => item.status === "완료").length;
   const pendingCount = results.filter(item => item.status === "대기" || item.status === "진행 중").length;
   const failedCount = results.filter(item => item.status === "실패").length;
+  const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
+  const previewPromptText = getRecordPromptText(previewRecord);
+  const previewZoomPercent = Math.round(previewZoom.scale * 100);
 
   return (
     <div className="flex flex-col gap-6 pb-28">
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       <section className="border-b bg-muted/60 backdrop-blur-sm">
         <Tabs value={activeMode} onValueChange={value => setActiveMode(value as GenerationMode)}>
           <div className="px-4 py-3">
@@ -1261,11 +1664,9 @@ function BatchStudioShellInner() {
                           </div>
                           <Badge variant={statusVariant}>{item.status}</Badge>
                         </div>
-                        <DiffSlider
+                        <BatchDiffItem
                           beforeSrc={item.beforeSrc}
                           afterSrc={item.afterSrc}
-                          labelBefore="원본"
-                          labelAfter="결과"
                         />
                         <Separator />
                       </div>
@@ -1284,12 +1685,14 @@ function BatchStudioShellInner() {
           <CardHeader>
             <CardTitle className="text-lg">최근 생성 기록</CardTitle>
             <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                1개 생성, 프리셋, 배치 생성의 모든 기록이 통합되어 표시됩니다.
-              </p>
-              <div className="text-xs text-muted-foreground">
-                {loading ? "기록 동기화 중" : `${historyRecordsLimited.length}개 표시 중`}
-              </div>
+	              <p className="text-sm text-muted-foreground">
+	                1개 생성, 프리셋, 배치 생성의 모든 기록이 통합되어 표시됩니다.
+	              </p>
+	              <div className="text-xs text-muted-foreground">
+	                {loading
+	                  ? "기록 동기화 중"
+	                  : `${Math.min(historyVisibleCount, filteredHistoryRecords.length)}/${filteredHistoryRecords.length}개 표시 중`}
+	              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -1311,23 +1714,28 @@ function BatchStudioShellInner() {
                 </Button>
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-              {historyRecordsLimited
-                .filter(record => historyView === "all" || record.metadata?.favorite)
-                .map(record => {
-                const imageUrl = record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl;
-                const recordLabel =
-                  (record.metadata?.characterViewLabel as string | undefined) ??
+	            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+	              {visibleHistoryRecords.map(record => {
+	                const imageUrl = getRecordGeneratedImageUrl(record);
+	                const recordLabel =
+	                  (record.metadata?.characterViewLabel as string | undefined) ??
                   (record.promptMeta?.refinedPrompt as string | undefined) ??
                   (record.promptMeta?.rawPrompt as string | undefined) ??
                   "";
                 return (
                   <div
-                    key={record.id}
-                    className="group relative overflow-hidden rounded-lg border bg-card aspect-[4/3]"
-                    role="button"
-                    tabIndex={0}
-                  >
+	                    key={record.id}
+	                    className="group relative aspect-[4/3] cursor-zoom-in overflow-hidden rounded-lg border bg-card transition hover:border-primary/50"
+	                    role="button"
+	                    tabIndex={0}
+	                    onClick={() => handlePreviewRecord(record)}
+	                    onKeyDown={event => {
+	                      if (event.key === "Enter" || event.key === " ") {
+	                        event.preventDefault();
+	                        handlePreviewRecord(record);
+	                      }
+	                    }}
+	                  >
                     {imageUrl ? (
                       <Image
                         src={imageUrl}
@@ -1401,22 +1809,142 @@ function BatchStudioShellInner() {
                     </div>
                   </div>
                 );
-              })}
-              {historyRecordsLimited.filter(record => historyView === "all" || record.metadata?.favorite).length === 0 && (
-                <div className="col-span-full flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
-                  {historyView === "favorite"
+	              })}
+	              {visibleHistoryRecords.length === 0 && (
+	                <div className="col-span-full flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
+	                  {historyView === "favorite"
                     ? "즐겨찾기에 추가한 이미지가 없습니다."
                     : loading ? "기록을 불러오는 중..." : "아직 생성된 이미지가 없습니다."
-                  }
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </div>
-  );
-}
+	                  }
+	                </div>
+	              )}
+	            </div>
+	            {hasMoreHistoryRecords ? (
+	              <div className="mt-4 flex justify-center">
+	                <Button
+	                  variant="outline"
+	                  onClick={() => setHistoryVisibleCount(count => count + HISTORY_VISIBLE_INCREMENT)}
+	                >
+	                  더 보기
+	                </Button>
+	              </div>
+	            ) : null}
+	          </CardContent>
+	        </Card>
+	      </section>
+	      {previewRecord ? (
+	        <div
+	          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+	          onClick={closePreviewRecord}
+	        >
+	          <div
+	            className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
+	            onClick={event => event.stopPropagation()}
+	          >
+	            <button
+	              type="button"
+	              className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
+	              onClick={event => {
+	                event.stopPropagation();
+	                closePreviewRecord();
+	              }}
+	            >
+	              닫기
+	            </button>
+	            <div className="flex min-h-0 flex-col bg-black">
+	              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+	                <div className="min-w-0">
+	                  <p className="text-sm font-semibold">원본 이미지</p>
+	                  <p className="truncate text-xs text-white/60">
+	                    {previewRecord.model} · {new Date(previewRecord.createdAt).toLocaleString()}
+	                  </p>
+	                </div>
+	                <div className="mr-14 flex flex-wrap items-center gap-2">
+	                  <Button size="sm" variant="secondary" onClick={() => previewZoom.zoomOut()} disabled={previewZoom.scale <= MIN_IMAGE_ZOOM}>
+	                    축소
+	                  </Button>
+	                  <Button size="sm" variant="secondary" onClick={() => previewZoom.reset()} disabled={previewZoom.scale === 1}>
+	                    {previewZoomPercent}%
+	                  </Button>
+	                  <Button size="sm" variant="secondary" onClick={() => previewZoom.zoomIn()} disabled={previewZoom.scale >= MAX_IMAGE_ZOOM}>
+	                    확대
+	                  </Button>
+	                </div>
+	              </div>
+	              <div
+	                {...previewZoom.bind}
+	                className={cn(
+	                  "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+	                  previewZoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+	                )}
+	                title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+	              >
+	                {previewImageUrl ? (
+	                  // eslint-disable-next-line @next/next/no-img-element
+	                  <img
+	                    src={previewImageUrl}
+	                    alt={previewPromptText || "preview"}
+	                    className="max-h-full max-w-full object-contain will-change-transform"
+	                    draggable={false}
+	                    style={{
+	                      transform: `translate(${previewZoom.transform.panX}px, ${previewZoom.transform.panY}px) scale(${previewZoom.transform.scale})`,
+	                      transformOrigin: "center center"
+	                    }}
+	                  />
+	                ) : (
+	                  <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+	                )}
+	              </div>
+	            </div>
+	            <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+	              <div className="space-y-1 pr-10 lg:pr-0">
+	                <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+	                <h2 className="text-base font-semibold text-foreground">프롬프트와 액션</h2>
+	              </div>
+	              <div className="flex flex-wrap gap-2">
+	                <Button size="sm" variant="outline" onClick={() => void handleCopyPreviewPrompt()} disabled={!previewPromptText}>
+	                  프롬프트 복사
+	                </Button>
+	                <Button size="sm" variant="outline" onClick={handleDownloadPreviewRecord} disabled={!previewImageUrl}>
+	                  다운로드
+	                </Button>
+	                <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()}>
+	                  삭제
+	                </Button>
+	              </div>
+	              <div className="space-y-2">
+	                <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+	                <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+	                  {previewPromptText || "저장된 프롬프트가 없습니다."}
+	                </div>
+	              </div>
+	              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+	                <div className="rounded-lg border bg-background/60 p-2">
+	                  <p className="font-medium text-foreground">모드</p>
+	                  <p className="uppercase">{previewRecord.mode}</p>
+	                </div>
+	                <div className="rounded-lg border bg-background/60 p-2">
+	                  <p className="font-medium text-foreground">모델</p>
+	                  <p>{previewRecord.model}</p>
+	                </div>
+	                <div className="rounded-lg border bg-background/60 p-2">
+	                  <p className="font-medium text-foreground">파일</p>
+	                  <p>{previewImageUrl?.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+	                </div>
+	                {(previewRecord.metadata as any)?.batchItemName ? (
+	                  <div className="rounded-lg border bg-background/60 p-2">
+	                    <p className="font-medium text-foreground">배치 항목</p>
+	                    <p>{(previewRecord.metadata as any).batchItemName}</p>
+	                  </div>
+	                ) : null}
+	              </div>
+	            </aside>
+	          </div>
+	        </div>
+	      ) : null}
+	    </div>
+	  );
+	}
 
 export function BatchStudioShell() {
   return (

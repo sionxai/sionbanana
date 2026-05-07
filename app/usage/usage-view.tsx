@@ -139,6 +139,7 @@ export function UsageView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const canLogoutWeb = authStatus?.source === "web";
 
   const refreshAuthStatus = useCallback(async () => {
     try {
@@ -171,6 +172,14 @@ export function UsageView() {
   }, [refreshAuthStatus]);
 
   const handleLogout = useCallback(async () => {
+    if (authStatus?.source === "codex-cli") {
+      toast.info("현재 Codex CLI 인증을 사용 중입니다. 앱에서는 CLI 인증 파일을 삭제하지 않습니다.");
+      return;
+    }
+    if (!authStatus?.authenticated) {
+      toast.info("현재 연결된 Web 로그인 토큰이 없습니다.");
+      return;
+    }
     if (!window.confirm("Web 로그인 토큰을 삭제할까요? Codex CLI 인증 파일은 유지됩니다.")) {
       return;
     }
@@ -189,7 +198,7 @@ export function UsageView() {
     } finally {
       setLoggingOut(false);
     }
-  }, [refresh]);
+  }, [authStatus, refresh]);
 
   useEffect(() => {
     void refresh();
@@ -205,8 +214,8 @@ export function UsageView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleLogout} disabled={loggingOut}>
-            {loggingOut ? "로그아웃 중..." : "로그아웃"}
+          <Button variant="outline" size="sm" onClick={handleLogout} disabled={loggingOut || !canLogoutWeb}>
+            {loggingOut ? "로그아웃 중..." : "Web 로그아웃"}
           </Button>
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             {loading ? "불러오는 중..." : "새로고침"}
@@ -252,6 +261,12 @@ export function UsageView() {
                   {formatAuthSource(authStatus?.source)}
                 </Badge>
               </div>
+              {authStatus?.source === "codex-cli" ? (
+                <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
+                  현재는 Codex CLI 인증 파일을 사용 중입니다. 앱의 로그아웃은 Web 로그인 토큰만 삭제하며,
+                  CLI 인증 파일은 보호를 위해 건드리지 않습니다.
+                </div>
+              ) : null}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">계정 ID</span>
                 <span className="font-mono text-xs">{data.account_id ?? authStatus?.accountId ?? "—"}</span>

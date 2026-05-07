@@ -95,9 +95,9 @@ export function GenerationOptionsPanel({ value, onChange }: Props) {
   const cost = estimateCost(value);
 
   return (
-    <div ref={containerRef} className="fixed bottom-24 left-6 z-40 sm:bottom-28">
+    <div ref={containerRef} className="fixed bottom-24 left-4 right-4 z-40 sm:bottom-28 sm:left-6 sm:right-auto">
       {open ? (
-        <div className="mb-2 w-[360px] max-h-[70vh] overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-4 shadow-xl backdrop-blur">
+        <div className="mb-2 max-h-[70vh] w-full overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-4 shadow-xl backdrop-blur sm:w-[360px]">
           <div className="mb-3 flex items-center justify-between">
             <h4 className="text-sm font-semibold">생성 옵션</h4>
             <button

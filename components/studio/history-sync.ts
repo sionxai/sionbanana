@@ -148,7 +148,6 @@ export function mergeHistoryRecords(
       }
       if (seen.has(record.id)) {
         duplicatesSkipped++;
-        console.log(`[History Merge] ${source}: Skipping duplicate ID: ${record.id}`);
         continue;
       }
       seen.add(record.id);
@@ -158,10 +157,6 @@ export function mergeHistoryRecords(
 
   appendRecords(primary, 'primary');
   appendRecords(secondary, 'secondary');
-
-  if (duplicatesSkipped > 0) {
-    console.log(`[History Merge] Total duplicates skipped: ${duplicatesSkipped}`);
-  }
 
   merged.sort((a, b) => {
     const aTime = parseIsoDate(a.createdAt ?? a.updatedAt);

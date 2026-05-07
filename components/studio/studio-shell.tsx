@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
@@ -16,10 +17,11 @@ import {
 } from "@/components/studio/generation-options-panel";
 import { SketchCanvas } from "@/components/studio/sketch-canvas";
 import { DragHandle } from "@/components/studio/drag-handle";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { useResizable } from "@/hooks/use-resizable";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
-import { callGenerateApi } from "@/hooks/use-generate-image";
+import { callGenerateApi, GENERATE_TIMEOUT_MS } from "@/hooks/use-generate-image";
 import { toast } from "sonner";
 // 로컬 단일 사용자 환경 — 인증 stub
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
@@ -93,6 +95,38 @@ async function readFileAsDataURL(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function getLocalImageIdFromUrl(value?: string | null): string | null {
+  if (!value || !value.startsWith("/api/images/")) {
+    return null;
+  }
+  const pathOnly = value.split(/[?#]/)[0];
+  const id = pathOnly.slice("/api/images/".length);
+  return /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
+}
+
+function getLocalImageIdForRecord(record: GeneratedImageDocument): string | null {
+  return getLocalImageIdFromUrl(record.imageUrl) ?? getLocalImageIdFromUrl(record.thumbnailUrl);
+}
+
+async function deleteLocalImageFile(record: GeneratedImageDocument): Promise<boolean> {
+  const fileId = getLocalImageIdForRecord(record);
+  if (!fileId) {
+    return false;
+  }
+  const response = await fetch(`/api/images/${fileId}`, { method: "DELETE" });
+  return response.ok;
+}
+
+function getRecordGeneratedImageUrl(record: GeneratedImageDocument | null): string {
+  // originalImageUrl is used as the "before/reference" image for diff records.
+  // For previewing a generated history item, prefer the generated image itself.
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? "";
+}
+
+function getRecordPromptText(record: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
 
 interface NormalizedCameraSettings {
@@ -436,6 +470,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   );
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
   // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
@@ -648,7 +683,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
           if (!slot.imageUrl) return true;
           if (!currentUid) return false;
           const url = slot.imageUrl;
-          return url.startsWith("data:") || url.includes(`/users/${currentUid}/`);
+          return url.startsWith("data:") || url.startsWith("/api/images/") || url.includes(`/users/${currentUid}/`);
         });
 
         const ensured = normalizedFiltered.length
@@ -1075,18 +1110,21 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
   }, [mergeLocalRecord, selectImage, setLocalRecords, user]);
 
-  const handleGenerate = (action: "primary" | "remix") => {
+  const handleGenerate = (action: "primary" | "remix", promptOverride?: string) => {
+    const promptForGeneration = promptOverride?.trim() || prompt;
+    const refinedPromptForGeneration = promptOverride?.trim() ? "" : refinedPrompt;
+
     const execute = async () => {
       const guard = startGeneration();
       setCurrentRequestId(guard.requestId);
 
-      // 이미지 생성은 60~90초까지 걸릴 수 있어 클라이언트 강제 타임아웃은 180초로 둔다.
+      // 이미지 생성은 오래 걸릴 수 있어 API 호출 timeout과 같은 값으로 둔다.
       const timeoutId = setTimeout(() => {
-        console.warn('Generation timeout after 180 seconds, forcing completion');
+        console.warn(`Generation timeout after ${GENERATE_TIMEOUT_MS / 1000} seconds, forcing completion`);
         guard.onError('Generation timeout - please try again');
         clearActiveGuard();
         setCurrentRequestId(null);
-      }, 180000);
+      }, GENERATE_TIMEOUT_MS);
 
       setActiveGuard({
         requestId: guard.requestId,
@@ -1164,8 +1202,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       const hasCameraInstruction = Boolean(cameraGuidance && cameraGuidance?.trim().length);
 
       if (
-        !prompt &&
-        !refinedPrompt &&
+        !promptForGeneration &&
+        !refinedPromptForGeneration &&
         !(isCameraMode && hasCameraPromptFallback) &&
         !hasCameraInstruction &&
         !hasLightingInstruction &&
@@ -1187,13 +1225,13 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       // Clean base prompt to avoid accumulated history
       const getCleanBasePrompt = (candidate: GeneratedImageDocument | null): string => {
         if (!candidate?.promptMeta) {
-          return hasCameraPromptFallback ? defaultCameraFallback : prompt;
+          return hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration;
         }
 
         // If rawPrompt is a system message, try to get actual user prompt
         const rawPrompt = candidate.promptMeta.rawPrompt;
         if (rawPrompt === "사용자 기준 이미지 업로드" || !rawPrompt || rawPrompt.trim().length === 0) {
-          return hasCameraPromptFallback ? defaultCameraFallback : prompt;
+          return hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration;
         }
 
         // Remove accumulated "Apply the following adjustments:" sections
@@ -1201,11 +1239,11 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         const cleanLines = lines.filter(line => !line.startsWith('Apply the following adjustments:'));
         const cleanPrompt = cleanLines.join('\n').trim();
 
-        return cleanPrompt || (hasCameraPromptFallback ? defaultCameraFallback : prompt);
+        return cleanPrompt || (hasCameraPromptFallback ? defaultCameraFallback : promptForGeneration);
       };
 
       const basePromptForRemixRaw = getCleanBasePrompt(referenceCandidate);
-      const userPromptInput = refinedPrompt || prompt;
+      const userPromptInput = refinedPromptForGeneration || promptForGeneration;
       const hasUserPrompt = Boolean(userPromptInput && userPromptInput.trim().length);
       const defaultPromptFallback =
         isCameraMode
@@ -1227,7 +1265,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
             ? basePromptForRemix
             : basePromptDefault
           : basePromptDefault;
-      const userInstruction = action === "remix" && !isCameraMode ? prompt : undefined;
+      const userInstruction = action === "remix" && !isCameraMode ? promptForGeneration : undefined;
 
       // Define rawPromptForRequest for API call
       const rawPromptForRequest = basePrompt;
@@ -1307,7 +1345,9 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       }
 
       // Create new prompt details for history
-      const actualUserPrompt = action === "remix" ? prompt : (refinedPrompt || prompt);
+      const actualUserPrompt = action === "remix"
+        ? promptForGeneration
+        : (refinedPromptForGeneration || promptForGeneration);
       const newPromptDetails: PromptDetails = {
         basePrompt: actualUserPrompt || currentBasePrompt,
         userInstructions: currentUserInstructions.length > 0 ? currentUserInstructions : undefined,
@@ -1574,6 +1614,10 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
             : item
         )
       );
+      const filledAfter = referenceSlots.filter(slot => slot.imageUrl && slot.id !== targetSlot!.id).length + 1;
+      if (filledAfter >= 5) {
+        toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+      }
       toast.success("스케치를 참조 이미지로 추가했습니다.");
     } catch (error) {
       console.error(error);
@@ -1626,6 +1670,10 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
             : item
         )
       );
+      const filledAfter = referenceSlots.filter(item => item.imageUrl && item.id !== slotId).length + 1;
+      if (filledAfter >= 5) {
+        toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+      }
       toast.success("참조 이미지를 추가했습니다.");
     } catch (error) {
       console.error("reference slot upload error", error);
@@ -2436,14 +2484,10 @@ ${viewInstruction}`;
       selectImage(fallbackId);
     }
 
-    // 디스크 파일 정리: record id가 곧 /api/images/<id>의 id이므로 같은 키로 삭제 호출.
-    const looksLocalImage = typeof target.imageUrl === "string" && target.imageUrl.startsWith("/api/images/");
-    if (looksLocalImage) {
-      try {
-        await fetch(`/api/images/${recordId}`, { method: "DELETE" });
-      } catch (error) {
-        console.warn("Failed to delete local image file", error);
-      }
+    try {
+      await deleteLocalImageFile(target);
+    } catch (error) {
+      console.warn("Failed to delete local image file", error);
     }
 
     toast.success("이미지를 삭제했습니다.");
@@ -2470,11 +2514,35 @@ ${viewInstruction}`;
 
     console.log(`[DeleteAll] Starting deletion of ${recordsToDelete.length} records`);
     console.log(`[DeleteAll] User ID: ${user.uid}`);
-    try {
-      setLocalRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
-      selectImage(null);
 
-      toast.success(`${recordsToDelete.length}개의 이미지를 삭제했습니다.`);
+    try {
+      let localFileFailCount = 0;
+      for (const record of recordsToDelete) {
+        removeRecordFromLocalStorage(record.id);
+        if (!getLocalImageIdForRecord(record)) {
+          continue;
+        }
+        try {
+          const removed = await deleteLocalImageFile(record);
+          if (!removed) {
+            localFileFailCount++;
+          }
+        } catch (error) {
+          localFileFailCount++;
+          console.warn(`[DeleteAll] Failed to delete local image file ${record.id}:`, error);
+        }
+      }
+
+      setLocalRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
+      setDiskRecords(prev => prev.filter(r => r.id === REFERENCE_IMAGE_DOC_ID));
+      selectImage(null);
+      broadcastHistoryUpdate(historyRecords.filter(r => r.id === REFERENCE_IMAGE_DOC_ID), "studio");
+
+      toast.success(
+        localFileFailCount > 0
+          ? `${recordsToDelete.length}개의 기록을 삭제했습니다. 파일 ${localFileFailCount}개는 정리하지 못했습니다.`
+          : `${recordsToDelete.length}개의 이미지를 삭제했습니다.`
+      );
     } catch (error) {
       console.error("[DeleteAll] Failed to delete all records:", error);
       toast.error("일부 이미지 삭제에 실패했습니다.");
@@ -2483,6 +2551,63 @@ ${viewInstruction}`;
 
   const handlePreviewRecord = (record: GeneratedImageDocument) => {
     setPreviewRecord(record);
+    previewZoom.reset();
+  };
+
+  const closePreviewRecord = () => {
+    setPreviewRecord(null);
+    previewZoom.reset();
+  };
+
+  const handleCopyPreviewPrompt = async () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!promptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(promptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  };
+
+  const handleRegeneratePreviewRecord = () => {
+    const promptText = getRecordPromptText(previewRecord);
+    if (!previewRecord || !promptText) {
+      toast.error("재생성할 프롬프트가 없습니다.");
+      return;
+    }
+
+    setPrompt(promptText);
+    setRefinedPrompt("");
+    setLastPromptDetails(null);
+    selectImageAuto(previewRecord.id, previewRecord);
+    closePreviewRecord();
+    handleGenerate("primary", promptText);
+  };
+
+  const handleSetPreviewAsReference = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    await handleSetReferenceFromHistory(previewRecord.id);
+    closePreviewRecord();
+  };
+
+  const handleDeletePreviewRecord = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    const confirmed = window.confirm("이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다.");
+    if (!confirmed) {
+      return;
+    }
+    const recordId = previewRecord.id;
+    closePreviewRecord();
+    await handleDeleteRecord(recordId);
   };
 
   const handleHistorySelect = useCallback((id: string) => {
@@ -2832,9 +2957,20 @@ ${viewInstruction}`;
     }
   };
 
+  const activeReferenceCount = Array.from(
+    new Set([referenceImageUrl, ...collectReferenceGalleryUrls()].filter((url): url is string => Boolean(url)))
+  ).length;
+  const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
+  const previewPromptText = getRecordPromptText(previewRecord);
+  const previewZoomPercent = Math.round(previewZoom.scale * 100);
+
   return (
     <div className="flex h-full flex-1 flex-col">
-      <GenerationProgressIndicator inflightCount={inflightCount} />
+      <GenerationProgressIndicator
+        inflightCount={inflightCount}
+        referenceCount={activeReferenceCount}
+        size={imageGenOptions.size}
+      />
       <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
       <div className="border-b bg-gradient-to-r from-background via-background to-background/95 shadow-sm">
         <div className="flex items-center justify-between px-8 py-5">
@@ -2893,26 +3029,25 @@ ${viewInstruction}`;
 
       <div
         ref={containerRef}
-        className="flex flex-1 gap-0 p-4 lg:flex-row flex-col"
+        className="flex flex-1 flex-col gap-0 p-4 pb-40 lg:flex-row lg:pb-4"
       >
         {/* Left Panel - Prompt Panel */}
         <div
           className={cn(
-            "flex-shrink-0 relative",
-            "lg:block hidden", // Hide on mobile, show on desktop
+            "relative w-full lg:flex-shrink-0 lg:w-[var(--left-panel-width)]",
             resizable.isCollapsed.left && "lg:hidden"
           )}
           style={{
-            width: `${resizable.leftWidth}px`
-          }}
+            "--left-panel-width": `${resizable.leftWidth}px`
+          } as CSSProperties}
         >
           {/* Panel Collapse Button */}
           <button
             onClick={resizable.toggleLeftPanel}
             className={cn(
-              "absolute top-4 -right-3 z-10 w-6 h-6 rounded-full",
+              "absolute top-4 -right-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
               "bg-background border border-border shadow-sm",
-              "flex items-center justify-center text-xs",
+              "items-center justify-center text-xs",
               "hover:bg-accent transition-colors"
             )}
             title="패널 접기"
@@ -2994,10 +3129,10 @@ ${viewInstruction}`;
 
         {/* Center Panel - Workspace Panel */}
         <div
-          className="flex-1 min-w-0 px-2"
+          className="w-full flex-1 min-w-0 px-2 lg:w-[var(--center-panel-width)]"
           style={{
-            width: `${resizable.centerWidth}px`
-          }}
+            "--center-panel-width": `${resizable.centerWidth}px`
+          } as CSSProperties}
         >
           <WorkspacePanel
           mode={activeMode}
@@ -3014,6 +3149,8 @@ ${viewInstruction}`;
           referenceImageUrl={referenceImageUrl}
           referenceImageKey={referenceImageState.signature}
           isGenerating={isGenerating}
+          generationReferenceCount={activeReferenceCount}
+          generationSize={imageGenOptions.size}
           showGenerationSuccess={showGenerationSuccess}
           successRecordId={successRecordId ?? undefined}
           promptDetails={lastPromptDetails}
@@ -3067,21 +3204,20 @@ ${viewInstruction}`;
         {/* Right Panel - History Panel */}
         <div
           className={cn(
-            "flex-shrink-0 relative",
-            "lg:block hidden", // Hide on mobile, show on desktop
+            "relative mt-4 w-full flex-shrink-0 lg:mt-0 lg:w-[var(--right-panel-width)]",
             resizable.isCollapsed.right && "lg:hidden"
           )}
           style={{
-            width: `${resizable.rightWidth}px`
-          }}
+            "--right-panel-width": `${resizable.rightWidth}px`
+          } as CSSProperties}
         >
           {/* Panel Collapse Button */}
           <button
             onClick={resizable.toggleRightPanel}
             className={cn(
-              "absolute top-4 -left-3 z-10 w-6 h-6 rounded-full",
+              "absolute top-4 -left-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
               "bg-background border border-border shadow-sm",
-              "flex items-center justify-center text-xs",
+              "items-center justify-center text-xs",
               "hover:bg-accent transition-colors"
             )}
             title="패널 접기"
@@ -3122,33 +3258,128 @@ ${viewInstruction}`;
 
       {previewRecord ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setPreviewRecord(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+          onClick={closePreviewRecord}
         >
-          <div className="relative h-full w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl border border-white/20 bg-black/90 shadow-lg">
+          <div
+            className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
+            onClick={event => event.stopPropagation()}
+          >
             <button
               type="button"
-              className="absolute right-4 top-4 rounded-full bg-white/20 px-3 py-1 text-xs text-white backdrop-blur"
+              className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
               onClick={event => {
                 event.stopPropagation();
-                setPreviewRecord(null);
+                closePreviewRecord();
               }}
             >
               닫기
             </button>
-            {previewRecord.imageUrl ? (
-              <img
-                src={previewRecord.imageUrl}
-                alt={previewRecord.promptMeta?.rawPrompt ?? "preview"}
-                className="h-full w-full object-contain"
-              />
-            ) : previewRecord.originalImageUrl ? (
-              <img
-                src={previewRecord.originalImageUrl}
-                alt={previewRecord.promptMeta?.rawPrompt ?? "preview"}
-                className="h-full w-full object-contain"
-              />
-            ) : null}
+            <div className="flex min-h-0 flex-col bg-black">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">원본 이미지</p>
+                  <p className="truncate text-xs text-white/60">
+                    {previewRecord.model} · {new Date(previewRecord.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="mr-14 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomOut()}
+                    disabled={previewZoom.scale <= MIN_IMAGE_ZOOM}
+                  >
+                    축소
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.reset()}
+                    disabled={previewZoom.scale === 1}
+                  >
+                    {previewZoomPercent}%
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => previewZoom.zoomIn()}
+                    disabled={previewZoom.scale >= MAX_IMAGE_ZOOM}
+                  >
+                    확대
+                  </Button>
+                </div>
+              </div>
+              <div
+                {...previewZoom.bind}
+                className={cn(
+                  "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+                  previewZoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+                )}
+                title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+              >
+                {previewImageUrl ? (
+                  <img
+                    src={previewImageUrl}
+                    alt={previewPromptText || "preview"}
+                    className="max-h-full max-w-full object-contain will-change-transform"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${previewZoom.transform.panX}px, ${previewZoom.transform.panY}px) scale(${previewZoom.transform.scale})`,
+                      transformOrigin: "center center"
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+                )}
+              </div>
+            </div>
+            <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+              <div className="space-y-1 pr-10 lg:pr-0">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+                <h2 className="text-base font-semibold text-foreground">프롬프트와 액션</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={handleRegeneratePreviewRecord} disabled={!previewPromptText}>
+                  재생성
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleCopyPreviewPrompt} disabled={!previewPromptText}>
+                  프롬프트 복사
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleSetPreviewAsReference()} disabled={!previewImageUrl}>
+                  기준이미지 등록
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()}>
+                  삭제
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+                <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+                  {previewPromptText || "저장된 프롬프트가 없습니다."}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모드</p>
+                  <p className="uppercase">{previewRecord.mode}</p>
+                </div>
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">모델</p>
+                  <p>{previewRecord.model}</p>
+                </div>
+                {previewRecord.promptMeta?.aspectRatio ? (
+                  <div className="rounded-lg border bg-background/60 p-2">
+                    <p className="font-medium text-foreground">비율</p>
+                    <p>{getAspectRatioLabel(previewRecord.promptMeta.aspectRatio)}</p>
+                  </div>
+                ) : null}
+                <div className="rounded-lg border bg-background/60 p-2">
+                  <p className="font-medium text-foreground">파일</p>
+                  <p>{previewImageUrl.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
       ) : null}
@@ -3163,4 +3394,3 @@ export function StudioShell() {
     </PresetLibraryProvider>
   );
 }
-

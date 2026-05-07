@@ -107,8 +107,17 @@ async function readAuthFile(filePath: string): Promise<CodexAuthFile> {
 
 async function writeAuthFile(filePath: string, data: CodexAuthFile): Promise<void> {
   const serialized = JSON.stringify(data, null, 2);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, serialized, { mode: 0o600 });
+  const dir = path.dirname(filePath);
+  const tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.writeFile(tmpPath, serialized, { mode: 0o600 });
+    await fs.rename(tmpPath, filePath);
+    await fs.chmod(filePath, 0o600).catch(() => undefined);
+  } catch (error) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
@@ -287,19 +296,23 @@ async function loadFreshAuth(): Promise<CachedAuth> {
 }
 
 export async function getCodexAuth(): Promise<{ accessToken: string; accountId: string }> {
+  const fresh = await getFreshCachedAuth();
+  return { accessToken: fresh.accessToken, accountId: fresh.accountId };
+}
+
+async function getFreshCachedAuth(): Promise<CachedAuth> {
   if (cache && cache.expiresAt - Date.now() > REFRESH_MARGIN_MS) {
-    return { accessToken: cache.accessToken, accountId: cache.accountId };
+    return cache;
   }
   if (inflight) {
-    const result = await inflight;
-    return { accessToken: result.accessToken, accountId: result.accountId };
+    return inflight;
   }
 
   inflight = loadFreshAuth();
   try {
     const fresh = await inflight;
     cache = fresh;
-    return { accessToken: fresh.accessToken, accountId: fresh.accountId };
+    return fresh;
   } finally {
     inflight = null;
   }
@@ -354,8 +367,7 @@ export async function getCodexAuthStatus(): Promise<{
   error?: { code: string; message: string };
 }> {
   try {
-    const fresh = await loadFreshAuth();
-    cache = fresh;
+    const fresh = await getFreshCachedAuth();
     return {
       authenticated: true,
       filePath: fresh.filePath,

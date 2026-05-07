@@ -11,6 +11,44 @@ interface UseGeneratedImagesOptions {
 
 const HISTORY_REFRESH_EVENT = "yesgem-history-refresh";
 
+type DiskImageEntry = {
+  id: string;
+  ext: string;
+  bucket: string;
+  createdAtIso: string;
+  size: number;
+};
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
+
+function createDiskFallbackRecord(item: DiskImageEntry): GeneratedImageDocument {
+  return {
+    id: item.id,
+    userId: "local",
+    mode: "create",
+    promptMeta: {
+      rawPrompt: "디스크에서 복원된 이미지",
+      refinedPrompt: "디스크에서 복원된 이미지"
+    },
+    status: "completed",
+    imageUrl: `/api/images/${item.id}`,
+    thumbnailUrl: `/api/images/${item.id}`,
+    originalImageUrl: `/api/images/${item.id}`,
+    metadata: {
+      diskFallback: true,
+      fileSize: item.size,
+      bucket: item.bucket,
+      ext: item.ext
+    },
+    model: "gpt-image-2",
+    createdAt: item.createdAtIso,
+    updatedAt: item.createdAtIso
+  };
+}
+
 function readRecords(): GeneratedImageDocument[] {
   if (typeof window === "undefined") return [];
   try {
@@ -33,15 +71,57 @@ function shallowEqual(a: GeneratedImageDocument[], b: GeneratedImageDocument[]) 
   return true;
 }
 
+function sortRecords(records: GeneratedImageDocument[]) {
+  return [...records].sort((a, b) => {
+    const aTime = Date.parse(a.createdAt || a.updatedAt || "");
+    const bTime = Date.parse(b.createdAt || b.updatedAt || "");
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
+}
+
+function mergeWithDiskRecords(
+  localRecords: GeneratedImageDocument[],
+  diskItems: DiskImageEntry[]
+): GeneratedImageDocument[] {
+  const knownIds = new Set<string>();
+  const knownFileIds = new Set<string>();
+
+  localRecords.forEach(record => {
+    knownIds.add(record.id);
+    const fileId =
+      getLocalImageId(record.imageUrl) ??
+      getLocalImageId(record.originalImageUrl) ??
+      getLocalImageId(record.thumbnailUrl);
+    if (fileId) {
+      knownFileIds.add(fileId);
+    }
+  });
+
+  const fallbackRecords = diskItems
+    .filter(item => !knownIds.has(item.id) && !knownFileIds.has(item.id))
+    .map(createDiskFallbackRecord);
+
+  return sortRecords([...localRecords, ...fallbackRecords]);
+}
+
+async function readDiskRecords(signal?: AbortSignal): Promise<DiskImageEntry[]> {
+  const res = await fetch("/api/images", { signal, cache: "no-store" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { ok?: boolean; items?: DiskImageEntry[] };
+  return data.ok && Array.isArray(data.items) ? data.items : [];
+}
+
 export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
   const { limitResults } = options;
-  const [records, setRecords] = useState<GeneratedImageDocument[]>(() => readRecords());
+  const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>(() => readRecords());
+  const [diskItems, setDiskItems] = useState<DiskImageEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const reload = () => {
-      setRecords(prev => {
+      setLocalRecords(prev => {
         const next = readRecords();
         return shallowEqual(prev, next) ? prev : next;
       });
@@ -62,12 +142,45 @@ export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
     };
   }, []);
 
-  const limited = useMemo(
-    () => (limitResults ? records.slice(0, limitResults) : records),
-    [records, limitResults]
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const reloadDisk = async () => {
+      setLoading(true);
+      try {
+        const next = await readDiskRecords(controller.signal);
+        setDiskItems(next);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn("[useGeneratedImages] Failed to read disk images", error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    reloadDisk();
+    const handleCustom = () => reloadDisk();
+    window.addEventListener(HISTORY_REFRESH_EVENT, handleCustom as EventListener);
+    return () => {
+      controller.abort();
+      window.removeEventListener(HISTORY_REFRESH_EVENT, handleCustom as EventListener);
+    };
+  }, []);
+
+  const mergedRecords = useMemo(
+    () => mergeWithDiskRecords(localRecords, diskItems),
+    [localRecords, diskItems]
   );
 
-  return { records: limited, loading: false };
+  const limited = useMemo(
+    () => (limitResults ? mergedRecords.slice(0, limitResults) : mergedRecords),
+    [mergedRecords, limitResults]
+  );
+
+  return { records: limited, loading };
 }
 
 export function notifyHistoryRefresh() {
