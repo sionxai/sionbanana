@@ -48,7 +48,7 @@ fetch('https://chatgpt.com/backend-api/codex/responses', {
     'chatgpt-account-id': '<account_id>',
     'OpenAI-Beta': 'responses=experimental'
   },
-  body: { model: 'gpt-5.4-mini', input: [...], tools: [...], stream: true }
+  body: { model: 'gpt-5.5', input: [...], tools: [...], stream: true }
 })
                                         │
                                         ▼
@@ -89,7 +89,7 @@ SSE 스트림 파싱 → 텍스트 또는 base64 PNG 추출
 ```ts
 export async function callCodexResponses(input: {
   prompt?: string | Message[];
-  model?: 'gpt-5.4-mini' | 'gpt-5.4' | 'gpt-5.5';
+  model?: 'gpt-5.5' | 'gpt-5.4' | 'gpt-5.5';
   mode: 'text' | 'image';
   imageOptions?: { quality, size, moderation, references?: Buffer[] };
   signal?: AbortSignal;
@@ -124,8 +124,8 @@ export async function callCodexResponses(input: {
 #### 2.2 `app/api/storyboard/route.ts` 🔧 (가장 큰 작업)
 **현재**: OpenAI Chat Completions (`gpt-4o-mini`)
 **변경**:
-- L929~974, L1097~1108, L1153~1200 (OpenAI fetch 3곳) → `callCodexResponses({ mode: 'text', model: 'gpt-5.4-mini' })`
-- 모델명 변경: `gpt-4o-mini` → `gpt-5.4-mini`
+- L929~974, L1097~1108, L1153~1200 (OpenAI fetch 3곳) → `callCodexResponses({ mode: 'text', model: 'gpt-5.5' })`
+- 모델명 변경: `gpt-4o-mini` → `gpt-5.5`
 - 프롬프트 빌더 3개 (`buildJsonPrompt`, `buildSoraPromptV2`, `buildNaturalPrompt`) **완전 유지** (최근 1.56v 작업분 보존)
 - `characterNotes` 처리 **유지**
 - Zod 스키마 **유지**
@@ -307,7 +307,7 @@ SIONBANANA_DATA_DIR=
 CODEX_HOME=
 
 # 기본 모델
-DEFAULT_TEXT_MODEL=gpt-5.4-mini
+DEFAULT_TEXT_MODEL=gpt-5.5
 DEFAULT_IMAGE_QUALITY=medium
 ```
 
@@ -381,7 +381,7 @@ export async function callCodexResponses(opts: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: opts.model ?? 'gpt-5.4-mini',
+      model: opts.model ?? 'gpt-5.5',
       input: opts.input,
       tools,
       tool_choice: tools ? 'required' : undefined,
@@ -440,7 +440,7 @@ Phase 1~7 완료 후 다음을 순차적으로 확인:
 - [ ] 스튜디오 페이지 진입 → 로그인 게이트 없이 바로 표시
 - [ ] 이미지 1장 생성 → `data/images/2026-04/{uuid}.png` 파일 생성 + SQLite INSERT
 - [ ] 히스토리 페이지에서 방금 생성한 이미지 표시
-- [ ] 스토리보드 생성 (자연어/JSON 두 모드 모두) → `gpt-5.4-mini` 응답 받기
+- [ ] 스토리보드 생성 (자연어/JSON 두 모드 모두) → `gpt-5.5` 응답 받기
 - [ ] 프롬프트 최적화 (`/api/prompt`) 동작
 - [ ] 프리셋 페이지 → `presets-migration-data.json` 시드 표시
 - [ ] `npm run lint` 통과
@@ -453,7 +453,7 @@ Phase 1~7 완료 후 다음을 순차적으로 확인:
 | 리스크 | 완화책 |
 |------|------|
 | Codex 비공식 endpoint 약관 위반 위험 | 시온 본인 계정으로 본인 PC에서만 사용. README에 면책 명시. GitHub 공개 시 OpenAI가 차단 가능 |
-| `gpt-5.4-mini` 모델이 Codex 플랜에 따라 다름 | 환경변수 `DEFAULT_TEXT_MODEL`로 오버라이드. 모델 이름은 Codex CLI 버전 따라 변동 가능성 |
+| `gpt-5.5` 모델이 Codex 플랜에 따라 다름 | 환경변수 `DEFAULT_TEXT_MODEL`로 오버라이드. 모델 이름은 Codex CLI 버전 따라 변동 가능성 |
 | OpenAI가 OAuth 토큰 검증을 강화하면 깨짐 | 폴백 없음. 버전 잠금 + 변경 시 즉시 패치 정책 |
 | 이미지 생성 응답 스키마 변경 | `image_generation_call.result` 키 외에 fallback (`output_image`, `image_url`) 시도하는 파서 |
 | `studio-shell.tsx` 슬림화 중 회귀 | 한 commit에 한 영역만 (Firebase 제거, 그 다음 로컬 API 연결 등 단계 분리) |

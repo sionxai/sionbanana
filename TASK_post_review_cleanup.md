@@ -98,7 +98,7 @@ M  tsconfig.tsbuildinfo                           # 빌드 산출물 (commit X)
 - [ ] `idempotencyKey`가 `crypto.randomUUID()` 또는 fallback으로 자동 생성 + 옵션 통과
 
 **`lib/codex-fetch.ts`** (메인 Claude 추가분):
-- [ ] `DEFAULT_IMAGE_MODEL` / `DEFAULT_TEXT_MODEL` fallback이 `"gpt-5.5"` (이전 `gpt-5.4-mini`에서 변경)
+- [ ] `DEFAULT_IMAGE_MODEL` / `DEFAULT_TEXT_MODEL` fallback이 `"gpt-5.5"` (이전 `gpt-5.5`에서 변경)
 - [ ] 진단 로그 (`codex request: model=...`, `response.failed payload:`) 유지 — MCP 도입 시까지 유용
 - [ ] `response.failed` 이벤트의 전체 payload를 logTag와 함께 console.error로 출력
 

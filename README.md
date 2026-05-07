@@ -1,6 +1,6 @@
 # 시온 바나나 (Sion Banana) — 로컬 도구 버전
 
-본인의 ChatGPT 구독 (Plus/Pro/Business/Enterprise 어느 플랜이든)으로 PC에서 직접 돌리는 AI 이미지 + 스토리보드 워크플로우 도구. Firebase / 별도 백엔드 / 별도 API 결제 없이, **Codex CLI OAuth 인증**으로 `gpt-image-2` (이미지) + `gpt-5.4-mini` (텍스트)를 호출한다.
+본인의 ChatGPT 구독 (Plus/Pro/Business/Enterprise 어느 플랜이든)으로 PC에서 직접 돌리는 AI 이미지 + 스토리보드 워크플로우 도구. Firebase / 별도 백엔드 / 별도 API 결제 없이, **Codex CLI OAuth 인증**으로 `gpt-image-2` (이미지) + `gpt-5.5` (텍스트)를 호출한다.
 
 ## 기술 스택
 
@@ -42,8 +42,8 @@ SIONBANANA_DATA_DIR=          # 데이터 디렉토리. 비워두면 ./data
 CODEX_HOME=                    # ~/.codex 외 다른 위치를 쓸 때만
 CHATGPT_LOCAL_HOME=            # 보조 인증 디렉토리
 CODEX_RESPONSES_ENDPOINT=      # 보통 변경 불필요
-DEFAULT_TEXT_MODEL=gpt-5.4-mini
-DEFAULT_IMAGE_MODEL=gpt-5.4-mini
+DEFAULT_TEXT_MODEL=gpt-5.5
+DEFAULT_IMAGE_MODEL=gpt-5.5
 ```
 
 ## 동작 확인
