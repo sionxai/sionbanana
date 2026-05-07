@@ -26,7 +26,6 @@ export const serverEnv = serverSchema.parse({
 // 로컬 단일 사용자 도구로 전환되면서 Firebase 의존성을 제거. 호출처는 점진적으로 정리.
 export const clientEnv = {} as Record<string, string | undefined>;
 export const isFirebaseConfigured = false;
-export const shouldUseFirestore = false;
 
 export function getServiceAccountKey(): null {
   return null;
