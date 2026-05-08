@@ -35,6 +35,7 @@ import {
   type StoryReferenceLibrary,
   type StoryReferenceRole
 } from "@/lib/story-references";
+import { TONE_OPTIONS } from "@/lib/story-tones";
 import type { AspectRatioPreset, GeneratedImageDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -209,13 +210,17 @@ function buildReferenceMap(references: StoryReference[]): string {
     .join("; ");
 }
 
-function buildFinalPrompt(scenePrompt: string, references: StoryReference[]): string {
+const STORY_CONTINUITY_LOCK =
+  "Series continuity: keep recurring @handles visually consistent across scenes; preserve established identity, scale, wardrobe cues, and location character unless this scene explicitly changes them.";
+
+function buildFinalPrompt(scenePrompt: string, references: StoryReference[], toneSuffix?: string): string {
   const refMap = buildReferenceMap(references);
   return [
     `Reference map: ${refMap}.`,
-    "Identity lock: every @handle in the scene must use only its matching reference image. For character references, preserve the same face, hair, age impression, body proportions, outfit, and visible identity details; do not invent, blend, or replace the person. For location references, preserve the recognizable architecture, layout, materials, signage, and major visual features; adapt only camera angle, lighting, weather, and staging required by the scene.",
-    `Detailed scene image prompt: ${scenePrompt}`
-  ].join(" ");
+    `Detailed scene image prompt: ${scenePrompt}`,
+    STORY_CONTINUITY_LOCK,
+    toneSuffix
+  ].filter(Boolean).join(" ");
 }
 
 function getSceneStatusLabel(status: SceneStatus): string {
@@ -305,6 +310,7 @@ export function StoryStudioShell() {
   const [storyText, setStoryText] = useState("");
   const [sceneCount, setSceneCount] = useState(5);
   const [mode, setMode] = useState<StoryMode>("instant");
+  const [toneId, setToneId] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioPreset>(DEFAULT_ASPECT_RATIO);
   const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
@@ -345,6 +351,7 @@ export function StoryStudioShell() {
   const storyMentions = useMemo(() => parseStoryMentions(storyText, library), [library, storyText]);
   const registeredReferences = useMemo(() => flattenReferences(library), [library]);
   const inputReason = useMemo(() => getStoryInputReason(storyText, library), [library, storyText]);
+  const selectedTone = useMemo(() => TONE_OPTIONS.find(tone => tone.id === toneId) ?? null, [toneId]);
   const hasGeneratingScene = scenes.some(scene => scene.status === "generating");
   const isBusy = isSplitting || isGeneratingAll || hasGeneratingScene;
 
@@ -437,7 +444,8 @@ export function StoryStudioShell() {
       const mentionedRefs = validation.mentions
         .map(handle => findReferenceByHandle(library, handle))
         .filter((ref): ref is StoryReference => ref !== null);
-      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs);
+      const toneSuffix = TONE_OPTIONS.find(tone => tone.id === toneId)?.promptSuffix;
+      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, toneSuffix);
       const referenceGallery = mentionedRefs.map(ref => ref.imageUrl);
       const referenceMap = buildReferenceMap(mentionedRefs);
 
@@ -505,6 +513,9 @@ export function StoryStudioShell() {
           storyImageSize: imageGenOptions.size,
           storyQuality: imageGenOptions.quality,
           storyModeration: imageGenOptions.moderation,
+          storyToneId: selectedTone?.id ?? null,
+          storyToneLabel: selectedTone?.label ?? null,
+          storyToneCategory: selectedTone?.category ?? null,
           generationOptions: {
             quality: imageGenOptions.quality,
             imageSize: imageGenOptions.size,
@@ -524,7 +535,7 @@ export function StoryStudioShell() {
       broadcastHistoryUpdate(merged, "story");
       return historyRecords[0];
     },
-    [aspectRatio, imageGenOptions, library, storyText]
+    [aspectRatio, imageGenOptions, library, selectedTone, storyText, toneId]
   );
 
   const generateSceneTargets = useCallback(
