@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -47,12 +48,14 @@ import {
   type StoryReferenceLibrary,
   type StoryReferenceRole
 } from "@/lib/story-references";
-import { TONE_OPTIONS } from "@/lib/story-tones";
+import { TONE_CATEGORY_LABELS, TONE_OPTIONS, type ToneCategory, type ToneOption } from "@/lib/story-tones";
 import type { AspectRatioPreset, GeneratedImageDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type SceneStatus = "idle" | "generating" | "completed" | "error";
 type StoryMode = "review" | "instant";
+
+const TONE_CATEGORY_ORDER: ToneCategory[] = ["cinematic", "commercial", "documentary", "vlog"];
 
 type Scene = {
   id: string;
@@ -880,6 +883,9 @@ export function StoryStudioShell() {
               onSceneCountChange={setSceneCount}
               mode={mode}
               onModeChange={setMode}
+              toneId={toneId}
+              selectedTone={selectedTone}
+              onToneChange={setToneId}
               aspectRatio={aspectRatio}
               onAspectRatioChange={setAspectRatio}
               registeredReferences={registeredReferences}
@@ -1096,6 +1102,9 @@ function StoryPromptInput({
   onSceneCountChange,
   mode,
   onModeChange,
+  toneId,
+  selectedTone,
+  onToneChange,
   aspectRatio,
   onAspectRatioChange,
   registeredReferences,
@@ -1110,6 +1119,9 @@ function StoryPromptInput({
   onSceneCountChange: (value: number) => void;
   mode: StoryMode;
   onModeChange: (value: StoryMode) => void;
+  toneId: string | null;
+  selectedTone: ToneOption | null;
+  onToneChange: (value: string | null) => void;
   aspectRatio: AspectRatioPreset;
   onAspectRatioChange: (value: AspectRatioPreset) => void;
   registeredReferences: StoryReference[];
@@ -1120,6 +1132,9 @@ function StoryPromptInput({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const actionLabel = mode === "review" ? "스토리보드 분할" : "자동 생성";
+  const selectedToneSummary = selectedTone
+    ? `${TONE_CATEGORY_LABELS[selectedTone.category]} / ${selectedTone.label}`
+    : "기본 (없음)";
 
   const insertHandle = useCallback(
     (handle: string) => {
@@ -1180,6 +1195,56 @@ function StoryPromptInput({
             <span>필요하면 @핸들을 직접 포함할 수 있습니다.</span>
             <span>{storyText.trim().length}/2000</span>
           </div>
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-border/70 bg-background p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="text-xs text-muted-foreground">톤</Label>
+            <Badge variant="outline">선택된 톤: {selectedToneSummary}</Badge>
+          </div>
+          <Button
+            type="button"
+            variant={toneId === null ? "default" : "outline"}
+            size="sm"
+            onClick={() => onToneChange(null)}
+            disabled={busy}
+            title="톤 suffix를 추가하지 않습니다."
+            aria-label="기본 톤: 톤 suffix를 추가하지 않습니다."
+          >
+            기본 (없음)
+          </Button>
+          <Tabs defaultValue="cinematic" className="space-y-3">
+            <TabsList className="grid h-auto w-full grid-cols-4 gap-1 bg-muted p-1">
+              {TONE_CATEGORY_ORDER.map(category => (
+                <TabsTrigger key={category} value={category} className="px-2 py-1.5 text-xs">
+                  {TONE_CATEGORY_LABELS[category]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {TONE_CATEGORY_ORDER.map(category => (
+              <TabsContent key={category} value={category} className="mt-0">
+                <ToggleGroup
+                  type="single"
+                  value={toneId ?? ""}
+                  onValueChange={value => onToneChange(value || null)}
+                  className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5"
+                  disabled={busy}
+                >
+                  {TONE_OPTIONS.filter(tone => tone.category === category).map(tone => (
+                    <ToggleGroupItem
+                      key={tone.id}
+                      value={tone.id}
+                      className="h-auto min-h-9 min-w-0 px-2 py-2 text-xs leading-tight"
+                      title={tone.description}
+                      aria-label={`${TONE_CATEGORY_LABELS[tone.category]} ${tone.label}: ${tone.description}`}
+                    >
+                      {tone.label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)]">
