@@ -1,7 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { ArrowDown, ArrowUp, Download, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Upload, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Image as ImageIcon,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Upload,
+  X
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1375,6 +1387,8 @@ function SceneCard({
   const isCompleted = scene.status === "completed" && Boolean(scene.resultUrl);
   const canRegenerate = !allGenerationActive && !isGenerating;
   const downloadExtension = getImageFormatExtension(scene.resultFormat);
+  const [isGeneratedPromptOpen, setIsGeneratedPromptOpen] = useState(false);
+  const generatedPrompt = scene.resultRecord?.promptMeta?.refinedPrompt ?? scene.prompt;
 
   return (
     <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-background">
@@ -1435,6 +1449,23 @@ function SceneCard({
           ) : (
             <span className="text-xs text-muted-foreground">멘션 없음</span>
           )}
+        </div>
+
+        <div className="rounded-lg border border-border/70 bg-muted/20">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-foreground"
+            onClick={() => setIsGeneratedPromptOpen(current => !current)}
+            aria-expanded={isGeneratedPromptOpen}
+          >
+            <span>생성 프롬프트</span>
+            {isGeneratedPromptOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          {isGeneratedPromptOpen ? (
+            <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words border-t border-border/70 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {generatedPrompt}
+            </pre>
+          ) : null}
         </div>
 
         <div
