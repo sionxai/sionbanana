@@ -336,7 +336,9 @@ export function StoryStudioShell() {
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [isAnyGenerating, setIsAnyGenerating] = useState(false);
   const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
+  const generationLockRef = useRef(false);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   useEffect(() => {
@@ -372,7 +374,22 @@ export function StoryStudioShell() {
   const inputReason = useMemo(() => getStoryInputReason(storyText, library), [library, storyText]);
   const selectedTone = useMemo(() => TONE_OPTIONS.find(tone => tone.id === toneId) ?? null, [toneId]);
   const hasGeneratingScene = scenes.some(scene => scene.status === "generating");
-  const isBusy = isSplitting || isGeneratingAll || hasGeneratingScene;
+  const isBusy = isAnyGenerating || isSplitting || isGeneratingAll || hasGeneratingScene;
+
+  const acquireGenerationLock = useCallback(() => {
+    if (generationLockRef.current) {
+      toast.info("이미 생성 작업이 진행 중입니다.");
+      return false;
+    }
+    generationLockRef.current = true;
+    setIsAnyGenerating(true);
+    return true;
+  }, []);
+
+  const releaseGenerationLock = useCallback(() => {
+    generationLockRef.current = false;
+    setIsAnyGenerating(false);
+  }, []);
 
   const persistSlot = useCallback(
     (
@@ -561,68 +578,74 @@ export function StoryStudioShell() {
     async (
       targets: Array<{ scene: Scene; index: number }>,
       totalScenes: number,
-      options: { markAllBusy?: boolean } = {}
+      options: { markAllBusy?: boolean; skipGenerationLock?: boolean } = {}
     ) => {
       if (!targets.length) {
         return;
       }
       const markAllBusy = options.markAllBusy ?? targets.length > 1;
+      const shouldManageLock = !options.skipGenerationLock;
 
-      const prepared = targets.map(target => {
-        const validation = validateScenePrompt(target.scene.prompt, library);
-        return {
-          ...target,
-          scene: {
-            ...target.scene,
-            mentions: validation.mentions,
-            status: validation.error ? "error" as const : "idle" as const,
-            error: validation.error ?? undefined,
-            resultUrl: validation.error ? undefined : target.scene.resultUrl,
-            resultRecord: validation.error ? undefined : target.scene.resultRecord,
-            resultFormat: validation.error ? undefined : target.scene.resultFormat
-          },
-          error: validation.error
-        };
-      });
-      const preparedById = new Map(prepared.map(item => [item.scene.id, item]));
-      const validTargets = prepared.filter(item => !item.error);
+      if (shouldManageLock && !acquireGenerationLock()) {
+        return;
+      }
 
-      setScenes(current =>
-        current.map(scene => {
-          const preparedScene = preparedById.get(scene.id);
-          if (!preparedScene) {
-            return scene;
-          }
-          if (preparedScene.error) {
+      try {
+        const prepared = targets.map(target => {
+          const validation = validateScenePrompt(target.scene.prompt, library);
+          return {
+            ...target,
+            scene: {
+              ...target.scene,
+              mentions: validation.mentions,
+              status: validation.error ? "error" as const : "idle" as const,
+              error: validation.error ?? undefined,
+              resultUrl: validation.error ? undefined : target.scene.resultUrl,
+              resultRecord: validation.error ? undefined : target.scene.resultRecord,
+              resultFormat: validation.error ? undefined : target.scene.resultFormat
+            },
+            error: validation.error
+          };
+        });
+        const preparedById = new Map(prepared.map(item => [item.scene.id, item]));
+        const validTargets = prepared.filter(item => !item.error);
+
+        setScenes(current =>
+          current.map(scene => {
+            const preparedScene = preparedById.get(scene.id);
+            if (!preparedScene) {
+              return scene;
+            }
+            if (preparedScene.error) {
+              return {
+                ...preparedScene.scene,
+                status: "error",
+                error: preparedScene.error,
+                resultUrl: undefined,
+                resultRecord: undefined,
+                resultFormat: undefined
+              };
+            }
             return {
               ...preparedScene.scene,
-              status: "error",
-              error: preparedScene.error,
+              status: "generating",
+              error: undefined,
               resultUrl: undefined,
               resultRecord: undefined,
               resultFormat: undefined
             };
-          }
-          return {
-            ...preparedScene.scene,
-            status: "generating",
-            error: undefined,
-            resultUrl: undefined,
-            resultRecord: undefined,
-            resultFormat: undefined
-          };
-        })
-      );
+          })
+        );
 
-      if (!validTargets.length) {
-        toast.error("생성 가능한 씬이 없습니다.");
-        return;
-      }
+        if (!validTargets.length) {
+          toast.error("생성 가능한 씬이 없습니다.");
+          return;
+        }
 
-      if (markAllBusy) {
-        setIsGeneratingAll(true);
-      }
-      try {
+        if (markAllBusy) {
+          setIsGeneratingAll(true);
+        }
+
         const settled = await runWithConcurrency(validTargets, 4, async target => {
           try {
             const record = await generateSceneImage(target.scene, target.index, totalScenes);
@@ -672,9 +695,12 @@ export function StoryStudioShell() {
         if (markAllBusy) {
           setIsGeneratingAll(false);
         }
+        if (shouldManageLock) {
+          releaseGenerationLock();
+        }
       }
     },
-    [generateSceneImage, imageGenOptions.format, library]
+    [acquireGenerationLock, generateSceneImage, imageGenOptions.format, library, releaseGenerationLock]
   );
 
   const handleGenerate = useCallback(async () => {
@@ -686,6 +712,9 @@ export function StoryStudioShell() {
     const handles = buildStoryboardHandles(library);
     if (!handles.length) {
       toast.error("등록된 핸들이 최소 1개 필요합니다.");
+      return;
+    }
+    if (!acquireGenerationLock()) {
       return;
     }
 
@@ -731,15 +760,16 @@ export function StoryStudioShell() {
         await generateSceneTargets(
           nextScenes.map((scene, index) => ({ scene, index })),
           nextScenes.length,
-          { markAllBusy: true }
+          { markAllBusy: true, skipGenerationLock: true }
         );
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "스토리 분할 중 오류가 발생했습니다.");
     } finally {
       setIsSplitting(false);
+      releaseGenerationLock();
     }
-  }, [generateSceneTargets, inputReason, library, mode, sceneCount, storyText]);
+  }, [acquireGenerationLock, generateSceneTargets, inputReason, library, mode, releaseGenerationLock, sceneCount, storyText]);
 
   const handleGenerateAll = useCallback(() => {
     void generateSceneTargets(
@@ -899,7 +929,7 @@ export function StoryStudioShell() {
               scenes={scenes}
               mode={mode}
               busy={isBusy}
-              allGenerationActive={isGeneratingAll}
+              allGenerationActive={isBusy}
               onPromptChange={handleScenePromptChange}
               onDownloadCompletedImages={handleDownloadCompletedImages}
               onGenerateAll={handleGenerateAll}
