@@ -14,6 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { persistRecordsMerge, broadcastHistoryUpdate } from "@/components/studio/history-sync";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
+import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { parseStoryMentions, type ParsedStory } from "@/lib/story-mentions";
 import {
   STORY_REFERENCE_SLOT_COUNT,
@@ -38,20 +39,9 @@ type SlotUploadHandler = (role: StoryReferenceRole, slotIndex: number, event: Ch
 
 const EMPTY_RESULT: StoryResultState = { status: "idle" };
 
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("파일을 읽을 수 없습니다."));
-      }
-    };
-    reader.onerror = () => reject(new Error("파일을 읽는 중 오류가 발생했습니다."));
-    reader.readAsDataURL(file);
-  });
-}
+type StoryReferenceUploadResponse =
+  | { ok: true; imageUrl: string; id: string }
+  | { ok: false; reason?: string };
 
 function getRoleSlots(library: StoryReferenceLibrary, role: StoryReferenceRole) {
   return role === "character" ? library.characters : library.locations;
@@ -59,6 +49,10 @@ function getRoleSlots(library: StoryReferenceLibrary, role: StoryReferenceRole) 
 
 function getRoleLabel(role: StoryReferenceRole) {
   return role === "character" ? "인물" : "로케이션";
+}
+
+function getSlotUploadKey(role: StoryReferenceRole, slotIndex: number): string {
+  return `${role}:${slotIndex}`;
 }
 
 function getDisableReason(parsed: ParsedStory): string | null {
@@ -107,6 +101,7 @@ export function StoryStudioShell() {
   const [storyText, setStoryText] = useState("");
   const [aspectRatio, setAspectRatio] = useState<AspectRatioPreset>(DEFAULT_ASPECT_RATIO);
   const [result, setResult] = useState<StoryResultState>(EMPTY_RESULT);
+  const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLibrary(loadStoryReferences());
@@ -156,9 +151,31 @@ export function StoryStudioShell() {
         return;
       }
 
-      void readFileAsDataURL(file)
-        .then(dataUrl => {
-          persistSlot(role, slotIndex, { imageUrl: dataUrl });
+      const uploadKey = getSlotUploadKey(role, slotIndex);
+      setUploadingSlots(current => ({ ...current, [uploadKey]: true }));
+
+      void resizeImageToDataUrl(file, { maxSize: 1920, mime: "image/jpeg", quality: 0.85 })
+        .then(async ({ dataUrl }) => {
+          const response = await fetch("/api/story-references", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64: dataUrl })
+          });
+          const body = (await response.json().catch(() => null)) as StoryReferenceUploadResponse | null;
+
+          if (!body) {
+            throw new Error("이미지 업로드 응답을 읽지 못했습니다.");
+          }
+
+          if (!body.ok) {
+            throw new Error(body.reason ?? "이미지 업로드에 실패했습니다.");
+          }
+
+          if (!response.ok) {
+            throw new Error("이미지 업로드에 실패했습니다.");
+          }
+
+          persistSlot(role, slotIndex, { imageUrl: body.imageUrl });
           toast.success(`${getRoleLabel(role)} 이미지를 저장했습니다.`);
         })
         .catch(error => {
@@ -166,6 +183,11 @@ export function StoryStudioShell() {
         })
         .finally(() => {
           input.value = "";
+          setUploadingSlots(current => {
+            const next = { ...current };
+            delete next[uploadKey];
+            return next;
+          });
         });
     },
     [persistSlot]
@@ -308,12 +330,14 @@ export function StoryStudioShell() {
           <div className="space-y-5">
             <CharacterLibrary
               library={library}
+              uploadingSlots={uploadingSlots}
               onHandleChange={(slotIndex, handle) => persistSlot("character", slotIndex, { handle })}
               onImageUpload={handleSlotUpload}
               onImageClear={slotIndex => persistSlot("character", slotIndex, { imageUrl: "" })}
             />
             <LocationLibrary
               library={library}
+              uploadingSlots={uploadingSlots}
               onHandleChange={(slotIndex, handle) => persistSlot("location", slotIndex, { handle })}
               onImageUpload={handleSlotUpload}
               onImageClear={slotIndex => persistSlot("location", slotIndex, { imageUrl: "" })}
@@ -344,11 +368,13 @@ export function StoryStudioShell() {
 
 function CharacterLibrary({
   library,
+  uploadingSlots,
   onHandleChange,
   onImageUpload,
   onImageClear
 }: {
   library: StoryReferenceLibrary;
+  uploadingSlots: Record<string, boolean>;
   onHandleChange: (slotIndex: number, handle: string) => void;
   onImageUpload: SlotUploadHandler;
   onImageClear: (slotIndex: number) => void;
@@ -358,6 +384,7 @@ function CharacterLibrary({
       title="인물 라이브러리"
       role="character"
       slots={library.characters}
+      uploadingSlots={uploadingSlots}
       imagePlaceholder="인물 이미지"
       handlePlaceholder="예: 민수"
       onHandleChange={onHandleChange}
@@ -369,11 +396,13 @@ function CharacterLibrary({
 
 function LocationLibrary({
   library,
+  uploadingSlots,
   onHandleChange,
   onImageUpload,
   onImageClear
 }: {
   library: StoryReferenceLibrary;
+  uploadingSlots: Record<string, boolean>;
   onHandleChange: (slotIndex: number, handle: string) => void;
   onImageUpload: SlotUploadHandler;
   onImageClear: (slotIndex: number) => void;
@@ -383,6 +412,7 @@ function LocationLibrary({
       title="로케이션 라이브러리"
       role="location"
       slots={library.locations}
+      uploadingSlots={uploadingSlots}
       imagePlaceholder="로케이션 이미지"
       handlePlaceholder="예: 카페"
       onHandleChange={onHandleChange}
@@ -396,6 +426,7 @@ function ReferenceLibrary({
   title,
   role,
   slots,
+  uploadingSlots,
   imagePlaceholder,
   handlePlaceholder,
   onHandleChange,
@@ -405,6 +436,7 @@ function ReferenceLibrary({
   title: string;
   role: StoryReferenceRole;
   slots: (StoryReference | null)[];
+  uploadingSlots: Record<string, boolean>;
   imagePlaceholder: string;
   handlePlaceholder: string;
   onHandleChange: (slotIndex: number, handle: string) => void;
@@ -420,6 +452,7 @@ function ReferenceLibrary({
         {Array.from({ length: STORY_REFERENCE_SLOT_COUNT }, (_, slotIndex) => {
           const slot = slots[slotIndex] ?? null;
           const inputId = `${role}-story-reference-${slotIndex}`;
+          const isUploading = uploadingSlots[getSlotUploadKey(role, slotIndex)] ?? false;
           return (
             <div key={slotIndex} className="rounded-lg border border-border/70 bg-background p-3">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -438,7 +471,7 @@ function ReferenceLibrary({
                 className="mb-3"
               />
               <div className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/30">
-                <div className="flex aspect-[4/3] items-center justify-center bg-background">
+                <div className="relative flex aspect-[4/3] items-center justify-center bg-background">
                   {slot?.imageUrl ? (
                     <img
                       src={slot.imageUrl}
@@ -451,6 +484,12 @@ function ReferenceLibrary({
                       <span>{imagePlaceholder}</span>
                     </div>
                   )}
+                  {isUploading ? (
+                    <div className="absolute flex flex-col items-center gap-2 rounded-md bg-background/80 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <span>저장 중</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2 border-t border-border/70 bg-card p-2">
                   <input
@@ -458,12 +497,22 @@ function ReferenceLibrary({
                     type="file"
                     accept="image/*"
                     className="hidden"
+                    disabled={isUploading}
                     onChange={event => onImageUpload(role, slotIndex, event)}
                   />
-                  <Button asChild variant="outline" size="sm" className="flex-1">
-                    <label htmlFor={inputId} className="cursor-pointer">
-                      <Upload className="mr-1.5 h-3.5 w-3.5" />
-                      업로드
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className={cn("flex-1", isUploading && "pointer-events-none opacity-70")}
+                  >
+                    <label htmlFor={isUploading ? undefined : inputId} className="cursor-pointer" aria-disabled={isUploading}>
+                      {isUploading ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {isUploading ? "저장 중" : "업로드"}
                     </label>
                   </Button>
                   <Button
@@ -471,7 +520,7 @@ function ReferenceLibrary({
                     variant="ghost"
                     size="sm"
                     onClick={() => onImageClear(slotIndex)}
-                    disabled={!slot?.imageUrl}
+                    disabled={!slot?.imageUrl || isUploading}
                     aria-label={`${title} 슬롯 ${slotIndex + 1} 이미지 클리어`}
                   >
                     <X className="h-4 w-4" />
