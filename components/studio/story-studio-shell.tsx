@@ -209,9 +209,12 @@ function buildReferenceMap(references: StoryReference[]): string {
     .join("; ");
 }
 
-function buildFinalPrompt(storyText: string, references: StoryReference[]): string {
+function buildFinalPrompt(scenePrompt: string, references: StoryReference[], sourceStory?: string): string {
   const refMap = buildReferenceMap(references);
-  return `Reference map: ${refMap}. Use each labeled reference only for that named entity. Scene: ${storyText}.`;
+  const sourceContext = sourceStory?.trim()
+    ? `Overall story context for continuity only: ${sourceStory.trim()}. `
+    : "";
+  return `${sourceContext}Reference map: ${refMap}. Use each labeled reference only for that named entity. Depict this detailed keyframe prompt as the primary image brief: ${scenePrompt}.`;
 }
 
 function getSceneStatusLabel(status: SceneStatus): string {
@@ -432,7 +435,7 @@ export function StoryStudioShell() {
       const mentionedRefs = validation.mentions
         .map(handle => findReferenceByHandle(library, handle))
         .filter((ref): ref is StoryReference => ref !== null);
-      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs);
+      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, storyText);
       const referenceGallery = mentionedRefs.map(ref => ref.imageUrl);
       const referenceMap = buildReferenceMap(mentionedRefs);
 
