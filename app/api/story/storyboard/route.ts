@@ -39,6 +39,8 @@ const requestSchema = z
   })
   .strict();
 
+type StoryboardRequestBody = z.infer<typeof requestSchema>;
+
 function toCodexInput(messages: { role: ChatRole; content: string }[]): CodexMessage[] {
   return messages.map(message => ({
     role: message.role === "system" ? "developer" : message.role,
@@ -152,30 +154,61 @@ function buildMessages({
   ];
 }
 
+async function requestStoryboardScenes({
+  body,
+  registeredHandles,
+  isRetry = false
+}: {
+  body: StoryboardRequestBody;
+  registeredHandles: Set<string>;
+  isRetry?: boolean;
+}): Promise<StoryboardScene[]> {
+  const messages = buildMessages(body);
+  if (isRetry) {
+    messages.push({
+      role: "user" as const,
+      content:
+        `이전 응답의 컷 수가 요청한 ${body.sceneCount}개보다 적었습니다. ` +
+        `반드시 ${body.sceneCount}개 JSON 배열 항목만 반환하세요.`
+    });
+  }
+
+  const result = await callCodexResponses({
+    mode: "text",
+    model: STORYBOARD_MODEL,
+    input: toCodexInput(messages),
+    reasoningEffort: "none",
+    logTag: "api/story/storyboard"
+  });
+
+  const content = result.text?.trim();
+  if (!content) {
+    throw new Error("스토리 분할 결과 없음");
+  }
+
+  const parsed = safeParseJsonArray(content);
+  if (!parsed) {
+    throw new Error("LLM 응답 파싱 실패");
+  }
+
+  return normalizeScenes(parsed, registeredHandles, body.sceneCount).filter(scene => scene.prompt);
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const body = requestSchema.parse(await request.json());
     const registeredHandles = new Set(body.handles.map(item => normalizeHandle(item.handle)).filter(Boolean));
 
-    const result = await callCodexResponses({
-      mode: "text",
-      model: STORYBOARD_MODEL,
-      input: toCodexInput(buildMessages(body)),
-      reasoningEffort: "none",
-      logTag: "api/story/storyboard"
-    });
-
-    const content = result.text?.trim();
-    if (!content) {
-      return NextResponse.json({ ok: false, reason: "스토리 분할 결과 없음" }, { status: 502 });
+    let scenes = await requestStoryboardScenes({ body, registeredHandles });
+    if (scenes.length < body.sceneCount) {
+      scenes = await requestStoryboardScenes({ body, registeredHandles, isRetry: true });
     }
-
-    const parsed = safeParseJsonArray(content);
-    if (!parsed) {
-      return NextResponse.json({ ok: false, reason: "LLM 응답 파싱 실패" }, { status: 502 });
+    if (scenes.length < body.sceneCount) {
+      return NextResponse.json(
+        { ok: false, reason: "스토리 분할 컷 수가 요청보다 적음" },
+        { status: 502 }
+      );
     }
-
-    const scenes = normalizeScenes(parsed, registeredHandles, body.sceneCount);
     if (!scenes.length) {
       return NextResponse.json({ ok: false, reason: "스토리 분할 결과 없음" }, { status: 502 });
     }
@@ -201,6 +234,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         { ok: false, reason: `Codex 호출 실패 (${error.status})` },
         { status: error.status === 401 ? 401 : 502 }
       );
+    }
+    if (error instanceof Error && (error.message === "스토리 분할 결과 없음" || error.message === "LLM 응답 파싱 실패")) {
+      return NextResponse.json({ ok: false, reason: error.message }, { status: 502 });
     }
     console.error("/api/story/storyboard error", error);
     return NextResponse.json({ ok: false, reason: "스토리 분할 중 오류가 발생했습니다." }, { status: 500 });
