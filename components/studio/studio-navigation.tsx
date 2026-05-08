@@ -48,7 +48,7 @@ export function StudioNavigation() {
         aria-hidden
         className="pointer-events-none absolute bottom-1 left-2 select-none font-mono text-[10px] text-muted-foreground/50"
       >
-        2.01v
+        2.02v
       </span>
       <div className="mx-auto flex max-w-6xl items-center justify-around px-4 py-2">
         {navItems.map(item => {
