@@ -10,6 +10,7 @@ const navItems = [
   { href: "/studio/variations", label: "변형 생성" },
   { href: "/studio/batch", label: "배치 생성" },
   { href: "/studio/presets", label: "프리셋" },
+  { href: "/studio/story", label: "스토리" },
   { href: "/studio/history", label: "생성기록" },
   { href: "/usage", label: "사용량" }
 ];
@@ -47,7 +48,7 @@ export function StudioNavigation() {
         aria-hidden
         className="pointer-events-none absolute bottom-1 left-2 select-none font-mono text-[10px] text-muted-foreground/50"
       >
-        1.0v
+        1.1v
       </span>
       <div className="mx-auto flex max-w-6xl items-center justify-around px-4 py-2">
         {navItems.map(item => {
