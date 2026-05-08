@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -u
 
-PROJECT_DIR="/Users/nohshinhee/Documents/2. coding/sionbanana/.claude/worktrees/gallant-robinson-873eaa"
+PROJECT_DIR="/Users/nohshinhee/Documents/2. coding/sionbanana"
 PORT="${SIONBANANA_PORT:-3002}"
 URL="http://localhost:${PORT}/studio"
 SERVER_PID=""
