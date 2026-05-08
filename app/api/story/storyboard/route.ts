@@ -7,7 +7,7 @@ import {
   type CodexMessage
 } from "@/lib/codex-fetch";
 import { CodexAuthError } from "@/lib/codex-oauth";
-import type { StoryReferenceRole } from "@/lib/story-references";
+import { STORY_REFERENCE_HANDLE_PATTERN, type StoryReferenceRole } from "@/lib/story-references";
 
 type ChatRole = "system" | "user" | "assistant" | "developer";
 
@@ -22,7 +22,10 @@ const HANDLE_PATTERN = /@([A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]+)/gu;
 
 const handleSchema = z
   .object({
-    handle: z.string().trim().min(1).max(80),
+    handle: z
+      .string()
+      .trim()
+      .regex(STORY_REFERENCE_HANDLE_PATTERN, "핸들은 1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다."),
     role: z.enum(["character", "location"]),
     description: z.string().trim().max(300).optional()
   })

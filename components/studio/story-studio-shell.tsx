@@ -402,15 +402,19 @@ export function StoryStudioShell() {
       const nextImageUrl = patch.imageUrl ?? current?.imageUrl ?? "";
       const nextDescription = patch.description ?? current?.description;
 
-      const nextLibrary =
-        !nextHandle.trim() && !nextImageUrl
-          ? saveStoryReference(role, slotIndex, null)
-          : saveStoryReference(role, slotIndex, {
-              handle: nextHandle,
-              imageUrl: nextImageUrl,
-              description: nextDescription
-            });
-      setLibrary(nextLibrary);
+      try {
+        const nextLibrary =
+          !nextHandle.trim() && !nextImageUrl
+            ? saveStoryReference(role, slotIndex, null)
+            : saveStoryReference(role, slotIndex, {
+                handle: nextHandle,
+                imageUrl: nextImageUrl,
+                description: nextDescription
+              });
+        setLibrary(nextLibrary);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "레퍼런스를 저장하지 못했습니다.");
+      }
     },
     [library]
   );

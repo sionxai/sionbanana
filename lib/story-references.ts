@@ -24,6 +24,7 @@ export type StoryReferenceInput = Omit<
 export const STORY_REFERENCE_SLOT_COUNT = 5;
 export const STORY_REFERENCES_STORAGE_KEY = "sionbanana-story-references-v1";
 export const STORY_REFERENCES_EVENT = "sionbanana:story-references-updated";
+export const STORY_REFERENCE_HANDLE_PATTERN = /^[A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]{1,32}$/u;
 
 function createEmptySlots(): (StoryReference | null)[] {
   return Array.from({ length: STORY_REFERENCE_SLOT_COUNT }, () => null);
@@ -45,6 +46,30 @@ function createId(): string {
 
 function normalizeHandle(value: string): string {
   return value.trim().replace(/^@+/, "");
+}
+
+function assertValidHandle(handle: string) {
+  if (!STORY_REFERENCE_HANDLE_PATTERN.test(handle)) {
+    throw new Error("핸들은 1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다.");
+  }
+}
+
+function assertUniqueHandle(
+  library: StoryReferenceLibrary,
+  role: StoryReferenceRole,
+  slotIndex: number,
+  handle: string
+) {
+  const duplicate = [...library.characters, ...library.locations].some(ref => {
+    if (!ref || (ref.role === role && ref.slotIndex === slotIndex)) {
+      return false;
+    }
+    return normalizeHandle(ref.handle) === handle;
+  });
+
+  if (duplicate) {
+    throw new Error(`이미 사용 중인 핸들입니다: @${handle}`);
+  }
 }
 
 function normalizeSlotArray(
@@ -136,9 +161,12 @@ export function saveStoryReference(
     nextSlots[slotIndex] = null;
   } else {
     const now = new Date().toISOString();
+    const handle = normalizeHandle(ref.handle);
+    assertValidHandle(handle);
+    assertUniqueHandle(current, role, slotIndex, handle);
     nextSlots[slotIndex] = {
       id: previous?.id ?? createId(),
-      handle: normalizeHandle(ref.handle),
+      handle,
       role,
       imageUrl: ref.imageUrl,
       description: ref.description,
