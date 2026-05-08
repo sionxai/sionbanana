@@ -7,11 +7,15 @@ import { generateId } from "@/lib/utils";
 export const runtime = "nodejs";
 
 const DEFAULT_MIME = "image/jpeg";
+const MAX_IMAGE_BASE64_LENGTH = 20_000_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const requestSchema = z
   .object({
-    imageBase64: z.string().min(1),
+    imageBase64: z
+      .string()
+      .min(1)
+      .max(MAX_IMAGE_BASE64_LENGTH, "이미지 데이터는 20,000,000자 이하만 업로드할 수 있습니다."),
     mime: z.string().min(1).max(80).optional()
   })
   .strict();
@@ -47,8 +51,11 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const reason =
+        error.issues.find(issue => issue.path.join(".") === "imageBase64" && issue.code === "too_big")?.message ??
+        "유효하지 않은 입력입니다.";
       return NextResponse.json(
-        { ok: false, reason: "유효하지 않은 입력입니다.", issues: error.issues },
+        { ok: false, reason, issues: error.issues },
         { status: 400 }
       );
     }
