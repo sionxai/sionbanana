@@ -465,7 +465,7 @@ export function StoryStudioShell() {
         .filter((ref): ref is StoryReference => ref !== null);
       const toneSuffix = TONE_OPTIONS.find(tone => tone.id === toneId)?.promptSuffix;
       const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, toneSuffix);
-      const referenceGallery = mentionedRefs.map(ref => ref.imageUrl);
+      const referenceGallery = mentionedRefs.slice(1).map(ref => ref.imageUrl);
       const referenceMap = buildReferenceMap(mentionedRefs);
 
       const response = await callGenerateApi({
