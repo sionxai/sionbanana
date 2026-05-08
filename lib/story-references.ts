@@ -118,6 +118,21 @@ function getRoleSlots(library: StoryReferenceLibrary, role: StoryReferenceRole) 
   return role === "character" ? library.characters : library.locations;
 }
 
+function validateLibraryHandles(library: StoryReferenceLibrary) {
+  const seen = new Set<string>();
+  [...library.characters, ...library.locations].forEach(ref => {
+    if (!ref) {
+      return;
+    }
+    const handle = normalizeHandle(ref.handle);
+    assertValidHandle(handle);
+    if (seen.has(handle)) {
+      throw new Error(`이미 사용 중인 핸들입니다: @${handle}`);
+    }
+    seen.add(handle);
+  });
+}
+
 function emitStoryReferencesUpdated(library: StoryReferenceLibrary) {
   if (typeof window === "undefined") {
     return;
@@ -180,6 +195,18 @@ export function saveStoryReference(
     role === "character"
       ? { characters: nextSlots, locations: [...current.locations] }
       : { characters: [...current.characters], locations: nextSlots };
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(STORY_REFERENCES_STORAGE_KEY, JSON.stringify(next));
+    emitStoryReferencesUpdated(next);
+  }
+
+  return next;
+}
+
+export function replaceLibrary(nextLibrary: StoryReferenceLibrary): StoryReferenceLibrary {
+  const next = normalizeLibrary(nextLibrary);
+  validateLibraryHandles(next);
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORY_REFERENCES_STORAGE_KEY, JSON.stringify(next));

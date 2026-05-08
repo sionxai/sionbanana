@@ -11,6 +11,7 @@ import {
   X
 } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,9 +37,11 @@ import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { parseStoryMentions } from "@/lib/story-mentions";
 import {
   STORY_REFERENCE_SLOT_COUNT,
+  STORY_REFERENCE_HANDLE_PATTERN,
   findReferenceByHandle,
   getRegisteredHandles,
   loadStoryReferences,
+  replaceLibrary,
   saveStoryReference,
   subscribeStoryReferences,
   type StoryReference,
@@ -74,6 +77,36 @@ type StoryboardSceneResponse = {
 type StoryboardResponse =
   | { ok: true; scenes: StoryboardSceneResponse[]; meta?: { model?: string } }
   | { ok: false; reason?: string };
+
+const storyReferenceImportSchema = z
+  .object({
+    id: z.string().min(1),
+    handle: z
+      .string()
+      .trim()
+      .regex(STORY_REFERENCE_HANDLE_PATTERN, "핸들은 1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다."),
+    role: z.enum(["character", "location"]),
+    imageUrl: z.string(),
+    description: z.string().optional(),
+    slotIndex: z.number().int().min(0).max(STORY_REFERENCE_SLOT_COUNT - 1),
+    createdAt: z.string(),
+    updatedAt: z.string()
+  })
+  .strict()
+  .nullable();
+
+const storyReferenceLibraryImportSchema = z
+  .object({
+    version: z.literal(1),
+    exportedAt: z.string(),
+    library: z
+      .object({
+        characters: z.array(storyReferenceImportSchema).max(STORY_REFERENCE_SLOT_COUNT),
+        locations: z.array(storyReferenceImportSchema).max(STORY_REFERENCE_SLOT_COUNT)
+      })
+      .strict()
+  })
+  .strict();
 
 function getRoleSlots(library: StoryReferenceLibrary, role: StoryReferenceRole) {
   return role === "character" ? library.characters : library.locations;
@@ -217,6 +250,10 @@ function getStoryKeyvisualFilename(index: number): string {
   return `sionbanana-story-keyvisual-${String(index + 1).padStart(2, "0")}.png`;
 }
 
+function getLibraryExportFilename(date: Date): string {
+  return `sionbanana-library-${date.toISOString().slice(0, 10).replace(/-/g, "")}.json`;
+}
+
 function buildReferenceMap(references: StoryReference[]): string {
   return references
     .map((ref, index) => `Image ${index + 1} = ${ref.role === "character" ? "Character" : "Location"} reference for @${ref.handle}`)
@@ -307,6 +344,7 @@ export function StoryStudioShell() {
   const [isAnyGenerating, setIsAnyGenerating] = useState(false);
   const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
   const generationLockRef = useRef(false);
+  const libraryImportInputRef = useRef<HTMLInputElement>(null);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   useEffect(() => {
@@ -357,6 +395,61 @@ export function StoryStudioShell() {
   const releaseGenerationLock = useCallback(() => {
     generationLockRef.current = false;
     setIsAnyGenerating(false);
+  }, []);
+
+  const handleExportLibrary = useCallback(() => {
+    const exportedAt = new Date();
+    const payload = {
+      version: 1,
+      exportedAt: exportedAt.toISOString(),
+      library
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = getLibraryExportFilename(exportedAt);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [library]);
+
+  const handleImportLibraryClick = useCallback(() => {
+    libraryImportInputRef.current?.click();
+  }, []);
+
+  const handleImportLibrary = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    void file
+      .text()
+      .then(text => {
+        const parsedJson = JSON.parse(text) as unknown;
+        const parsed = storyReferenceLibraryImportSchema.parse(parsedJson);
+        if (!window.confirm("기존 라이브러리를 덮어씁니다. 계속할까요?")) {
+          return;
+        }
+        const nextLibrary = replaceLibrary(parsed.library as StoryReferenceLibrary);
+        setLibrary(nextLibrary);
+        toast.success("라이브러리를 가져왔습니다.");
+      })
+      .catch(error => {
+        const message =
+          error instanceof z.ZodError || error instanceof SyntaxError
+            ? "라이브러리 JSON 형식이 올바르지 않습니다."
+            : error instanceof Error
+              ? error.message
+              : "라이브러리를 가져오지 못했습니다.";
+        toast.error(message);
+      })
+      .finally(() => {
+        input.value = "";
+      });
   }, []);
 
   const persistSlot = useCallback(
@@ -878,7 +971,24 @@ export function StoryStudioShell() {
             <h1 className="text-2xl font-semibold tracking-normal">스토리</h1>
             <p className="text-sm text-muted-foreground">등록한 인물과 로케이션을 @핸들로 호출해 여러 컷의 키비주얼을 구성합니다.</p>
           </div>
-          <Badge variant="secondary" className="w-fit">Phase 2</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={libraryImportInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportLibrary}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={handleExportLibrary}>
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              내보내기
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleImportLibraryClick}>
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+              가져오기
+            </Button>
+            <Badge variant="secondary" className="w-fit">Phase 2</Badge>
+          </div>
         </header>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
