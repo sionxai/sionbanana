@@ -345,7 +345,8 @@ export function StoryStudioShell() {
   const storyMentions = useMemo(() => parseStoryMentions(storyText, library), [library, storyText]);
   const registeredReferences = useMemo(() => flattenReferences(library), [library]);
   const inputReason = useMemo(() => getStoryInputReason(storyText, library), [library, storyText]);
-  const isBusy = isSplitting || isGeneratingAll || scenes.some(scene => scene.status === "generating");
+  const hasGeneratingScene = scenes.some(scene => scene.status === "generating");
+  const isBusy = isSplitting || isGeneratingAll || hasGeneratingScene;
 
   const persistSlot = useCallback(
     (
@@ -527,10 +528,15 @@ export function StoryStudioShell() {
   );
 
   const generateSceneTargets = useCallback(
-    async (targets: Array<{ scene: Scene; index: number }>, totalScenes: number) => {
+    async (
+      targets: Array<{ scene: Scene; index: number }>,
+      totalScenes: number,
+      options: { markAllBusy?: boolean } = {}
+    ) => {
       if (!targets.length) {
         return;
       }
+      const markAllBusy = options.markAllBusy ?? targets.length > 1;
 
       const prepared = targets.map(target => {
         const validation = validateScenePrompt(target.scene.prompt, library);
@@ -583,7 +589,9 @@ export function StoryStudioShell() {
         return;
       }
 
-      setIsGeneratingAll(true);
+      if (markAllBusy) {
+        setIsGeneratingAll(true);
+      }
       try {
         const settled = await runWithConcurrency(validTargets, 4, async target => {
           try {
@@ -631,7 +639,9 @@ export function StoryStudioShell() {
           toast.error(`${failCount}개 씬 생성에 실패했습니다.`);
         }
       } finally {
-        setIsGeneratingAll(false);
+        if (markAllBusy) {
+          setIsGeneratingAll(false);
+        }
       }
     },
     [generateSceneImage, imageGenOptions.format, library]
@@ -688,7 +698,11 @@ export function StoryStudioShell() {
 
       if (mode === "instant") {
         setIsSplitting(false);
-        await generateSceneTargets(nextScenes.map((scene, index) => ({ scene, index })), nextScenes.length);
+        await generateSceneTargets(
+          nextScenes.map((scene, index) => ({ scene, index })),
+          nextScenes.length,
+          { markAllBusy: true }
+        );
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "스토리 분할 중 오류가 발생했습니다.");
@@ -698,7 +712,11 @@ export function StoryStudioShell() {
   }, [generateSceneTargets, inputReason, library, mode, sceneCount, storyText]);
 
   const handleGenerateAll = useCallback(() => {
-    void generateSceneTargets(scenes.map((scene, index) => ({ scene, index })), scenes.length);
+    void generateSceneTargets(
+      scenes.map((scene, index) => ({ scene, index })),
+      scenes.length,
+      { markAllBusy: true }
+    );
   }, [generateSceneTargets, scenes]);
 
   const handleRegenerateScene = useCallback(
@@ -707,7 +725,7 @@ export function StoryStudioShell() {
       if (index < 0) {
         return;
       }
-      void generateSceneTargets([{ scene: scenes[index], index }], scenes.length);
+      void generateSceneTargets([{ scene: scenes[index], index }], scenes.length, { markAllBusy: false });
     },
     [generateSceneTargets, scenes]
   );
@@ -786,6 +804,7 @@ export function StoryStudioShell() {
               scenes={scenes}
               mode={mode}
               busy={isBusy}
+              allGenerationActive={isGeneratingAll}
               onPromptChange={handleScenePromptChange}
               onGenerateAll={handleGenerateAll}
               onRegenerateScene={handleRegenerateScene}
@@ -1146,6 +1165,7 @@ function SceneBoard({
   scenes,
   mode,
   busy,
+  allGenerationActive,
   onPromptChange,
   onGenerateAll,
   onRegenerateScene,
@@ -1155,6 +1175,7 @@ function SceneBoard({
   scenes: Scene[];
   mode: StoryMode;
   busy: boolean;
+  allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
   onGenerateAll: () => void;
   onRegenerateScene: (sceneId: string) => void;
@@ -1195,7 +1216,7 @@ function SceneBoard({
                 scene={scene}
                 index={index}
                 editable={mode === "review" && scene.status !== "generating" && scene.status !== "completed"}
-                busy={busy}
+                allGenerationActive={allGenerationActive}
                 onPromptChange={onPromptChange}
                 onRegenerateScene={onRegenerateScene}
                 onPreviewRecord={onPreviewRecord}
@@ -1217,7 +1238,7 @@ function SceneCard({
   scene,
   index,
   editable,
-  busy,
+  allGenerationActive,
   onPromptChange,
   onRegenerateScene,
   onPreviewRecord
@@ -1225,14 +1246,14 @@ function SceneCard({
   scene: Scene;
   index: number;
   editable: boolean;
-  busy: boolean;
+  allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
   onRegenerateScene: (sceneId: string) => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
 }) {
   const isGenerating = scene.status === "generating";
   const isCompleted = scene.status === "completed" && Boolean(scene.resultUrl);
-  const canRegenerate = !busy && !isGenerating;
+  const canRegenerate = !allGenerationActive && !isGenerating;
   const downloadExtension = getImageFormatExtension(scene.resultFormat);
 
   return (

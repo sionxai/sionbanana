@@ -38,7 +38,7 @@ export interface GenerateResponse {
   }>;
 }
 
-export const GENERATE_TIMEOUT_MS = 180000;
+export const GENERATE_TIMEOUT_MS = 300000;
 const TRANSIENT_GENERATE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 const GENERATE_RETRY_DELAYS_MS = [1500, 4000];
 
