@@ -452,7 +452,14 @@ export function StoryStudioShell() {
             throw new Error("이미지 업로드에 실패했습니다.");
           }
 
-          persistSlot(role, slotIndex, { imageUrl: body.imageUrl });
+          const latestLibrary = loadStoryReferences();
+          const latestSlot = getRoleSlots(latestLibrary, role)[slotIndex];
+          const nextLibrary = saveStoryReference(role, slotIndex, {
+            handle: latestSlot?.handle ?? "",
+            imageUrl: body.imageUrl,
+            description: latestSlot?.description
+          });
+          setLibrary(nextLibrary);
           toast.success(`${getRoleLabel(role)} 이미지를 저장했습니다.`);
         })
         .catch(error => {
@@ -467,7 +474,7 @@ export function StoryStudioShell() {
           });
         });
     },
-    [persistSlot]
+    []
   );
 
   const generateSceneImage = useCallback(
