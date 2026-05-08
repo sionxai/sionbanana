@@ -217,6 +217,13 @@ function getSceneStatusVariant(status: SceneStatus): "default" | "secondary" | "
   }
 }
 
+function getSceneBoardGridClass(sceneTotal: number): string {
+  if (sceneTotal === 1) {
+    return "mx-auto grid w-full max-w-3xl gap-4";
+  }
+  return "grid gap-4 md:grid-cols-2 2xl:grid-cols-3";
+}
+
 function normalizeGeneratedImages(response: GenerateResponse, fallbackPrefix: string) {
   const images =
     Array.isArray(response.images) && response.images.length > 0
@@ -1104,7 +1111,7 @@ function SceneBoard({
       </CardHeader>
       <CardContent className="space-y-4 p-4 pt-0">
         {hasScenes ? (
-          <div className={cn("grid gap-4", scenes.length === 1 ? "lg:grid-cols-1" : "md:grid-cols-2 2xl:grid-cols-3")}>
+          <div className={getSceneBoardGridClass(scenes.length)}>
             {scenes.map((scene, index) => (
               <SceneCard
                 key={scene.id}
