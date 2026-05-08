@@ -12,7 +12,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  DEFAULT_GENERATION_OPTIONS,
+  GenerationOptionsPanel,
+  type GenerationOptionsValue
+} from "@/components/studio/generation-options-panel";
 import { persistRecordsMerge, broadcastHistoryUpdate } from "@/components/studio/history-sync";
+import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { callGenerateApi, type GenerateResponse } from "@/hooks/use-generate-image";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { runWithConcurrency } from "@/lib/concurrency";
@@ -41,6 +47,8 @@ type Scene = {
   mentions: string[];
   status: SceneStatus;
   resultUrl?: string;
+  resultRecord?: GeneratedImageDocument;
+  resultFormat?: GenerationOptionsValue["format"];
   error?: string;
 };
 
@@ -180,6 +188,21 @@ function getLocalImageId(url?: string | null): string | null {
   return match?.[1] ?? null;
 }
 
+function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): string | null {
+  return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? null;
+}
+
+function getRecordPromptText(record?: GeneratedImageDocument | null): string {
+  return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
+}
+
+function getImageFormatExtension(format?: GenerationOptionsValue["format"]): string {
+  if (format === "jpeg") {
+    return "jpg";
+  }
+  return format ?? "png";
+}
+
 function buildReferenceMap(references: StoryReference[]): string {
   return references
     .map((ref, index) => `Image ${index + 1} = ${ref.role === "character" ? "Character" : "Location"} "${ref.handle}"`)
@@ -280,9 +303,12 @@ export function StoryStudioShell() {
   const [mode, setMode] = useState<StoryMode>("instant");
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioPreset>(DEFAULT_ASPECT_RATIO);
+  const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
+  const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
+  const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
 
   useEffect(() => {
     setLibrary(loadStoryReferences());
@@ -307,6 +333,10 @@ export function StoryStudioShell() {
       })
     );
   }, [library]);
+
+  useEffect(() => {
+    previewZoom.reset();
+  }, [previewRecord?.id, previewZoom.reset]);
 
   const storyMentions = useMemo(() => parseStoryMentions(storyText, library), [library, storyText]);
   const registeredReferences = useMemo(() => flattenReferences(library), [library]);
@@ -393,7 +423,7 @@ export function StoryStudioShell() {
   );
 
   const generateSceneImage = useCallback(
-    async (scene: Scene, sceneIndex: number, totalScenes: number): Promise<string> => {
+    async (scene: Scene, sceneIndex: number, totalScenes: number): Promise<GeneratedImageDocument> => {
       const validation = validateScenePrompt(scene.prompt, library);
       if (validation.error) {
         throw new Error(validation.error);
@@ -414,6 +444,11 @@ export function StoryStudioShell() {
           action: "story-keyvisual-multi",
           aspectRatio,
           outputMimeType: "image/png",
+          quality: imageGenOptions.quality,
+          imageSize: imageGenOptions.size,
+          format: imageGenOptions.format,
+          moderation: imageGenOptions.moderation,
+          count: imageGenOptions.count,
           batchItemId: scene.id,
           batchItemName: `story-scene-${sceneIndex + 1}`,
           referenceImageUrl: mentionedRefs[0]?.imageUrl,
@@ -459,6 +494,17 @@ export function StoryStudioShell() {
           storySceneTotal: totalScenes,
           storyCopyIndex: imageIndex + 1,
           storyCopyTotal: generatedImages.length,
+          storyOutputFormat: imageGenOptions.format,
+          storyImageSize: imageGenOptions.size,
+          storyQuality: imageGenOptions.quality,
+          storyModeration: imageGenOptions.moderation,
+          generationOptions: {
+            quality: imageGenOptions.quality,
+            imageSize: imageGenOptions.size,
+            format: imageGenOptions.format,
+            moderation: imageGenOptions.moderation,
+            count: imageGenOptions.count
+          },
           costCredits: response.costCredits
         },
         model: response.model ?? "gpt-image-2",
@@ -469,9 +515,9 @@ export function StoryStudioShell() {
 
       const merged = persistRecordsMerge(historyRecords);
       broadcastHistoryUpdate(merged, "story");
-      return primaryImage.imageUrl;
+      return historyRecords[0];
     },
-    [aspectRatio, library, storyText]
+    [aspectRatio, imageGenOptions, library, storyText]
   );
 
   const generateSceneTargets = useCallback(
@@ -489,7 +535,9 @@ export function StoryStudioShell() {
             mentions: validation.mentions,
             status: validation.error ? "error" as const : "idle" as const,
             error: validation.error ?? undefined,
-            resultUrl: validation.error ? undefined : target.scene.resultUrl
+            resultUrl: validation.error ? undefined : target.scene.resultUrl,
+            resultRecord: validation.error ? undefined : target.scene.resultRecord,
+            resultFormat: validation.error ? undefined : target.scene.resultFormat
           },
           error: validation.error
         };
@@ -508,14 +556,18 @@ export function StoryStudioShell() {
               ...preparedScene.scene,
               status: "error",
               error: preparedScene.error,
-              resultUrl: undefined
+              resultUrl: undefined,
+              resultRecord: undefined,
+              resultFormat: undefined
             };
           }
           return {
             ...preparedScene.scene,
             status: "generating",
             error: undefined,
-            resultUrl: undefined
+            resultUrl: undefined,
+            resultRecord: undefined,
+            resultFormat: undefined
           };
         })
       );
@@ -529,20 +581,22 @@ export function StoryStudioShell() {
       try {
         const settled = await runWithConcurrency(validTargets, 4, async target => {
           try {
-            const imageUrl = await generateSceneImage(target.scene, target.index, totalScenes);
+            const record = await generateSceneImage(target.scene, target.index, totalScenes);
             setScenes(current =>
               current.map(scene =>
                 scene.id === target.scene.id
                   ? {
                       ...scene,
                       status: "completed",
-                      resultUrl: imageUrl,
+                      resultUrl: getRecordGeneratedImageUrl(record) ?? undefined,
+                      resultRecord: record,
+                      resultFormat: imageGenOptions.format,
                       error: undefined
                     }
                   : scene
               )
             );
-            return imageUrl;
+            return record;
           } catch (error) {
             setScenes(current =>
               current.map(scene =>
@@ -551,6 +605,8 @@ export function StoryStudioShell() {
                       ...scene,
                       status: "error",
                       resultUrl: undefined,
+                      resultRecord: undefined,
+                      resultFormat: undefined,
                       error: error instanceof Error ? error.message : "이미지 생성 중 오류가 발생했습니다."
                     }
                   : scene
@@ -572,7 +628,7 @@ export function StoryStudioShell() {
         setIsGeneratingAll(false);
       }
     },
-    [generateSceneImage, library]
+    [generateSceneImage, imageGenOptions.format, library]
   );
 
   const handleGenerate = useCallback(async () => {
@@ -664,7 +720,9 @@ export function StoryStudioShell() {
             mentions: validation.mentions,
             status: validation.error ? "error" : "idle",
             error: validation.error ?? undefined,
-            resultUrl: undefined
+            resultUrl: undefined,
+            resultRecord: undefined,
+            resultFormat: undefined
           };
         })
       );
@@ -725,11 +783,22 @@ export function StoryStudioShell() {
               onPromptChange={handleScenePromptChange}
               onGenerateAll={handleGenerateAll}
               onRegenerateScene={handleRegenerateScene}
+              onPreviewRecord={setPreviewRecord}
               onResplit={() => void handleGenerate()}
             />
           </div>
         </div>
       </div>
+
+      <GenerationOptionsPanel value={imageGenOptions} onChange={setImageGenOptions} />
+
+      {previewRecord ? (
+        <StoryImagePreviewModal
+          record={previewRecord}
+          zoom={previewZoom}
+          onClose={() => setPreviewRecord(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1074,6 +1143,7 @@ function SceneBoard({
   onPromptChange,
   onGenerateAll,
   onRegenerateScene,
+  onPreviewRecord,
   onResplit
 }: {
   scenes: Scene[];
@@ -1082,6 +1152,7 @@ function SceneBoard({
   onPromptChange: (sceneId: string, prompt: string) => void;
   onGenerateAll: () => void;
   onRegenerateScene: (sceneId: string) => void;
+  onPreviewRecord: (record: GeneratedImageDocument) => void;
   onResplit: () => void;
 }) {
   const hasScenes = scenes.length > 0;
@@ -1121,6 +1192,7 @@ function SceneBoard({
                 busy={busy}
                 onPromptChange={onPromptChange}
                 onRegenerateScene={onRegenerateScene}
+                onPreviewRecord={onPreviewRecord}
               />
             ))}
           </div>
@@ -1141,7 +1213,8 @@ function SceneCard({
   editable,
   busy,
   onPromptChange,
-  onRegenerateScene
+  onRegenerateScene,
+  onPreviewRecord
 }: {
   scene: Scene;
   index: number;
@@ -1149,10 +1222,12 @@ function SceneCard({
   busy: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
   onRegenerateScene: (sceneId: string) => void;
+  onPreviewRecord: (record: GeneratedImageDocument) => void;
 }) {
   const isGenerating = scene.status === "generating";
   const isCompleted = scene.status === "completed" && Boolean(scene.resultUrl);
   const canRegenerate = !busy && !isGenerating;
+  const downloadExtension = getImageFormatExtension(scene.resultFormat);
 
   return (
     <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-background">
@@ -1205,11 +1280,19 @@ function SceneCard({
               <span>생성 중</span>
             </div>
           ) : isCompleted ? (
-            <img
-              src={scene.resultUrl}
-              alt={`스토리 씬 ${index + 1}`}
-              className="h-full w-full object-contain"
-            />
+            <button
+              type="button"
+              className="h-full w-full cursor-zoom-in"
+              onClick={() => scene.resultRecord && onPreviewRecord(scene.resultRecord)}
+              disabled={!scene.resultRecord}
+              aria-label={`씬 ${index + 1} 이미지 크게 보기`}
+            >
+              <img
+                src={scene.resultUrl}
+                alt={`스토리 씬 ${index + 1}`}
+                className="h-full w-full object-contain"
+              />
+            </button>
           ) : scene.status === "error" ? (
             <div className="max-w-[260px] space-y-2 px-4 text-center">
               <p className="text-sm font-medium text-destructive">생성 불가</p>
@@ -1224,11 +1307,183 @@ function SceneCard({
         </div>
 
         <Button asChild variant="outline" className="w-full" disabled={!isCompleted}>
-          <a href={isCompleted ? scene.resultUrl : "#"} download={`sionbanana-story-scene-${index + 1}.png`}>
+          <a href={isCompleted ? scene.resultUrl : "#"} download={`sionbanana-story-scene-${index + 1}.${downloadExtension}`}>
             <Download className="mr-2 h-4 w-4" />
             다운로드
           </a>
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function StoryImagePreviewModal({
+  record,
+  zoom,
+  onClose
+}: {
+  record: GeneratedImageDocument;
+  zoom: ReturnType<typeof useImagePanZoom>;
+  onClose: () => void;
+}) {
+  const imageUrl = getRecordGeneratedImageUrl(record);
+  const promptText = getRecordPromptText(record);
+  const zoomPercent = Math.round(zoom.scale * 100);
+  const recordFormat = record.metadata?.storyOutputFormat;
+  const downloadExtension = getImageFormatExtension(
+    recordFormat === "png" || recordFormat === "jpeg" || recordFormat === "webp" ? recordFormat : undefined
+  );
+
+  const handleCopyPrompt = useCallback(async () => {
+    if (!promptText) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(promptText);
+      toast.success("프롬프트를 복사했습니다.");
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  }, [promptText]);
+
+  const handleDownload = useCallback(() => {
+    if (!imageUrl) {
+      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = `sionbanana-story-${record.id}.${downloadExtension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [downloadExtension, imageUrl, record.id]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 lg:p-6"
+      onClick={onClose}
+    >
+      <div
+        className="relative grid h-full max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-xl border border-white/20 bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_360px]"
+        onClick={event => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
+          onClick={onClose}
+        >
+          닫기
+        </button>
+
+        <div className="flex min-h-0 flex-col bg-black">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3 text-white">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">스토리 씬 이미지</p>
+              <p className="truncate text-xs text-white/60">
+                {record.model} · {new Date(record.createdAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="mr-14 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => zoom.zoomOut()} disabled={zoom.scale <= MIN_IMAGE_ZOOM}>
+                축소
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => zoom.reset()} disabled={zoom.scale === 1}>
+                {zoomPercent}%
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => zoom.zoomIn()} disabled={zoom.scale >= MAX_IMAGE_ZOOM}>
+                확대
+              </Button>
+            </div>
+          </div>
+
+          <div
+            {...zoom.bind}
+            className={cn(
+              "relative flex min-h-[50vh] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black",
+              zoom.isPanning ? "cursor-grabbing" : "cursor-grab"
+            )}
+            title="마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 원래대로"
+          >
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={promptText || "story preview"}
+                className="max-h-full max-w-full object-contain will-change-transform"
+                draggable={false}
+                style={{
+                  transform: `translate(${zoom.transform.panX}px, ${zoom.transform.panY}px) scale(${zoom.transform.scale})`,
+                  transformOrigin: "center center"
+                }}
+              />
+            ) : (
+              <div className="text-sm text-white/70">이미지를 불러올 수 없습니다.</div>
+            )}
+          </div>
+        </div>
+
+        <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0">
+          <div className="space-y-1 pr-10 lg:pr-0">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">생성 기록</p>
+            <h2 className="text-base font-semibold text-foreground">프롬프트와 옵션</h2>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => void handleCopyPrompt()} disabled={!promptText}>
+              프롬프트 복사
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleDownload} disabled={!imageUrl}>
+              다운로드
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">생성 프롬프트</p>
+            <div className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+              {promptText || "저장된 프롬프트가 없습니다."}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">모드</p>
+              <p className="uppercase">{record.mode}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">모델</p>
+              <p>{record.model}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">파일</p>
+              <p>{imageUrl?.startsWith("/api/images/") ? "로컬 원본" : "이미지 URL"}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">포맷</p>
+              <p className="uppercase">{downloadExtension}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">씬</p>
+              <p>
+                {String(record.metadata?.storySceneIndex ?? "-")} / {String(record.metadata?.storySceneTotal ?? "-")}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">크기</p>
+              <p>{String(record.metadata?.storyImageSize ?? "auto")}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">품질</p>
+              <p>{String(record.metadata?.storyQuality ?? "-")}</p>
+            </div>
+            <div className="rounded-lg border bg-background/60 p-2">
+              <p className="font-medium text-foreground">Copy</p>
+              <p>
+                {String(record.metadata?.storyCopyIndex ?? "-")} / {String(record.metadata?.storyCopyTotal ?? "-")}
+              </p>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );
