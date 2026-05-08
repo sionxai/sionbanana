@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   Download,
+  FolderOpen,
   Image as ImageIcon,
   Loader2,
   RefreshCw,
+  Save,
   Sparkles,
   Upload,
   X
@@ -35,6 +37,13 @@ import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { runWithConcurrency } from "@/lib/concurrency";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { parseStoryMentions } from "@/lib/story-mentions";
+import {
+  loadProjects,
+  removeProject,
+  saveProject,
+  subscribeProjects,
+  type StoryProject
+} from "@/lib/story-projects";
 import {
   STORY_REFERENCE_SLOT_COUNT,
   STORY_REFERENCE_HANDLE_PATTERN,
@@ -239,6 +248,11 @@ function getRecordPromptText(record?: GeneratedImageDocument | null): string {
   return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
 
+function getProjectSceneResultFormat(record?: GeneratedImageDocument): GenerationOptionsValue["format"] | undefined {
+  const format = record?.metadata?.storyOutputFormat;
+  return format === "png" || format === "jpeg" || format === "webp" ? format : undefined;
+}
+
 function getImageFormatExtension(format?: GenerationOptionsValue["format"]): string {
   if (format === "jpeg") {
     return "jpg";
@@ -252,6 +266,14 @@ function getStoryKeyvisualFilename(index: number): string {
 
 function getLibraryExportFilename(date: Date): string {
   return `sionbanana-library-${date.toISOString().slice(0, 10).replace(/-/g, "")}.json`;
+}
+
+function formatProjectUpdatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
 }
 
 function buildReferenceMap(references: StoryReference[]): string {
@@ -336,6 +358,8 @@ export function StoryStudioShell() {
   const [mode, setMode] = useState<StoryMode>("instant");
   const [toneId, setToneId] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [projects, setProjects] = useState<StoryProject[]>(() => loadProjects());
+  const [isProjectListOpen, setIsProjectListOpen] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioPreset>(DEFAULT_ASPECT_RATIO);
   const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
@@ -351,6 +375,13 @@ export function StoryStudioShell() {
     setLibrary(loadStoryReferences());
     return subscribeStoryReferences(nextLibrary => {
       setLibrary(nextLibrary);
+    });
+  }, []);
+
+  useEffect(() => {
+    setProjects(loadProjects());
+    return subscribeProjects(nextProjects => {
+      setProjects(nextProjects);
     });
   }, []);
 
@@ -381,6 +412,7 @@ export function StoryStudioShell() {
   const selectedTone = useMemo(() => TONE_OPTIONS.find(tone => tone.id === toneId) ?? null, [toneId]);
   const hasGeneratingScene = scenes.some(scene => scene.status === "generating");
   const isBusy = isAnyGenerating || isSplitting || isGeneratingAll || hasGeneratingScene;
+  const hasProjectWork = storyText.trim().length > 0 || scenes.length > 0;
 
   const acquireGenerationLock = useCallback(() => {
     if (generationLockRef.current) {
@@ -395,6 +427,78 @@ export function StoryStudioShell() {
   const releaseGenerationLock = useCallback(() => {
     generationLockRef.current = false;
     setIsAnyGenerating(false);
+  }, []);
+
+  const handleSaveProject = useCallback(() => {
+    if (!hasProjectWork) {
+      toast.info("저장할 스토리 프로젝트가 없습니다.");
+      return;
+    }
+
+    const name = window.prompt("프로젝트 이름");
+    const trimmedName = name?.trim();
+    if (!trimmedName) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    try {
+      const nextProjects = saveProject({
+        id: createGeneratedId(),
+        name: trimmedName,
+        createdAt: now,
+        updatedAt: now,
+        story: storyText,
+        sceneCount,
+        mode,
+        toneId,
+        scenes: scenes.map(scene => ({
+          id: scene.id,
+          prompt: scene.prompt,
+          mentions: scene.mentions,
+          status: scene.status,
+          ...(scene.resultUrl ? { resultUrl: scene.resultUrl } : {}),
+          ...(scene.resultRecord ? { resultRecord: scene.resultRecord } : {})
+        }))
+      });
+      setProjects(nextProjects);
+      setIsProjectListOpen(true);
+      toast.success("프로젝트를 저장했습니다.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "프로젝트를 저장하지 못했습니다.");
+    }
+  }, [hasProjectWork, mode, sceneCount, scenes, storyText, toneId]);
+
+  const handleLoadProject = useCallback(
+    (project: StoryProject) => {
+      if (hasProjectWork && !window.confirm("현재 작업이 사라집니다. 계속할까요?")) {
+        return;
+      }
+
+      setStoryText(project.story);
+      setSceneCount(project.sceneCount);
+      setMode(project.mode);
+      setToneId(project.toneId);
+      setScenes(
+        project.scenes.map(scene => ({
+          ...scene,
+          resultFormat: getProjectSceneResultFormat(scene.resultRecord)
+        }))
+      );
+      setPreviewRecord(null);
+      setIsProjectListOpen(false);
+      toast.success("프로젝트를 불러왔습니다.");
+    },
+    [hasProjectWork]
+  );
+
+  const handleRemoveProject = useCallback((project: StoryProject) => {
+    if (!window.confirm(`"${project.name}" 프로젝트를 삭제할까요?`)) {
+      return;
+    }
+    const nextProjects = removeProject(project.id);
+    setProjects(nextProjects);
+    toast.success("프로젝트를 삭제했습니다.");
   }, []);
 
   const handleExportLibrary = useCallback(() => {
@@ -979,6 +1083,14 @@ export function StoryStudioShell() {
               className="hidden"
               onChange={handleImportLibrary}
             />
+            <Button type="button" variant="outline" size="sm" onClick={handleSaveProject} disabled={!hasProjectWork || isBusy}>
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+              프로젝트 저장
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsProjectListOpen(current => !current)} disabled={isBusy}>
+              <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+              프로젝트 불러오기
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleExportLibrary}>
               <Download className="mr-1.5 h-3.5 w-3.5" />
               내보내기
@@ -990,6 +1102,15 @@ export function StoryStudioShell() {
             <Badge variant="secondary" className="w-fit">Phase 2</Badge>
           </div>
         </header>
+
+        {isProjectListOpen ? (
+          <StoryProjectShelf
+            projects={projects}
+            onLoadProject={handleLoadProject}
+            onRemoveProject={handleRemoveProject}
+            onClose={() => setIsProjectListOpen(false)}
+          />
+        ) : null}
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
           <div className="space-y-5">
@@ -1057,6 +1178,71 @@ export function StoryStudioShell() {
         />
       ) : null}
     </div>
+  );
+}
+
+function StoryProjectShelf({
+  projects,
+  onLoadProject,
+  onRemoveProject,
+  onClose
+}: {
+  projects: StoryProject[];
+  onLoadProject: (project: StoryProject) => void;
+  onRemoveProject: (project: StoryProject) => void;
+  onClose: () => void;
+}) {
+  return (
+    <section className="rounded-lg border border-border/70 bg-background p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">프로젝트 불러오기</h2>
+          <p className="text-xs text-muted-foreground">저장된 스토리 프로젝트 {projects.length}개</p>
+        </div>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose} aria-label="프로젝트 목록 닫기">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {projects.length ? (
+        <ScrollArea className="max-h-72">
+          <div className="space-y-2 pr-3">
+            {projects.map(project => (
+              <div
+                key={project.id}
+                className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{project.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    업데이트 {formatProjectUpdatedAt(project.updatedAt)} · {project.scenes.length}개 씬
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button type="button" size="sm" onClick={() => onLoadProject(project)}>
+                    불러오기
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onRemoveProject(project)}
+                    aria-label={`${project.name} 프로젝트 삭제`}
+                  >
+                    <X className="mr-1.5 h-3.5 w-3.5" />
+                    삭제
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      ) : (
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+          저장된 프로젝트가 없습니다.
+        </div>
+      )}
+    </section>
   );
 }
 
