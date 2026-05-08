@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { Download, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -202,6 +202,10 @@ function getImageFormatExtension(format?: GenerationOptionsValue["format"]): str
     return "jpg";
   }
   return format ?? "png";
+}
+
+function getStoryKeyvisualFilename(index: number): string {
+  return `sionbanana-story-keyvisual-${String(index + 1).padStart(2, "0")}.png`;
 }
 
 function buildReferenceMap(references: StoryReference[]): string {
@@ -730,6 +734,42 @@ export function StoryStudioShell() {
     );
   }, [generateSceneTargets, scenes]);
 
+  const handleDownloadCompletedImages = useCallback(() => {
+    const completedImages = scenes
+      .filter(scene => scene.status === "completed" && scene.resultRecord?.imageUrl)
+      .map(scene => scene.resultRecord?.imageUrl)
+      .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
+
+    if (!completedImages.length) {
+      toast.info("다운로드할 완료 이미지가 없습니다.");
+      return;
+    }
+
+    completedImages.forEach((imageUrl, index) => {
+      window.setTimeout(() => {
+        const link = document.createElement("a");
+        link.href = imageUrl;
+        link.download = getStoryKeyvisualFilename(index);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }, index * 150);
+    });
+  }, [scenes]);
+
+  const handleRetryFailedScenes = useCallback(() => {
+    const targets = scenes
+      .map((scene, index) => ({ scene, index }))
+      .filter(target => target.scene.status === "error");
+
+    if (!targets.length) {
+      toast.info("재시도할 실패 씬이 없습니다.");
+      return;
+    }
+
+    void generateSceneTargets(targets, scenes.length, { markAllBusy: true });
+  }, [generateSceneTargets, scenes]);
+
   const handleRegenerateScene = useCallback(
     (sceneId: string) => {
       const index = scenes.findIndex(scene => scene.id === sceneId);
@@ -740,6 +780,19 @@ export function StoryStudioShell() {
     },
     [generateSceneTargets, scenes]
   );
+
+  const handleMoveScene = useCallback((sceneId: string, direction: "up" | "down") => {
+    setScenes(current => {
+      const index = current.findIndex(scene => scene.id === sceneId);
+      const nextIndex = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }, []);
 
   const handleScenePromptChange = useCallback(
     (sceneId: string, prompt: string) => {
@@ -764,6 +817,19 @@ export function StoryStudioShell() {
     },
     [library]
   );
+
+  const handleResplit = useCallback(() => {
+    const hasGeneratedResults = scenes.some(
+      scene => scene.status === "completed" || scene.resultUrl || scene.resultRecord
+    );
+    if (
+      hasGeneratedResults &&
+      !window.confirm("이미 생성된 결과가 있습니다. 다시 분할하면 결과가 사라집니다. 계속할까요?")
+    ) {
+      return;
+    }
+    void handleGenerate();
+  }, [handleGenerate, scenes]);
 
   return (
     <div className="min-h-screen bg-muted/20 px-4 py-6 md:px-6">
@@ -817,10 +883,13 @@ export function StoryStudioShell() {
               busy={isBusy}
               allGenerationActive={isGeneratingAll}
               onPromptChange={handleScenePromptChange}
+              onDownloadCompletedImages={handleDownloadCompletedImages}
               onGenerateAll={handleGenerateAll}
+              onRetryFailedScenes={handleRetryFailedScenes}
               onRegenerateScene={handleRegenerateScene}
+              onMoveScene={handleMoveScene}
               onPreviewRecord={setPreviewRecord}
-              onResplit={() => void handleGenerate()}
+              onResplit={handleResplit}
             />
           </div>
         </div>
@@ -1178,8 +1247,11 @@ function SceneBoard({
   busy,
   allGenerationActive,
   onPromptChange,
+  onDownloadCompletedImages,
   onGenerateAll,
+  onRetryFailedScenes,
   onRegenerateScene,
+  onMoveScene,
   onPreviewRecord,
   onResplit
 }: {
@@ -1188,13 +1260,18 @@ function SceneBoard({
   busy: boolean;
   allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
+  onDownloadCompletedImages: () => void;
   onGenerateAll: () => void;
+  onRetryFailedScenes: () => void;
   onRegenerateScene: (sceneId: string) => void;
+  onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
   onResplit: () => void;
 }) {
   const hasScenes = scenes.length > 0;
   const canGenerateAll = hasScenes && mode === "review" && !busy;
+  const completedImageCount = scenes.filter(scene => scene.status === "completed" && scene.resultRecord?.imageUrl).length;
+  const failedSceneCount = scenes.filter(scene => scene.status === "error").length;
 
   return (
     <Card className="rounded-lg">
@@ -1205,6 +1282,26 @@ function SceneBoard({
         </div>
         {hasScenes ? (
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onDownloadCompletedImages}
+              disabled={completedImageCount === 0}
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              완료 이미지 전체 다운로드
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRetryFailedScenes}
+              disabled={failedSceneCount === 0 || busy}
+            >
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              실패 씬 재시도
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={onResplit} disabled={busy}>
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
               전체 재분할
@@ -1230,7 +1327,11 @@ function SceneBoard({
                 allGenerationActive={allGenerationActive}
                 onPromptChange={onPromptChange}
                 onRegenerateScene={onRegenerateScene}
+                onMoveScene={onMoveScene}
                 onPreviewRecord={onPreviewRecord}
+                moveDisabled={busy}
+                isFirst={index === 0}
+                isLast={index === scenes.length - 1}
               />
             ))}
           </div>
@@ -1252,7 +1353,11 @@ function SceneCard({
   allGenerationActive,
   onPromptChange,
   onRegenerateScene,
-  onPreviewRecord
+  onMoveScene,
+  onPreviewRecord,
+  moveDisabled,
+  isFirst,
+  isLast
 }: {
   scene: Scene;
   index: number;
@@ -1260,7 +1365,11 @@ function SceneCard({
   allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
   onRegenerateScene: (sceneId: string) => void;
+  onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
+  moveDisabled: boolean;
+  isFirst: boolean;
+  isLast: boolean;
 }) {
   const isGenerating = scene.status === "generating";
   const isCompleted = scene.status === "completed" && Boolean(scene.resultUrl);
@@ -1274,16 +1383,38 @@ function SceneCard({
           <span className="text-sm font-medium">씬 {index + 1}</span>
           <Badge variant={getSceneStatusVariant(scene.status)}>{getSceneStatusLabel(scene.status)}</Badge>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => onRegenerateScene(scene.id)}
-          disabled={!canRegenerate}
-          aria-label={`씬 ${index + 1} 재생성`}
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onMoveScene(scene.id, "up")}
+            disabled={moveDisabled || isFirst}
+            aria-label={`씬 ${index + 1} 위로 이동`}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onMoveScene(scene.id, "down")}
+            disabled={moveDisabled || isLast}
+            aria-label={`씬 ${index + 1} 아래로 이동`}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onRegenerateScene(scene.id)}
+            disabled={!canRegenerate}
+            aria-label={`씬 ${index + 1} 재생성`}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-3">
