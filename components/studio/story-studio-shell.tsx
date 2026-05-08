@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { persistRecordsMerge, broadcastHistoryUpdate } from "@/components/studio/history-sync";
+import { callGenerateApi } from "@/hooks/use-generate-image";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { parseStoryMentions, type ParsedStory } from "@/lib/story-mentions";
 import {
@@ -23,7 +25,7 @@ import {
   type StoryReferenceLibrary,
   type StoryReferenceRole
 } from "@/lib/story-references";
-import type { AspectRatioPreset } from "@/lib/types";
+import type { AspectRatioPreset, GeneratedImageDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type StoryResultState =
@@ -75,6 +77,29 @@ function getDisableReason(parsed: ParsedStory): string | null {
 
 function flattenReferences(library: StoryReferenceLibrary): StoryReference[] {
   return [...library.characters, ...library.locations].filter((ref): ref is StoryReference => ref !== null);
+}
+
+function createGeneratedId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `story-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getLocalImageId(url?: string | null): string | null {
+  const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
+  return match?.[1] ?? null;
+}
+
+function buildReferenceMap(references: StoryReference[]): string {
+  return references
+    .map((ref, index) => `Image ${index + 1} = ${ref.role === "character" ? "Character" : "Location"} "${ref.handle}"`)
+    .join("; ");
+}
+
+function buildFinalPrompt(storyText: string, references: StoryReference[]): string {
+  const refMap = buildReferenceMap(references);
+  return `Reference map: ${refMap}. Use each labeled reference only for that named entity. Scene: ${storyText}.`;
 }
 
 export function StoryStudioShell() {
@@ -147,15 +172,126 @@ export function StoryStudioShell() {
   );
 
   const handleGenerate = useCallback(() => {
-    const reason = getDisableReason(parseStoryMentions(storyText, library));
+    const currentParsed = parseStoryMentions(storyText, library);
+    const reason = getDisableReason(currentParsed);
     if (reason) {
       toast.error(reason);
       return;
     }
 
-    setResult(EMPTY_RESULT);
-    toast.message("스토리 키비주얼 생성 흐름을 준비했습니다.");
-  }, [library, storyText]);
+    const mentionedRefs = currentParsed.mentioned
+      .map(handle => findReferenceByHandle(library, handle))
+      .filter((ref): ref is StoryReference => ref !== null);
+
+    if (mentionedRefs.some(ref => !ref.imageUrl)) {
+      toast.error("이미지가 등록되지 않은 핸들이 있습니다.");
+      return;
+    }
+
+    const finalPrompt = buildFinalPrompt(storyText, mentionedRefs);
+    const referenceGallery = mentionedRefs.map(ref => ref.imageUrl);
+    const referenceMap = buildReferenceMap(mentionedRefs);
+
+    setResult({ status: "loading" });
+
+    const execute = async () => {
+      try {
+        const response = await callGenerateApi({
+          mode: "create",
+          prompt: finalPrompt,
+          refinedPrompt: finalPrompt,
+          options: {
+            action: "story-keyvisual",
+            aspectRatio,
+            outputMimeType: "image/png",
+            referenceImageUrl: mentionedRefs[0].imageUrl,
+            referenceGallery
+          }
+        });
+
+        if (!response.ok) {
+          const message = response.reason ?? "잠시 후 다시 시도해주세요.";
+          setResult({ status: "error", error: message });
+          toast.error("이미지 생성에 실패했습니다.", { description: message });
+          return;
+        }
+
+        const generatedImages =
+          Array.isArray(response.images) && response.images.length > 0
+            ? response.images
+                .map((image, imageIndex) => ({
+                  id:
+                    typeof image.id === "string" && image.id.length > 0
+                      ? image.id
+                      : getLocalImageId(image.imageUrl) ?? `story-${imageIndex + 1}-${createGeneratedId()}`,
+                  imageUrl: image.imageUrl ?? image.base64Image ?? null
+                }))
+                .filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl))
+            : [
+                {
+                  id:
+                    typeof response.id === "string" && response.id.length > 0
+                      ? response.id
+                      : getLocalImageId(response.imageUrl ?? response.base64Image) ?? createGeneratedId(),
+                  imageUrl: response.imageUrl ?? response.base64Image ?? null
+                }
+              ].filter((image): image is { id: string; imageUrl: string } => Boolean(image.imageUrl));
+
+        const primaryImage = generatedImages[0];
+        if (!primaryImage) {
+          const message = "이미지 데이터를 찾을 수 없습니다.";
+          setResult({ status: "error", error: message });
+          toast.error(message);
+          return;
+        }
+
+        const now = new Date().toISOString();
+        const historyRecords: GeneratedImageDocument[] = generatedImages.map((image, imageIndex) => ({
+          id: image.id,
+          userId: "local",
+          mode: "create",
+          promptMeta: {
+            rawPrompt: storyText,
+            refinedPrompt: finalPrompt,
+            aspectRatio,
+            referenceGallery
+          },
+          status: "completed",
+          imageUrl: image.imageUrl,
+          thumbnailUrl: image.imageUrl,
+          originalImageUrl: image.imageUrl,
+          metadata: {
+            action: "story-keyvisual",
+            referenceMap,
+            mentionedHandles: currentParsed.mentioned,
+            referencedSlots: mentionedRefs.map(ref => ({
+              handle: ref.handle,
+              role: ref.role,
+              slotIndex: ref.slotIndex
+            })),
+            storyCopyIndex: imageIndex + 1,
+            storyCopyTotal: generatedImages.length,
+            costCredits: response.costCredits
+          },
+          model: response.model ?? "gpt-image-2",
+          costCredits: response.costCredits,
+          createdAt: now,
+          updatedAt: now
+        }));
+
+        const merged = persistRecordsMerge(historyRecords);
+        broadcastHistoryUpdate(merged, "story");
+        setResult({ status: "success", imageUrl: primaryImage.imageUrl });
+        toast.success("스토리 키비주얼을 생성했습니다.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "이미지 생성 중 오류가 발생했습니다.";
+        setResult({ status: "error", error: message });
+        toast.error("이미지 생성 중 오류가 발생했습니다.", { description: message });
+      }
+    };
+
+    void execute();
+  }, [aspectRatio, library, storyText]);
 
   return (
     <div className="min-h-screen bg-muted/20 px-4 py-6 md:px-6">
