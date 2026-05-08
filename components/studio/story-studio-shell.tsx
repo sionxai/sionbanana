@@ -204,6 +204,15 @@ function getLocalImageId(url?: string | null): string | null {
   return match?.[1] ?? null;
 }
 
+function cleanupLocalImageUrl(url?: string | null) {
+  if (!url || !getLocalImageId(url)) {
+    return;
+  }
+  void fetch(url, { method: "DELETE" }).catch(error => {
+    console.warn("[story] Failed to cleanup local reference image", error);
+  });
+}
+
 function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): string | null {
   return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? null;
 }
@@ -412,6 +421,9 @@ export function StoryStudioShell() {
                 description: nextDescription
               });
         setLibrary(nextLibrary);
+        if (patch.imageUrl !== undefined && current?.imageUrl && current.imageUrl !== nextImageUrl) {
+          cleanupLocalImageUrl(current.imageUrl);
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "레퍼런스를 저장하지 못했습니다.");
       }
@@ -433,6 +445,7 @@ export function StoryStudioShell() {
       }
 
       const uploadKey = getSlotUploadKey(role, slotIndex);
+      let uploadedImageUrl: string | null = null;
       setUploadingSlots(current => ({ ...current, [uploadKey]: true }));
 
       void resizeImageToDataUrl(file, { maxSize: 1920, mime: "image/jpeg", quality: 0.85 })
@@ -456,14 +469,25 @@ export function StoryStudioShell() {
             throw new Error("이미지 업로드에 실패했습니다.");
           }
 
+          uploadedImageUrl = body.imageUrl;
           const latestLibrary = loadStoryReferences();
           const latestSlot = getRoleSlots(latestLibrary, role)[slotIndex];
-          const nextLibrary = saveStoryReference(role, slotIndex, {
-            handle: latestSlot?.handle ?? "",
-            imageUrl: body.imageUrl,
-            description: latestSlot?.description
-          });
+          const previousImageUrl = latestSlot?.imageUrl ?? null;
+          let nextLibrary: StoryReferenceLibrary;
+          try {
+            nextLibrary = saveStoryReference(role, slotIndex, {
+              handle: latestSlot?.handle ?? "",
+              imageUrl: body.imageUrl,
+              description: latestSlot?.description
+            });
+          } catch (error) {
+            cleanupLocalImageUrl(uploadedImageUrl);
+            throw error;
+          }
           setLibrary(nextLibrary);
+          if (previousImageUrl !== body.imageUrl) {
+            cleanupLocalImageUrl(previousImageUrl);
+          }
           toast.success(`${getRoleLabel(role)} 이미지를 저장했습니다.`);
         })
         .catch(error => {
