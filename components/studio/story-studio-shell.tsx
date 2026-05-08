@@ -205,16 +205,17 @@ function getImageFormatExtension(format?: GenerationOptionsValue["format"]): str
 
 function buildReferenceMap(references: StoryReference[]): string {
   return references
-    .map((ref, index) => `Image ${index + 1} = ${ref.role === "character" ? "Character" : "Location"} "${ref.handle}"`)
+    .map((ref, index) => `Image ${index + 1} = ${ref.role === "character" ? "Character" : "Location"} reference for @${ref.handle}`)
     .join("; ");
 }
 
-function buildFinalPrompt(scenePrompt: string, references: StoryReference[], sourceStory?: string): string {
+function buildFinalPrompt(scenePrompt: string, references: StoryReference[]): string {
   const refMap = buildReferenceMap(references);
-  const sourceContext = sourceStory?.trim()
-    ? `Overall story context for continuity only: ${sourceStory.trim()}. `
-    : "";
-  return `${sourceContext}Reference map: ${refMap}. Use each labeled reference only for that named entity. Depict this detailed keyframe prompt as the primary image brief: ${scenePrompt}.`;
+  return [
+    `Reference map: ${refMap}.`,
+    "Identity lock: every @handle in the scene must use only its matching reference image. For character references, preserve the same face, hair, age impression, body proportions, outfit, and visible identity details; do not invent, blend, or replace the person. For location references, preserve the recognizable architecture, layout, materials, signage, and major visual features; adapt only camera angle, lighting, weather, and staging required by the scene.",
+    `Detailed scene image prompt: ${scenePrompt}`
+  ].join(" ");
 }
 
 function getSceneStatusLabel(status: SceneStatus): string {
@@ -435,7 +436,7 @@ export function StoryStudioShell() {
       const mentionedRefs = validation.mentions
         .map(handle => findReferenceByHandle(library, handle))
         .filter((ref): ref is StoryReference => ref !== null);
-      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, storyText);
+      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs);
       const referenceGallery = mentionedRefs.map(ref => ref.imageUrl);
       const referenceMap = buildReferenceMap(mentionedRefs);
 
@@ -475,7 +476,7 @@ export function StoryStudioShell() {
         userId: "local",
         mode: "create",
         promptMeta: {
-          rawPrompt: storyText,
+          rawPrompt: scene.prompt,
           refinedPrompt: finalPrompt,
           aspectRatio,
           referenceGallery
@@ -487,6 +488,8 @@ export function StoryStudioShell() {
         metadata: {
           action: "story-keyvisual-multi",
           referenceMap,
+          storySourcePrompt: storyText,
+          storyScenePrompt: scene.prompt,
           mentionedHandles: validation.mentions,
           referencedSlots: mentionedRefs.map(ref => ({
             handle: ref.handle,
