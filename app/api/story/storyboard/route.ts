@@ -7,6 +7,13 @@ import {
   type CodexMessage
 } from "@/lib/codex-fetch";
 import { CodexAuthError } from "@/lib/codex-oauth";
+import {
+  ANGLE_OPTIONS,
+  FRAMING_OPTIONS,
+  SPECIAL_OPTIONS,
+  normalizeCinematography,
+  type SceneCinematography
+} from "@/lib/story-cinematography";
 import { STORY_REFERENCE_HANDLE_PATTERN, type StoryReferenceRole } from "@/lib/story-references";
 
 type ChatRole = "system" | "user" | "assistant" | "developer";
@@ -15,6 +22,7 @@ type StoryboardScene = {
   prompt: string;
   mentions: string[];
   invalidMentions?: string[];
+  cinematography: SceneCinematography;
 };
 
 const STORYBOARD_MODEL = "gpt-5.5";
@@ -40,6 +48,19 @@ const requestSchema = z
   .strict();
 
 type StoryboardRequestBody = z.infer<typeof requestSchema>;
+
+const storyboardSceneResponseSchema = z
+  .object({
+    prompt: z.unknown().optional(),
+    mentions: z.unknown().optional(),
+    invalidMentions: z.unknown().optional(),
+    cinematography: z.unknown().optional()
+  })
+  .passthrough();
+
+const storyboardScenesResponseSchema = z.array(storyboardSceneResponseSchema);
+
+type RawStoryboardScene = z.infer<typeof storyboardSceneResponseSchema>;
 
 function toCodexInput(messages: { role: ChatRole; content: string }[]): CodexMessage[] {
   return messages.map(message => ({
@@ -81,18 +102,19 @@ function extractMentionCandidates(prompt: string): string[] {
   return unique(Array.from(prompt.matchAll(HANDLE_PATTERN), match => match[1]));
 }
 
-function safeParseJsonArray(text: string): unknown[] | null {
+function safeParseJsonArray(text: string): RawStoryboardScene[] | null {
   try {
     const parsed = JSON.parse(stripJsonFence(text));
-    return Array.isArray(parsed) ? parsed : null;
+    const result = storyboardScenesResponseSchema.safeParse(parsed);
+    return result.success ? result.data : null;
   } catch {
     return null;
   }
 }
 
-function normalizeScenes(rawScenes: unknown[], registeredHandles: Set<string>, sceneCount: number): StoryboardScene[] {
-  return rawScenes.slice(0, sceneCount).map(rawScene => {
-    const record = rawScene && typeof rawScene === "object" ? rawScene as Record<string, unknown> : {};
+function normalizeScenes(rawScenes: RawStoryboardScene[], registeredHandles: Set<string>, sceneCount: number): StoryboardScene[] {
+  return rawScenes.slice(0, sceneCount).map((rawScene, index) => {
+    const record = rawScene as Record<string, unknown>;
     const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
     const rawMentions = Array.isArray(record.mentions) ? record.mentions : [];
     const promptMentions = extractMentionCandidates(prompt);
@@ -103,6 +125,7 @@ function normalizeScenes(rawScenes: unknown[], registeredHandles: Set<string>, s
     return {
       prompt,
       mentions,
+      cinematography: normalizeCinematography(record.cinematography, index),
       ...(invalidMentions.length ? { invalidMentions } : {})
     };
   });
@@ -127,6 +150,9 @@ function buildMessages({
   handles: Array<{ handle: string; role: StoryReferenceRole; description?: string }>;
 }) {
   const handleList = formatHandleList(handles);
+  const framingIds = FRAMING_OPTIONS.map(option => option.id).join(", ");
+  const angleIds = ANGLE_OPTIONS.map(option => option.id).join(", ");
+  const specialIds = SPECIAL_OPTIONS.map(option => option.id).join(", ");
   return [
     {
       role: "system" as const,
@@ -138,6 +164,9 @@ function buildMessages({
         "스토리의 의도와 디테일을 해석해 장면마다 충분히 구체화하되, 한 컷에 보이지 않는 사건 설명이나 메타 해설은 쓰지 않는다. " +
         "등록된 핸들만 mention 가능하다. 예: @민수, @카페. " +
         "각 prompt에는 등장하는 @핸들을 포함하고, mentions에는 @를 제외한 핸들명을 넣는다. " +
+        `각 컷에 cinematography 객체를 포함한다. framing은 다음 id 중 하나: ${framingIds}. ` +
+        `angle은 다음 id 중 하나: ${angleIds}. special은 다음 id 중 하나 또는 null: ${specialIds}. ` +
+        "전체 컷에서 같은 framing/angle 조합을 기계적으로 반복하지 않는다. " +
         "응답은 JSON 배열만 반환한다. 마크다운, 설명, 코드펜스는 금지한다."
     },
     {
@@ -147,9 +176,10 @@ function buildMessages({
         `컷 수: ${sceneCount}\n\n` +
         `등록된 핸들:\n${handleList || "- 없음"}\n\n` +
         "출력 형식:\n" +
-        `[{"prompt":"비 내리는 저녁의 @카페 입구 앞, 젖은 유리문 너머 따뜻한 조명이 번지고 @민수가 문고리를 잡은 채 잠시 멈춰 선다. @민수의 표정은 기대와 두려움이 섞여 있고, 손에는 여러 번 접힌 종이가 구겨져 있다. 카메라는 문 앞의 좁은 처마 아래에서 인물을 살짝 올려다보며, 빗방울과 반사광이 장면의 긴장감을 만든다.","mentions":["민수","카페"]}]\n\n` +
+        `[{"prompt":"비 내리는 저녁의 @카페 입구 앞, 젖은 유리문 너머 따뜻한 조명이 번지고 @민수가 문고리를 잡은 채 잠시 멈춰 선다. @민수의 표정은 기대와 두려움이 섞여 있고, 손에는 여러 번 접힌 종이가 구겨져 있다. 카메라는 문 앞의 좁은 처마 아래에서 인물을 살짝 올려다보며, 빗방울과 반사광이 장면의 긴장감을 만든다.","mentions":["민수","카페"],"cinematography":{"framing":"medium-shot","angle":"low-angle","special":"over-the-shoulder"}}]\n\n` +
         `반드시 ${sceneCount}개 배열 항목을 목표로 작성하고, 각 prompt는 상세한 이미지 생성 프롬프트로 쓴다. ` +
-        "prompt에는 위 등록 핸들만 사용하고, 원문을 단순 요약하지 말고 컷마다 시각적으로 충분히 구체화한다."
+        "prompt에는 위 등록 핸들만 사용하고, 원문을 단순 요약하지 말고 컷마다 시각적으로 충분히 구체화한다. " +
+        "cinematography는 각 컷의 시각적 기능에 맞게 달리 선택한다."
     }
   ];
 }
@@ -169,7 +199,7 @@ async function requestStoryboardScenes({
       role: "user" as const,
       content:
         `이전 응답의 컷 수가 요청한 ${body.sceneCount}개보다 적었습니다. ` +
-        `반드시 ${body.sceneCount}개 JSON 배열 항목만 반환하세요.`
+        `반드시 ${body.sceneCount}개 JSON 배열 항목만 반환하고 각 항목에 cinematography를 포함하세요.`
     });
   }
 
