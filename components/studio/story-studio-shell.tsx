@@ -1070,6 +1070,32 @@ export function StoryStudioShell() {
     [library]
   );
 
+  const handleSceneCinematographyChange = useCallback((sceneId: string, next: SceneCinematography) => {
+    setScenes(current =>
+      current.map((scene, index) => {
+        if (scene.id !== sceneId) {
+          return scene;
+        }
+        const cinematography = normalizeCinematography(next, index);
+        if (scene.status !== "completed") {
+          return {
+            ...scene,
+            cinematography
+          };
+        }
+        return {
+          ...scene,
+          cinematography,
+          status: "idle",
+          resultUrl: undefined,
+          resultRecord: undefined,
+          resultFormat: undefined,
+          error: undefined
+        };
+      })
+    );
+  }, []);
+
   const handleResplit = useCallback(() => {
     const hasGeneratedResults = scenes.some(
       scene => scene.status === "completed" || scene.resultUrl || scene.resultRecord
@@ -1172,6 +1198,7 @@ export function StoryStudioShell() {
               busy={isBusy}
               allGenerationActive={isBusy}
               onPromptChange={handleScenePromptChange}
+              onCinematographyChange={handleSceneCinematographyChange}
               onDownloadCompletedImages={handleDownloadCompletedImages}
               onGenerateAll={handleGenerateAll}
               onRetryFailedScenes={handleRetryFailedScenes}
@@ -1660,6 +1687,7 @@ function SceneBoard({
   busy,
   allGenerationActive,
   onPromptChange,
+  onCinematographyChange,
   onDownloadCompletedImages,
   onGenerateAll,
   onRetryFailedScenes,
@@ -1673,6 +1701,7 @@ function SceneBoard({
   busy: boolean;
   allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
+  onCinematographyChange: (sceneId: string, next: SceneCinematography) => void;
   onDownloadCompletedImages: () => void;
   onGenerateAll: () => void;
   onRetryFailedScenes: () => void;
@@ -1739,6 +1768,7 @@ function SceneBoard({
                 editable={mode === "review" && scene.status !== "generating" && scene.status !== "completed"}
                 allGenerationActive={allGenerationActive}
                 onPromptChange={onPromptChange}
+                onCinematographyChange={onCinematographyChange}
                 onRegenerateScene={onRegenerateScene}
                 onMoveScene={onMoveScene}
                 onPreviewRecord={onPreviewRecord}

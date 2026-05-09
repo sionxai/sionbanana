@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -13,9 +13,20 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationOptionsValue } from "@/components/studio/generation-options-panel";
-import type { SceneCinematography } from "@/lib/story-cinematography";
+import {
+  ANGLE_OPTIONS,
+  FRAMING_OPTIONS,
+  SPECIAL_OPTIONS,
+  getCinematographyFramingOption,
+  getCinematographySpecialOption,
+  type CinematographyAngle,
+  type CinematographyFraming,
+  type CinematographySpecial,
+  type SceneCinematography
+} from "@/lib/story-cinematography";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +50,7 @@ type SceneCardProps = {
   editable: boolean;
   allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
+  onCinematographyChange: (sceneId: string, next: SceneCinematography) => void;
   onRegenerateScene: (sceneId: string) => void;
   onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
@@ -80,12 +92,28 @@ function getImageFormatExtension(format?: GenerationOptionsValue["format"]): str
   return format ?? "png";
 }
 
+const ANGLE_CHIP_LABELS: Record<CinematographyAngle, string> = {
+  "eye-level": "아이",
+  "high-angle": "하이",
+  "low-angle": "로우",
+  "dutch-angle": "더치",
+  "birds-eye": "버드",
+  "worms-eye": "웜"
+};
+
+function getCinematographyChipLabel(cinematography: SceneCinematography): string {
+  const framing = getCinematographyFramingOption(cinematography.framing);
+  const special = cinematography.special ? getCinematographySpecialOption(cinematography.special) : null;
+  return [framing.code, ANGLE_CHIP_LABELS[cinematography.angle], special?.label].filter(Boolean).join(" · ");
+}
+
 export function SceneCard({
   scene,
   index,
   editable,
   allGenerationActive,
   onPromptChange,
+  onCinematographyChange,
   onRegenerateScene,
   onMoveScene,
   onPreviewRecord,
@@ -99,6 +127,33 @@ export function SceneCard({
   const downloadExtension = getImageFormatExtension(scene.resultFormat);
   const [isGeneratedPromptOpen, setIsGeneratedPromptOpen] = useState(false);
   const generatedPrompt = scene.resultRecord?.promptMeta?.refinedPrompt ?? scene.prompt;
+  const cinematographyControlsDisabled = allGenerationActive || isGenerating;
+  const chipLabel = getCinematographyChipLabel(scene.cinematography);
+  const framingSelectId = `${scene.id}-framing`;
+  const angleSelectId = `${scene.id}-angle`;
+  const specialSelectId = `${scene.id}-special`;
+
+  const handleFramingChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    onCinematographyChange(scene.id, {
+      ...scene.cinematography,
+      framing: event.target.value as CinematographyFraming
+    });
+  };
+
+  const handleAngleChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    onCinematographyChange(scene.id, {
+      ...scene.cinematography,
+      angle: event.target.value as CinematographyAngle
+    });
+  };
+
+  const handleSpecialChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    onCinematographyChange(scene.id, {
+      ...scene.cinematography,
+      special: value === "none" ? null : value as CinematographySpecial
+    });
+  };
 
   return (
     <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-background">
@@ -106,6 +161,9 @@ export function SceneCard({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">씬 {index + 1}</span>
           <Badge variant={getSceneStatusVariant(scene.status)}>{getSceneStatusLabel(scene.status)}</Badge>
+          <span className="whitespace-nowrap rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] leading-4 tracking-normal text-muted-foreground">
+            {chipLabel}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -159,6 +217,64 @@ export function SceneCard({
           ) : (
             <span className="text-xs text-muted-foreground">멘션 없음</span>
           )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="space-y-1">
+            <Label htmlFor={framingSelectId} className="text-[11px] text-muted-foreground">
+              Framing
+            </Label>
+            <select
+              id={framingSelectId}
+              value={scene.cinematography.framing}
+              onChange={handleFramingChange}
+              disabled={cinematographyControlsDisabled}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {FRAMING_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={angleSelectId} className="text-[11px] text-muted-foreground">
+              Angle
+            </Label>
+            <select
+              id={angleSelectId}
+              value={scene.cinematography.angle}
+              onChange={handleAngleChange}
+              disabled={cinematographyControlsDisabled}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {ANGLE_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={specialSelectId} className="text-[11px] text-muted-foreground">
+              Special
+            </Label>
+            <select
+              id={specialSelectId}
+              value={scene.cinematography.special ?? "none"}
+              onChange={handleSpecialChange}
+              disabled={cinematographyControlsDisabled}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="none">없음</option>
+              {SPECIAL_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="rounded-lg border border-border/70 bg-muted/20">
