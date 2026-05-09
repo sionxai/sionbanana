@@ -36,6 +36,11 @@ import { callGenerateApi, type GenerateResponse } from "@/hooks/use-generate-ima
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import { runWithConcurrency } from "@/lib/concurrency";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
+import {
+  buildCinematographySuffix,
+  normalizeCinematography,
+  type SceneCinematography
+} from "@/lib/story-cinematography";
 import { parseStoryMentions } from "@/lib/story-mentions";
 import {
   loadProjects,
@@ -81,6 +86,7 @@ type StoryboardSceneResponse = {
   prompt?: unknown;
   mentions?: unknown;
   invalidMentions?: unknown;
+  cinematography?: unknown;
 };
 
 type StoryboardResponse =
@@ -285,11 +291,17 @@ function buildReferenceMap(references: StoryReference[]): string {
 const STORY_CONTINUITY_LOCK =
   "Series continuity: keep recurring @handles visually consistent across scenes; preserve established identity, scale, wardrobe cues, and location character unless this scene explicitly changes them.";
 
-function buildFinalPrompt(scenePrompt: string, references: StoryReference[], toneSuffix?: string): string {
+function buildFinalPrompt(
+  scenePrompt: string,
+  references: StoryReference[],
+  cinematography: SceneCinematography,
+  toneSuffix?: string
+): string {
   const refMap = buildReferenceMap(references);
   return [
     `Reference map: ${refMap}.`,
     `Detailed scene image prompt: ${scenePrompt}`,
+    buildCinematographySuffix(cinematography),
     STORY_CONTINUITY_LOCK,
     toneSuffix
   ].filter(Boolean).join(" ");
@@ -346,6 +358,7 @@ function createSceneFromStoryboard(
     id: createSceneId(index),
     prompt,
     mentions,
+    cinematography: normalizeCinematography(rawScene.cinematography, index),
     status: error ? "error" : "idle",
     error: error ?? undefined
   };
@@ -456,6 +469,7 @@ export function StoryStudioShell() {
           id: scene.id,
           prompt: scene.prompt,
           mentions: scene.mentions,
+          cinematography: scene.cinematography,
           status: scene.status,
           ...(scene.resultUrl ? { resultUrl: scene.resultUrl } : {}),
           ...(scene.resultRecord ? { resultRecord: scene.resultRecord } : {})
@@ -480,8 +494,9 @@ export function StoryStudioShell() {
       setMode(project.mode);
       setToneId(project.toneId);
       setScenes(
-        project.scenes.map(scene => ({
+        project.scenes.map((scene, index) => ({
           ...scene,
+          cinematography: normalizeCinematography(scene.cinematography, index),
           resultFormat: getProjectSceneResultFormat(scene.resultRecord)
         }))
       );
@@ -672,7 +687,7 @@ export function StoryStudioShell() {
         .map(handle => findReferenceByHandle(library, handle))
         .filter((ref): ref is StoryReference => ref !== null);
       const toneSuffix = TONE_OPTIONS.find(tone => tone.id === toneId)?.promptSuffix;
-      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, toneSuffix);
+      const finalPrompt = buildFinalPrompt(scene.prompt, mentionedRefs, scene.cinematography, toneSuffix);
       const referenceGallery = mentionedRefs.slice(1).map(ref => ref.imageUrl);
       const referenceMap = buildReferenceMap(mentionedRefs);
 
@@ -726,6 +741,7 @@ export function StoryStudioShell() {
           referenceMap,
           storySourcePrompt: storyText,
           storyScenePrompt: scene.prompt,
+          storyCinematography: scene.cinematography,
           mentionedHandles: validation.mentions,
           referencedSlots: mentionedRefs.map(ref => ({
             handle: ref.handle,

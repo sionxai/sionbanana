@@ -1,4 +1,5 @@
 import type { SceneStatus } from "@/components/studio/scene-card";
+import { normalizeCinematography, type SceneCinematography } from "@/lib/story-cinematography";
 import type { GeneratedImageDocument } from "@/lib/types";
 
 export const STORY_PROJECTS_STORAGE_KEY = "sionbanana-story-projects-v1";
@@ -8,6 +9,7 @@ export type StoryProjectScene = {
   id: string;
   prompt: string;
   mentions: string[];
+  cinematography?: SceneCinematography;
   status: SceneStatus;
   resultUrl?: string;
   resultRecord?: GeneratedImageDocument;
@@ -70,6 +72,7 @@ function normalizeScene(value: unknown, index: number): StoryProjectScene | null
     id: typeof record.id === "string" && record.id ? record.id : `story-scene-${index + 1}`,
     prompt,
     mentions: normalizeStringArray(record.mentions),
+    cinematography: normalizeCinematography(record.cinematography, index),
     status: normalizeSceneStatus(record.status, resultUrl),
     ...(resultUrl ? { resultUrl } : {}),
     ...(resultRecord ? { resultRecord } : {})

@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationOptionsValue } from "@/components/studio/generation-options-panel";
+import type { SceneCinematography } from "@/lib/story-cinematography";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ export type Scene = {
   id: string;
   prompt: string;
   mentions: string[];
+  cinematography: SceneCinematography;
   status: SceneStatus;
   resultUrl?: string;
   resultRecord?: GeneratedImageDocument;
