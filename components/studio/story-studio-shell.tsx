@@ -1195,6 +1195,7 @@ export function StoryStudioShell() {
             <SceneBoard
               scenes={scenes}
               mode={mode}
+              toneLabel={selectedTone?.label ?? null}
               busy={isBusy}
               allGenerationActive={isBusy}
               onPromptChange={handleScenePromptChange}
@@ -1684,6 +1685,7 @@ function StoryPromptInput({
 function SceneBoard({
   scenes,
   mode,
+  toneLabel,
   busy,
   allGenerationActive,
   onPromptChange,
@@ -1698,6 +1700,7 @@ function SceneBoard({
 }: {
   scenes: Scene[];
   mode: StoryMode;
+  toneLabel: string | null;
   busy: boolean;
   allGenerationActive: boolean;
   onPromptChange: (sceneId: string, prompt: string) => void;
@@ -1772,6 +1775,7 @@ function SceneBoard({
                 onRegenerateScene={onRegenerateScene}
                 onMoveScene={onMoveScene}
                 onPreviewRecord={onPreviewRecord}
+                toneLabel={toneLabel}
                 moveDisabled={busy}
                 isFirst={index === 0}
                 isLast={index === scenes.length - 1}

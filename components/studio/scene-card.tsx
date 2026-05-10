@@ -20,6 +20,7 @@ import {
   ANGLE_OPTIONS,
   FRAMING_OPTIONS,
   SPECIAL_OPTIONS,
+  getCinematographyAngleOption,
   getCinematographyFramingOption,
   getCinematographySpecialOption,
   type CinematographyAngle,
@@ -54,6 +55,7 @@ type SceneCardProps = {
   onRegenerateScene: (sceneId: string) => void;
   onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
+  toneLabel: string | null;
   moveDisabled: boolean;
   isFirst: boolean;
   isLast: boolean;
@@ -107,6 +109,20 @@ function getCinematographyChipLabel(cinematography: SceneCinematography): string
   return [framing.code, ANGLE_CHIP_LABELS[cinematography.angle], special?.label].filter(Boolean).join(" · ");
 }
 
+export function formatScenePromptPreview(scene: Scene, toneLabel: string | null): string {
+  const framing = getCinematographyFramingOption(scene.cinematography.framing);
+  const angle = getCinematographyAngleOption(scene.cinematography.angle);
+  const special = scene.cinematography.special ? getCinematographySpecialOption(scene.cinematography.special) : null;
+  const cameraLabels = [framing.label, angle.label, special?.label].filter(Boolean).join(", ");
+  const lines = [scene.prompt, "", `카메라: ${cameraLabels}.`];
+
+  if (toneLabel) {
+    lines.push(`톤: ${toneLabel}.`);
+  }
+
+  return lines.join("\n");
+}
+
 export function SceneCard({
   scene,
   index,
@@ -117,6 +133,7 @@ export function SceneCard({
   onRegenerateScene,
   onMoveScene,
   onPreviewRecord,
+  toneLabel,
   moveDisabled,
   isFirst,
   isLast
@@ -126,7 +143,9 @@ export function SceneCard({
   const canRegenerate = !allGenerationActive && !isGenerating;
   const downloadExtension = getImageFormatExtension(scene.resultFormat);
   const [isGeneratedPromptOpen, setIsGeneratedPromptOpen] = useState(false);
-  const generatedPrompt = scene.resultRecord?.promptMeta?.refinedPrompt ?? scene.prompt;
+  const generatedPrompt = scene.status === "completed" && scene.resultRecord
+    ? scene.resultRecord.promptMeta?.refinedPrompt ?? scene.prompt
+    : formatScenePromptPreview(scene, toneLabel);
   const cinematographyControlsDisabled = allGenerationActive || isGenerating;
   const chipLabel = getCinematographyChipLabel(scene.cinematography);
   const framingSelectId = `${scene.id}-framing`;
