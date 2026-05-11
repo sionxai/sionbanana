@@ -1681,6 +1681,33 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     }
   };
 
+  const handleReferenceSlotCreateUpload = async (file: File) => {
+    if (referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT) {
+      toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      const storedUrl = dataUrl;
+      const now = new Date().toISOString();
+
+      setReferenceSlots(prev =>
+        prev.length >= MAX_REFERENCE_SLOT_COUNT
+          ? prev
+          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, updatedAt: now }]
+      );
+      const filledAfter = referenceSlots.filter(item => item.imageUrl).length + 1;
+      if (filledAfter >= 5) {
+        toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+      }
+      toast.success("참조 이미지를 추가했습니다.");
+    } catch (error) {
+      console.error("reference slot create upload error", error);
+      toast.error("참조 이미지 업로드에 실패했습니다.");
+    }
+  };
+
   const handleReferenceSlotSelect = async (slotId: string) => {
     const slot = referenceSlots.find(item => item.id === slotId);
     if (!slot?.imageUrl) {
@@ -3246,6 +3273,7 @@ ${viewInstruction}`;
           onPreview={handlePreviewRecord}
           referenceSlots={referenceSlots}
           onReferenceSlotUpload={handleReferenceSlotUpload}
+          onReferenceSlotCreateUpload={handleReferenceSlotCreateUpload}
           onReferenceSlotClear={handleReferenceSlotClear}
           onReferenceSlotSelect={handleReferenceSlotSelect}
           onReferenceSlotAdd={handleReferenceSlotAdd}

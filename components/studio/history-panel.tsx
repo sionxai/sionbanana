@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { GeneratedImageDocument } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
+import { Plus } from "lucide-react";
 
 const RECENT_RECORD_LIMIT = 3;
 
@@ -40,6 +41,7 @@ interface HistoryPanelProps {
   onPreview?: (record: GeneratedImageDocument) => void;
   referenceSlots?: ReferenceSlotView[];
   onReferenceSlotUpload?: (slotId: string, file: File) => Promise<void> | void;
+  onReferenceSlotCreateUpload?: (file: File) => Promise<void> | void;
   onReferenceSlotClear?: (slotId: string) => void;
   onReferenceSlotSelect?: (slotId: string) => Promise<void> | void;
   onReferenceSlotAdd?: () => void;
@@ -70,6 +72,7 @@ export function HistoryPanel({
   onPreview,
   referenceSlots,
   onReferenceSlotUpload,
+  onReferenceSlotCreateUpload,
   onReferenceSlotClear,
   onReferenceSlotSelect,
   onReferenceSlotAdd,
@@ -168,6 +171,47 @@ export function HistoryPanel({
 
   const handleDragEnd = () => {
     setIsDragOver(false);
+  };
+
+  const handleReferenceSlotDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!onReferenceSlotUpload && !onReferenceSlotCreateUpload) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer.types.includes("Files")) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const getDroppedImageFile = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const file = event.dataTransfer.files?.[0] ?? null;
+    if (!file?.type.startsWith("image/")) {
+      return null;
+    }
+    return file;
+  };
+
+  const handleReferenceSlotDrop = async (event: DragEvent<HTMLElement>, slotId: string) => {
+    if (!onReferenceSlotUpload) {
+      return;
+    }
+    const file = getDroppedImageFile(event);
+    if (file) {
+      await onReferenceSlotUpload(slotId, file);
+    }
+  };
+
+  const handleReferenceSlotCreateDrop = async (event: DragEvent<HTMLElement>) => {
+    if (!onReferenceSlotCreateUpload) {
+      return;
+    }
+    const file = getDroppedImageFile(event);
+    if (file) {
+      await onReferenceSlotCreateUpload(file);
+    }
   };
 
   const handleQuickSetReference = () => {
@@ -399,7 +443,11 @@ export function HistoryPanel({
               </Button>
           </div>
         </div>
-        <div className="space-y-3">
+        <div
+          className="space-y-3"
+          onDragOver={handleReferenceSlotDragOver}
+          onDrop={event => void handleReferenceSlotCreateDrop(event)}
+        >
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <p className="text-xs font-semibold text-muted-foreground">참조 이미지</p>
@@ -412,6 +460,8 @@ export function HistoryPanel({
               variant="outline"
               className="h-7 px-2 text-[11px]"
               onClick={() => onReferenceSlotAdd?.()}
+              onDragOver={handleReferenceSlotDragOver}
+              onDrop={event => void handleReferenceSlotCreateDrop(event)}
               disabled={!canAddMoreReferenceSlots || !onReferenceSlotAdd}
             >
               슬롯 추가
@@ -425,7 +475,11 @@ export function HistoryPanel({
           <div className="grid grid-cols-3 gap-2">
             {slots.map(slot => (
               <div key={slot.id} className="space-y-1">
-                <div className="group relative aspect-square overflow-hidden rounded-lg border bg-muted/40">
+                <div
+                  className="group relative aspect-square overflow-hidden rounded-lg border bg-muted/40"
+                  onDragOver={handleReferenceSlotDragOver}
+                  onDrop={event => void handleReferenceSlotDrop(event, slot.id)}
+                >
                   {slot.imageUrl ? (
                     <NextImage src={slot.imageUrl} alt="reference slot" fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover" unoptimized />
                   ) : (
@@ -493,6 +547,19 @@ export function HistoryPanel({
                 />
               </div>
             ))}
+            {canAddMoreReferenceSlots ? (
+              <button
+                type="button"
+                className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed bg-muted/20 text-muted-foreground transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => onReferenceSlotAdd?.()}
+                onDragOver={handleReferenceSlotDragOver}
+                onDrop={event => void handleReferenceSlotCreateDrop(event)}
+                disabled={!onReferenceSlotAdd}
+                aria-label="참조 슬롯 추가"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
         </div>
         <Button variant="outline" className="w-full" size="sm">
