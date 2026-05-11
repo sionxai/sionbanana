@@ -20,14 +20,11 @@ import type { AspectRatioPreset, GeneratedImageDocument, GenerationMode } from "
 import { DEFAULT_ASPECT_RATIO, getAspectRatioDimensions, getAspectRatioLabel } from "@/lib/aspect";
 import { APERTURE_DEFAULT, formatAperture } from "@/lib/camera";
 import {
-  CHARACTER_BASE_PROMPT_FALLBACK,
   CHARACTER_NEGATIVE_ENFORCEMENT,
   CHARACTER_SHEET_BASE_PROMPT,
   CHARACTER_SHEET_NEGATIVE,
   CHARACTER_SHEET_SINGLE_VIEW_GUIDELINE,
   CHARACTER_SHEET_VIEWS,
-  CHARACTER_SINGLE_VIEW_GUIDELINE,
-  CHARACTER_VIEWS,
   TURNAROUND_BASE_PROMPT_FALLBACK,
   TURNAROUND_NEGATIVE_ENFORCEMENT,
   TURNAROUND_SINGLE_VIEW_GUIDELINE,
@@ -1696,7 +1693,11 @@ type ReferenceImageState = {
         referenceMetadata: (referenceRecord.metadata ?? {}) as { referenceId?: string | null },
         fallbackCandidate: historyRecords[0] ?? null,
         user,
-        imageGenOptions,
+        imageGenOptions: {
+          ...imageGenOptions,
+          size: "2048x1152",
+          count: 1
+        },
         cancelRef,
         onCancelled: () => setCancelRequested(false),
         onProgress: () => {
