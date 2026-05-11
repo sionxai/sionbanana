@@ -2328,6 +2328,19 @@ type ReferenceImageState = {
                 FOUR_THREE_RATIO_CLASS,
                 referenceImageUrl ? "" : "flex items-center justify-center"
               )}
+              onDragOver={event => {
+                event.preventDefault();
+              }}
+              onDrop={event => {
+                event.preventDefault();
+                if (batchPending) {
+                  return;
+                }
+                const file = event.dataTransfer.files[0];
+                if (file) {
+                  void handleReferenceUpload(file);
+                }
+              }}
             >
               {cacheBustedReferenceImageUrl ? (
                 <Image
@@ -2381,7 +2394,23 @@ type ReferenceImageState = {
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {referenceSlots.map(slot => (
-                  <div key={slot.id} className="group relative overflow-hidden rounded-lg border">
+                  <div
+                    key={slot.id}
+                    className="group relative overflow-hidden rounded-lg border"
+                    onDragOver={event => {
+                      event.preventDefault();
+                    }}
+                    onDrop={event => {
+                      event.preventDefault();
+                      if (batchPending) {
+                        return;
+                      }
+                      const file = event.dataTransfer.files[0];
+                      if (file) {
+                        void handleReferenceSlotUpload(slot.id, file);
+                      }
+                    }}
+                  >
                     {slot.imageUrl ? (
                       <>
                         <Image src={slot.imageUrl} alt="reference slot" width={160} height={120} className="h-full w-full object-cover" />
