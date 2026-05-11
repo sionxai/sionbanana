@@ -1768,7 +1768,7 @@ function SceneBoard({
                 key={scene.id}
                 scene={scene}
                 index={index}
-                editable={mode === "review" && scene.status !== "generating" && scene.status !== "completed"}
+                editable={scene.status !== "generating"}
                 allGenerationActive={allGenerationActive}
                 onPromptChange={onPromptChange}
                 onCinematographyChange={onCinematographyChange}
