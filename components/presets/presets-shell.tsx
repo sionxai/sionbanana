@@ -22,6 +22,10 @@ import { APERTURE_DEFAULT, formatAperture } from "@/lib/camera";
 import {
   CHARACTER_BASE_PROMPT_FALLBACK,
   CHARACTER_NEGATIVE_ENFORCEMENT,
+  CHARACTER_SHEET_BASE_PROMPT,
+  CHARACTER_SHEET_NEGATIVE,
+  CHARACTER_SHEET_SINGLE_VIEW_GUIDELINE,
+  CHARACTER_SHEET_VIEWS,
   CHARACTER_SINGLE_VIEW_GUIDELINE,
   CHARACTER_VIEWS,
   TURNAROUND_BASE_PROMPT_FALLBACK,
@@ -1669,17 +1673,18 @@ type ReferenceImageState = {
 
     try {
       await runBatchSequence({
-        views: CHARACTER_VIEWS,
-        batchLabel: "캐릭터셋",
-        basePrompt: CHARACTER_BASE_PROMPT_FALLBACK,
-        singleViewGuideline: CHARACTER_SINGLE_VIEW_GUIDELINE,
-        negativePrompt: CHARACTER_NEGATIVE_ENFORCEMENT,
+        views: CHARACTER_SHEET_VIEWS,
+        batchLabel: "캐릭터 시트",
+        basePrompt: CHARACTER_SHEET_BASE_PROMPT,
+        singleViewGuideline: CHARACTER_SHEET_SINGLE_VIEW_GUIDELINE,
+        commonViewGuideline: "",
+        negativePrompt: CHARACTER_SHEET_NEGATIVE,
         referenceImageForRequest,
         uniqueGalleryReferences,
-        aspectRatioValue,
-        aspectRatioLabel,
-        shouldApplyAspectRatio,
-        actionLabel: "character",
+        aspectRatioValue: "16:9",
+        aspectRatioLabel: "16:9",
+        shouldApplyAspectRatio: true,
+        actionLabel: "character-sheet",
         targetModel: "gpt-image-2",
         setPending: setBatchPending,
         cameraPayload,
@@ -1694,10 +1699,10 @@ type ReferenceImageState = {
         imageGenOptions,
         cancelRef,
         onCancelled: () => setCancelRequested(false),
-        onProgress: (view, index, total) => {
-          toast.loading(`${view.label} (${index + 1}/${total}) 생성 중...`, {
+        onProgress: () => {
+          toast.loading("캐릭터 시트 생성 중...", {
             id: PRESET_BATCH_PROGRESS_TOAST_ID,
-            duration: 5000
+            duration: 10000
           });
         }
       });
@@ -2392,7 +2397,7 @@ type ReferenceImageState = {
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2">
               <Button className="h-20 text-lg" onClick={() => void handlePresetCharacterSet()} disabled={batchPending}>
-                <Sparkles className="mr-2 h-5 w-5" /> 캐릭터셋 생성
+                <Sparkles className="mr-2 h-5 w-5" /> 캐릭터 시트
               </Button>
               <Button className="h-20 text-lg" onClick={() => void handlePresetView360()} disabled={batchPending}>
                 <Stars className="mr-2 h-5 w-5" /> 360도 뷰
