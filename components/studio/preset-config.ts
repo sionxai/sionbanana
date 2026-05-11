@@ -131,3 +131,23 @@ export const TURNAROUND_VIEWS: ViewSpec[] = [
       "Camera rotation +330 degrees, front-left view nearly facing forward with a slight turn toward the viewer's left side, maintaining identical character likeness"
   }
 ];
+
+export const CHARACTER_SHEET_BASE_PROMPT =
+  "Single character sheet image, 16:9 aspect ratio, clean solid mid-grey background (#808080, no gradient or texture). Render style matching the reference image exactly (photorealistic, identical texture, color, density). 3-point lighting consistent across all panels: soft key light from front-upper 45 degrees, soft side fill to reduce shadows, subtle rim backlight for silhouette separation. Minimize hard shadows.";
+
+export const CHARACTER_SHEET_LAYOUT_INSTRUCTION =
+  "Layout (16:9 split): LEFT 50% = two full-body shots side-by-side, left panel = front view, right panel = back view, both in standard A-pose (arms about 15 degrees from torso, palms facing inward, feet shoulder-width, balanced weight, neutral expression, eye-level camera, character fills frame edge-to-edge, identical size and vertical alignment between panels). RIGHT 50% = four face close-ups in 2x2 grid: top-left = front (0 degrees), top-right = left 3/4 view (45 degrees), bottom-left = right 3/4 view (45 degrees), bottom-right = left profile (90 degrees). All face panels share identical face size (chin-to-crown = 80% of panel height), neutral expression with mouth closed naturally. Gaze: front panel toward camera, others naturally toward their angle direction. No head movement except rotation angle. Even panel spacing, precise grid alignment, no labels or text";
+
+export const CHARACTER_SHEET_SINGLE_VIEW_GUIDELINE =
+  "Render all 6 panels in one single coherent image with precise grid alignment.";
+
+export const CHARACTER_SHEET_NEGATIVE =
+  "different identity, different costume, different hairstyle, expression change, smile, mouth open, multiple separate characters, white background, gradient background, textured background, colored background, hard shadows, inconsistent lighting, text labels, panel numbers, watermarks, misaligned grid, uneven panel spacing, missing panels";
+
+export const CHARACTER_SHEET_VIEW: ViewSpec = {
+  id: "character-sheet-6panel",
+  label: "캐릭터 시트",
+  instruction: CHARACTER_SHEET_LAYOUT_INSTRUCTION
+};
+
+export const CHARACTER_SHEET_VIEWS: ViewSpec[] = [CHARACTER_SHEET_VIEW];
