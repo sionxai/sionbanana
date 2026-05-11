@@ -1395,7 +1395,28 @@ type ReferenceImageState = {
       return;
     }
 
-    setLocalRecords(prev => prev.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID));
+    const referenceIds = new Set([REFERENCE_IMAGE_DOC_ID]);
+    if (referenceRecord.id) {
+      referenceIds.add(referenceRecord.id);
+    }
+    const isReferenceRecord = (record: GeneratedImageDocument) =>
+      referenceIds.has(record.id) || record.metadata?.isReference === true;
+
+    setLocalRecords(prev => prev.filter(record => !isReferenceRecord(record)));
+    try {
+      const stored = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as GeneratedImageDocument[];
+        if (Array.isArray(parsed)) {
+          window.localStorage.setItem(
+            LOCAL_STORAGE_KEY,
+            JSON.stringify(parsed.filter(record => !isReferenceRecord(record)))
+          );
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to remove reference from local history", error);
+    }
     broadcastReferenceUpdate(null, "presets");
     setReferenceImageOverride(null);
     toast.success("기준 이미지를 삭제했습니다.");
