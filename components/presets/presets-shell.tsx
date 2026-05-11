@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -56,7 +56,7 @@ import {
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
 import { cn } from "@/lib/utils";
-import { Download, Image as ImageIcon, Sparkles, Stars, Zap, ZoomIn } from "lucide-react";
+import { Download, Image as ImageIcon, Plus, Sparkles, Stars, Zap, ZoomIn } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsList } from "@/components/ui/tabs";
 
@@ -1432,6 +1432,41 @@ type ReferenceImageState = {
     });
   };
 
+  const handleReferenceDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    if (event.dataTransfer.types.includes("Files")) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const getDroppedFile = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    return event.dataTransfer.files[0] ?? null;
+  };
+
+  const handleReferenceSlotCreateUpload = async (file: File) => {
+    if (referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT) {
+      toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      const storedUrl = dataUrl;
+      const now = new Date().toISOString();
+
+      setReferenceSlots(prev =>
+        prev.length >= MAX_REFERENCE_SLOT_COUNT
+          ? prev
+          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, updatedAt: now }]
+      );
+      toast.success("참조 이미지를 추가했습니다.");
+    } catch (error) {
+      console.error("reference slot create upload error", error);
+      toast.error("참조 이미지 업로드에 실패했습니다.");
+    }
+  };
+
   const handleReferenceSlotUpload = async (slotId: string, file: File) => {
     const slot = referenceSlots.find(item => item.id === slotId);
     if (!slot) {
@@ -2328,15 +2363,13 @@ type ReferenceImageState = {
                 FOUR_THREE_RATIO_CLASS,
                 referenceImageUrl ? "" : "flex items-center justify-center"
               )}
-              onDragOver={event => {
-                event.preventDefault();
-              }}
+              onDragOver={handleReferenceDragOver}
               onDrop={event => {
-                event.preventDefault();
+                event.stopPropagation();
+                const file = getDroppedFile(event);
                 if (batchPending) {
                   return;
                 }
-                const file = event.dataTransfer.files[0];
                 if (file) {
                   void handleReferenceUpload(file);
                 }
@@ -2385,10 +2418,38 @@ type ReferenceImageState = {
                 삭제
               </Button>
             </div>
-            <div className="space-y-2">
+            <div
+              className="space-y-2"
+              onDragOver={handleReferenceDragOver}
+              onDrop={event => {
+                const file = getDroppedFile(event);
+                if (batchPending) {
+                  return;
+                }
+                if (file) {
+                  void handleReferenceSlotCreateUpload(file);
+                }
+              }}
+            >
               <div className="flex items-center justify-between text-sm font-medium">
                 <span>참조 이미지</span>
-                <Button variant="ghost" size="sm" onClick={handleReferenceSlotAdd} disabled={referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT || batchPending}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleReferenceSlotAdd}
+                  onDragOver={handleReferenceDragOver}
+                  onDrop={event => {
+                    event.stopPropagation();
+                    const file = getDroppedFile(event);
+                    if (batchPending) {
+                      return;
+                    }
+                    if (file) {
+                      void handleReferenceSlotCreateUpload(file);
+                    }
+                  }}
+                  disabled={referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT || batchPending}
+                >
                   슬롯 추가
                 </Button>
               </div>
@@ -2396,16 +2457,14 @@ type ReferenceImageState = {
                 {referenceSlots.map(slot => (
                   <div
                     key={slot.id}
-                    className="group relative overflow-hidden rounded-lg border"
-                    onDragOver={event => {
-                      event.preventDefault();
-                    }}
+                    className="group relative aspect-[4/3] overflow-hidden rounded-lg border"
+                    onDragOver={handleReferenceDragOver}
                     onDrop={event => {
-                      event.preventDefault();
+                      event.stopPropagation();
+                      const file = getDroppedFile(event);
                       if (batchPending) {
                         return;
                       }
-                      const file = event.dataTransfer.files[0];
                       if (file) {
                         void handleReferenceSlotUpload(slot.id, file);
                       }
@@ -2445,6 +2504,28 @@ type ReferenceImageState = {
                     )}
                   </div>
                 ))}
+                {referenceSlots.length < MAX_REFERENCE_SLOT_COUNT ? (
+                  <button
+                    type="button"
+                    className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed text-muted-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={handleReferenceSlotAdd}
+                    onDragOver={handleReferenceDragOver}
+                    onDrop={event => {
+                      event.stopPropagation();
+                      const file = getDroppedFile(event);
+                      if (batchPending) {
+                        return;
+                      }
+                      if (file) {
+                        void handleReferenceSlotCreateUpload(file);
+                      }
+                    }}
+                    disabled={batchPending}
+                    aria-label="참조 슬롯 추가"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
             </div>
           </CardContent>
