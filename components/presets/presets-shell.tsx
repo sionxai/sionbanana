@@ -1685,7 +1685,19 @@ type ReferenceImageState = {
         actionLabel: "character-sheet",
         targetModel: "gpt-image-2",
         setPending: (active: boolean) => {
-          setCharacterSheetPendingCount(prev => active ? prev + 1 : Math.max(0, prev - 1));
+          setCharacterSheetPendingCount(prev => {
+            const next = active ? prev + 1 : Math.max(0, prev - 1);
+            if (next > 0) {
+              toast.loading(`캐릭터 시트 생성 중... (${next}개 진행)`, {
+                id: PRESET_BATCH_PROGRESS_TOAST_ID,
+                duration: Infinity
+              });
+            } else {
+              toast.dismiss(PRESET_BATCH_PROGRESS_TOAST_ID);
+              toast.success("캐릭터 시트 생성이 모두 완료되었습니다.");
+            }
+            return next;
+          });
         },
         cameraPayload,
         apertureLabel,
@@ -1702,13 +1714,7 @@ type ReferenceImageState = {
           count: 1
         },
         cancelRef,
-        onCancelled: () => setCancelRequested(false),
-        onProgress: () => {
-          toast.loading("캐릭터 시트 생성 중...", {
-            id: PRESET_BATCH_PROGRESS_TOAST_ID,
-            duration: 10000
-          });
-        }
+        onCancelled: () => setCancelRequested(false)
       });
     } finally {
       cancelRef.current = false;
@@ -2401,7 +2407,13 @@ type ReferenceImageState = {
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2">
               <Button className="h-20 text-lg" onClick={() => void handlePresetCharacterSet()} disabled={batchPending}>
-                <Sparkles className="mr-2 h-5 w-5" /> 캐릭터 시트
+                <Sparkles className="mr-2 h-5 w-5" />
+                캐릭터 시트
+                {characterSheetPendingCount > 0 ? (
+                  <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs">
+                    {characterSheetPendingCount} 진행 중
+                  </span>
+                ) : null}
               </Button>
               <Button className="h-20 text-lg" onClick={() => void handlePresetView360()} disabled={batchPending}>
                 <Stars className="mr-2 h-5 w-5" /> 360도 뷰
