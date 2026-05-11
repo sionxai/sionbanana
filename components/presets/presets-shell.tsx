@@ -946,6 +946,7 @@ export function PresetsShell() {
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [referenceImageUploading, setReferenceImageUploading] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
+  const [characterSheetPendingCount, setCharacterSheetPendingCount] = useState(0);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [historyVisibleCount, setHistoryVisibleCount] = useState(INITIAL_HISTORY_VISIBLE_COUNT);
   const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
@@ -1683,7 +1684,9 @@ type ReferenceImageState = {
         shouldApplyAspectRatio: true,
         actionLabel: "character-sheet",
         targetModel: "gpt-image-2",
-        setPending: setBatchPending,
+        setPending: (active: boolean) => {
+          setCharacterSheetPendingCount(prev => active ? prev + 1 : Math.max(0, prev - 1));
+        },
         cameraPayload,
         apertureLabel,
         effectiveCameraAngle: cameraAngle,
