@@ -137,6 +137,10 @@ function getRecordGeneratedImageUrl(record: GeneratedImageDocument | null): stri
   return record?.imageUrl ?? record?.thumbnailUrl ?? record?.originalImageUrl ?? "";
 }
 
+function isDataUrl(value?: string | null): boolean {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
 function getRecordPromptText(record: GeneratedImageDocument | null): string {
   return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
@@ -549,6 +553,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
   const [view360BatchPending, setView360BatchPending] = useState(false);
   const [comparisonImageId, setComparisonImageId] = useState<string | null>(null);
+  const referenceSlotsPersistWarningShownRef = useRef(false);
   const historySyncSourceRef = useRef<string | null>(null);
   const pendingSelectedImageIdRef = useRef<string | null>(null);
   const [selectedRecordOverride, setSelectedRecordOverride] = useState<GeneratedImageDocument | null>(null);
@@ -738,14 +743,28 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     }
 
     try {
-      const payload = referenceSlots.map(slot => ({
-        id: slot.id,
-        imageUrl: slot.imageUrl,
-        updatedAt: slot.updatedAt
-      }));
+      let strippedDataUrlCount = 0;
+      const payload = referenceSlots.map(slot => {
+        const shouldStripImageUrl = isDataUrl(slot.imageUrl);
+        if (shouldStripImageUrl) {
+          strippedDataUrlCount += 1;
+        }
+        return {
+          id: slot.id,
+          imageUrl: shouldStripImageUrl ? null : slot.imageUrl,
+          updatedAt: slot.updatedAt
+        };
+      });
       window.localStorage.setItem(REFERENCE_GALLERY_STORAGE_KEY, JSON.stringify(payload));
+      if (strippedDataUrlCount > 0) {
+        console.warn(`Skipped ${strippedDataUrlCount} data URL reference slot(s) while persisting localStorage.`);
+      }
     } catch (error) {
       console.warn("Failed to persist reference slots", error);
+      if (!referenceSlotsPersistWarningShownRef.current) {
+        referenceSlotsPersistWarningShownRef.current = true;
+        toast.warning("참조 이미지 브라우저 저장 공간이 부족해 일부 저장을 건너뛰었습니다.");
+      }
     }
   }, [referenceSlots]);
 

@@ -8,19 +8,57 @@ export type ReferenceSyncPayload = {
   source?: string;
 };
 
+function isDataUrl(value?: string | null): boolean {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+function compactReferenceRecord(record: GeneratedImageDocument): GeneratedImageDocument {
+  const compact: GeneratedImageDocument = { ...record, metadata: record.metadata ? { ...record.metadata } : undefined };
+
+  if (isDataUrl(compact.imageUrl)) {
+    delete compact.imageUrl;
+  }
+  if (isDataUrl(compact.thumbnailUrl)) {
+    delete compact.thumbnailUrl;
+  }
+  if (isDataUrl(compact.originalImageUrl)) {
+    delete compact.originalImageUrl;
+  }
+  if (compact.diff) {
+    compact.diff = { ...compact.diff };
+    if (isDataUrl(compact.diff.beforeUrl)) {
+      delete compact.diff.beforeUrl;
+    }
+    if (isDataUrl(compact.diff.afterUrl)) {
+      delete compact.diff.afterUrl;
+    }
+  }
+
+  return compact;
+}
+
 export function broadcastReferenceUpdate(record: GeneratedImageDocument | null, source?: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const compactRecord = record ? compactReferenceRecord(record) : null;
+
   try {
-    if (typeof window !== "undefined") {
-      if (record) {
-        window.localStorage.setItem(REFERENCE_SYNC_STORAGE_KEY, JSON.stringify(record));
-      } else {
-        window.localStorage.removeItem(REFERENCE_SYNC_STORAGE_KEY);
-      }
-      const payload: ReferenceSyncPayload = { record, source };
-      window.dispatchEvent(new CustomEvent(REFERENCE_SYNC_EVENT, { detail: payload }));
+    if (compactRecord) {
+      window.localStorage.setItem(REFERENCE_SYNC_STORAGE_KEY, JSON.stringify(compactRecord));
+    } else {
+      window.localStorage.removeItem(REFERENCE_SYNC_STORAGE_KEY);
     }
   } catch (error) {
-    console.warn("Failed to broadcast reference update", error);
+    console.warn("Failed to persist reference update", error);
+  }
+
+  try {
+    const payload: ReferenceSyncPayload = { record: compactRecord, source };
+    window.dispatchEvent(new CustomEvent(REFERENCE_SYNC_EVENT, { detail: payload }));
+  } catch (error) {
+    console.warn("Failed to dispatch reference update", error);
   }
 }
 
