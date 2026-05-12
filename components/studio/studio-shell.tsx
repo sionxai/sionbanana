@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
+import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
@@ -80,21 +81,32 @@ import {
 import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, removeRecordFromLocalStorage, type HistorySyncPayload } from "@/components/studio/history-sync";
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 
-async function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("파일을 읽을 수 없습니다."));
-      }
-    };
-    reader.onerror = () => {
-      reject(new Error("파일을 읽는 중 오류가 발생했습니다."));
-    };
-    reader.readAsDataURL(file);
+type StoryReferenceUploadResponse =
+  | { ok: true; imageUrl: string; id: string }
+  | { ok: false; reason?: string };
+
+async function uploadReferenceFileToImageUrl(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("이미지 파일만 업로드할 수 있습니다.");
+  }
+
+  const { dataUrl, mime } = await resizeImageToDataUrl(file, { maxSize: 1920, mime: "image/jpeg", quality: 0.85 });
+  const response = await fetch("/api/story-references", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageBase64: dataUrl, mime })
   });
+  const body = (await response.json().catch(() => null)) as StoryReferenceUploadResponse | null;
+
+  if (!body) {
+    throw new Error("이미지 업로드 응답을 읽지 못했습니다.");
+  }
+
+  if (!response.ok || !body.ok) {
+    throw new Error(body.ok ? "이미지 업로드에 실패했습니다." : body.reason ?? "이미지 업로드에 실패했습니다.");
+  }
+
+  return body.imageUrl;
 }
 
 function getLocalImageIdFromUrl(value?: string | null): string | null {
@@ -1563,13 +1575,11 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   };
   const handleReferenceUpload = async (file: File) => {
     try {
-      const dataUrl = await readFileAsDataURL(file);
+      const storedUrl = await uploadReferenceFileToImageUrl(file);
       const recordId =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `upload-${Date.now()}`;
-
-      const storedUrl = dataUrl;
 
       const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
       setReferenceImageOverride(storedUrl);
@@ -1660,8 +1670,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     }
 
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      const storedUrl = dataUrl;
+      const storedUrl = await uploadReferenceFileToImageUrl(file);
 
       setReferenceSlots(prev =>
         prev.map(item =>
@@ -1688,8 +1697,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     }
 
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      const storedUrl = dataUrl;
+      const storedUrl = await uploadReferenceFileToImageUrl(file);
       const now = new Date().toISOString();
 
       setReferenceSlots(prev =>
