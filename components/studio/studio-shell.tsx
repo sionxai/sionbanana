@@ -148,6 +148,33 @@ function getRecordPromptText(record: GeneratedImageDocument | null): string {
   return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
 
+function buildCharacterReferencePrompt(
+  promptText: string,
+  mentionSource: string,
+  characters: Character[]
+): string {
+  const basePrompt = promptText.trim();
+  const parsedMentions = parseCharacterMentions(mentionSource, characters);
+
+  if (!basePrompt || parsedMentions.mentioned.length === 0) {
+    return basePrompt;
+  }
+
+  if (basePrompt.startsWith("Reference map:") && basePrompt.includes("Detailed prompt:")) {
+    return basePrompt;
+  }
+
+  const referenceMap = parsedMentions.mentioned
+    .map((handle, index) => {
+      const character = findCharacterByHandle(characters, handle);
+      return character ? `Image ${index + 1} = Character @${handle} (name: ${character.name})` : null;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join(". ");
+
+  return referenceMap ? `Reference map: ${referenceMap}. Detailed prompt: ${basePrompt}` : basePrompt;
+}
+
 interface NormalizedCameraSettings {
   angle?: string;
   subjectDirection?: string;
@@ -1522,6 +1549,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
           promptGeneratedBy = "manual";
         }
       }
+
+      promptToSend = buildCharacterReferencePrompt(promptToSend, promptForGeneration, characters);
 
       // Create new prompt details for history
       const actualUserPrompt = action === "remix"
