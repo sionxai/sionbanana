@@ -23,7 +23,10 @@ async function main() {
       return;
     }
 
-    const config = normalizeConfig(rawConfig);
+    const generationConfig = rawConfig.upscaleFrom
+      ? await buildUpscaleConfig(rawConfig)
+      : rawConfig;
+    const config = normalizeConfig(generationConfig);
     const server = await findHealthyServer(config.port, config.portExplicit);
     const idempotencyKey = createIdempotencyKey(config.slug);
     const payload = buildGeneratePayload(config, idempotencyKey);
@@ -293,6 +296,39 @@ async function buildCategoryIndex(rawCategory) {
 async function readJsonFile(filePath) {
   const raw = await fs.readFile(filePath, "utf8");
   return JSON.parse(raw);
+}
+
+async function buildUpscaleConfig(raw) {
+  const runDirValue = asTrimmedString(raw.upscaleFrom);
+  if (!runDirValue) {
+    throw new Error("--upscale-from requires a run directory");
+  }
+
+  const runDir = path.resolve(runDirValue);
+  const manifestPath = path.join(runDir, "manifest.json");
+  const manifest = await readJsonFile(manifestPath);
+  const prompt = asTrimmedString(manifest?.response?.revisedPrompt);
+  const reference = asTrimmedString(manifest?.response?.imageUrl);
+
+  if (!prompt) {
+    throw new Error(`manifest.response.revisedPrompt is required for --upscale-from: ${manifestPath}`);
+  }
+  if (!reference) {
+    throw new Error(`manifest.response.imageUrl is required for --upscale-from: ${manifestPath}`);
+  }
+
+  const originalSlug = asTrimmedString(manifest.slug) || sanitizeSlug(path.basename(runDir));
+  const sizeLabel = sizeToSlugPart(raw.size);
+  const explicitSlug = asTrimmedString(raw.slug);
+
+  return {
+    ...raw,
+    prompt,
+    reference,
+    referenceGallery: [],
+    category: asTrimmedString(manifest.category) || null,
+    slug: explicitSlug || `${originalSlug}-${sizeLabel}`
+  };
 }
 
 async function findHealthyServer(preferredPort, explicit) {
@@ -813,6 +849,19 @@ function toPosixPath(value) {
   return value.replace(/\\/g, "/");
 }
 
+function sizeToSlugPart(value) {
+  const size = asTrimmedString(value);
+  const match = size.match(/^(\d+)x(\d+)$/i);
+  if (match) {
+    const maxDimension = Math.max(Number(match[1]), Number(match[2]));
+    if (maxDimension >= 1024) {
+      return `${Math.max(1, Math.round(maxDimension / 1024))}k`;
+    }
+  }
+
+  return sanitizeSlug(size) || "upscale";
+}
+
 function asTrimmedString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -845,6 +894,7 @@ function printHelp() {
 Options:
   --prompt              Required generation prompt
   --build-index         Build data/agent-runs/_{category}-index.html
+  --upscale-from        Run directory to use as prompt/reference source
   --reference           Optional /api/images/<id> reference URL
   --reference-gallery   Optional comma-separated /api/images/<id> URLs
   --category            Optional classification label
