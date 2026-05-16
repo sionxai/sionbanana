@@ -84,6 +84,13 @@ const NOISE_AUTO_CORRECTION_PROMPT = `Remove all noise, grain, and digital artif
 while preserving all lines, shapes, colors, and composition exactly.
 Output a clean, denoised version with smooth gradients.`;
 
+export type CharacterMentionChipStatus = "attached" | "missing-image" | "invalid";
+
+export type CharacterMentionChip = {
+  handle: string;
+  status: CharacterMentionChipStatus;
+};
+
 function removeNoiseAutoCorrectionPrompt(value: string) {
   return value
     .replace(NOISE_AUTO_CORRECTION_PROMPT, "")
@@ -123,6 +130,7 @@ interface PromptPanelProps {
   onRefinePrompt?: () => void;
   generating?: boolean;
   inflightCount?: number;
+  characterMentionChips?: CharacterMentionChip[];
 }
 
 export function PromptPanel({
@@ -156,7 +164,8 @@ export function PromptPanel({
   onGenerate,
   onRefinePrompt,
   generating,
-  inflightCount = 0
+  inflightCount = 0,
+  characterMentionChips = []
 }: PromptPanelProps) {
   const {
     externalGroups,
@@ -343,6 +352,26 @@ export function PromptPanel({
       toast.error("프롬프트 복사에 실패했습니다.");
     }
   }, [prompt]);
+  const getCharacterMentionChipLabel = useCallback((status: CharacterMentionChipStatus) => {
+    switch (status) {
+      case "attached":
+        return "첨부됨";
+      case "missing-image":
+        return "이미지 없음";
+      case "invalid":
+        return "미등록";
+    }
+  }, []);
+  const getCharacterMentionChipClassName = useCallback((status: CharacterMentionChipStatus) => {
+    switch (status) {
+      case "attached":
+        return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700";
+      case "missing-image":
+        return "border-amber-500/30 bg-amber-500/10 text-amber-700";
+      case "invalid":
+        return "border-destructive/30 bg-destructive/10 text-destructive";
+    }
+  }, []);
 
   const promptCard = (
     <Card className="flex-1">
@@ -356,6 +385,21 @@ export function PromptPanel({
           placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
           className="min-h-[160px] resize-none"
         />
+        {characterMentionChips.length ? (
+          <div className="flex flex-wrap gap-2">
+            {characterMentionChips.map(chip => (
+              <span
+                key={`${chip.status}-${chip.handle}`}
+                className={cn(
+                  "inline-flex max-w-full items-center rounded-md border px-2 py-1 text-xs font-medium",
+                  getCharacterMentionChipClassName(chip.status)
+                )}
+              >
+                <span className="truncate">@{chip.handle} · {getCharacterMentionChipLabel(chip.status)}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="grid grid-cols-2 gap-2">
           <Button
             className="bg-sky-500 hover:bg-sky-500/90"

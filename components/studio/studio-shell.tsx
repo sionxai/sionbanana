@@ -9,7 +9,7 @@ import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "
 import { findCharacterByHandle, loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
 import { parseCharacterMentions } from "@/lib/character-mentions";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
-import { PromptPanel } from "@/components/studio/prompt-panel";
+import { PromptPanel, type CharacterMentionChip } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
 import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
@@ -502,6 +502,40 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         .filter((character): character is Character => Boolean(character?.primaryImageUrl)),
     [characters, parsedCharacterMentions.mentioned]
   );
+  const characterMentionChips = useMemo<CharacterMentionChip[]>(() => {
+    const chips: CharacterMentionChip[] = [];
+    const seen = new Set<string>();
+
+    parsedCharacterMentions.mentioned.forEach(handle => {
+      if (seen.has(handle)) {
+        return;
+      }
+      seen.add(handle);
+      const character = findCharacterByHandle(characters, handle);
+      if (!character) {
+        chips.push({ handle, status: "invalid" });
+        return;
+      }
+
+      const attached = referenceSlots.some(
+        slot => slot.source === "character-mention" && slot.characterId === character.id && Boolean(slot.imageUrl)
+      );
+      chips.push({
+        handle,
+        status: character.primaryImageUrl && attached ? "attached" : "missing-image"
+      });
+    });
+
+    parsedCharacterMentions.invalid.forEach(handle => {
+      if (seen.has(handle)) {
+        return;
+      }
+      seen.add(handle);
+      chips.push({ handle, status: "invalid" });
+    });
+
+    return chips;
+  }, [characters, parsedCharacterMentions.invalid, parsedCharacterMentions.mentioned, referenceSlots]);
 
   // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
   // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
@@ -3380,6 +3414,7 @@ ${viewInstruction}`;
               onRefinePrompt={handleRefinePrompt}
               generating={isGenerating || characterBatchPending || view360BatchPending}
               inflightCount={inflightCount}
+              characterMentionChips={characterMentionChips}
             />
           )}
         </div>
