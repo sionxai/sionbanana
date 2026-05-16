@@ -8,6 +8,7 @@ export type CharacterShot = {
 export type Character = {
   id: string;
   name: string;
+  handle: string;
   description?: string;
   thumbnailUrl: string;
   primaryImageUrl: string;
@@ -20,10 +21,13 @@ export type Character = {
 };
 
 export type CharacterInput = Partial<Pick<Character, "id" | "createdAt" | "updatedAt">> &
-  Omit<Character, "id" | "createdAt" | "updatedAt">;
+  Partial<Pick<Character, "handle">> &
+  Omit<Character, "id" | "handle" | "createdAt" | "updatedAt">;
 
 export const CHARACTERS_STORAGE_KEY = "sionbanana-characters-v1";
 export const CHARACTERS_EVENT = "sionbanana:characters-updated";
+export const CHARACTER_HANDLE_PATTERN = /^[A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]{1,32}$/u;
+const CHARACTER_HANDLE_LETTER_PATTERN = /[A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]/u;
 
 const SHOT_KINDS: CharacterShot["kind"][] = ["face", "body", "sheet", "other"];
 const CHARACTER_SOURCES: NonNullable<Character["source"]>[] = [
@@ -50,6 +54,61 @@ function isCharacterSource(value: unknown): value is NonNullable<Character["sour
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeHandle(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/^@+/, "") : "";
+}
+
+function createHandleFromName(name: string): string {
+  const fallback = name
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "_")
+    .split("")
+    .filter(character => CHARACTER_HANDLE_LETTER_PATTERN.test(character))
+    .join("")
+    .slice(0, 32);
+
+  return fallback || "character";
+}
+
+function assertValidHandle(handle: string) {
+  if (!CHARACTER_HANDLE_PATTERN.test(handle)) {
+    throw new Error("핸들은 1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다.");
+  }
+}
+
+function makeUniqueHandle(handle: string, used: Set<string>): string {
+  if (!used.has(handle)) {
+    used.add(handle);
+    return handle;
+  }
+
+  const base = handle.slice(0, 30) || "character";
+  let index = 2;
+  let suffix = `_${index}`;
+  let next = `${base.slice(0, 32 - suffix.length)}${suffix}`;
+  while (used.has(next)) {
+    index += 1;
+    suffix = `_${index}`;
+    next = `${base.slice(0, 32 - suffix.length)}${suffix}`;
+  }
+  used.add(next);
+  return next;
+}
+
+function assertUniqueHandle(characters: Character[], id: string, handle: string) {
+  const duplicate = characters.some(character => {
+    if (character.id === id) {
+      return false;
+    }
+    return normalizeHandle(character.handle) === handle;
+  });
+
+  if (duplicate) {
+    throw new Error(`이미 사용 중인 핸들입니다: @${handle}`);
+  }
 }
 
 function normalizeTags(value: unknown): string[] | undefined {
@@ -115,10 +174,13 @@ function normalizeCharacter(value: unknown): Character | null {
 
   const now = new Date().toISOString();
   const createdAt = stringOrUndefined(record.createdAt) ?? now;
+  const name = stringOrUndefined(record.name) ?? "이름 없는 캐릭터";
+  const handle = normalizeHandle(record.handle) || createHandleFromName(name);
 
   return {
     id: stringOrUndefined(record.id) ?? createId(),
-    name: stringOrUndefined(record.name) ?? "이름 없는 캐릭터",
+    name,
+    handle,
     description: stringOrUndefined(record.description),
     thumbnailUrl: stringOrUndefined(record.thumbnailUrl) ?? primaryImageUrl,
     primaryImageUrl,
@@ -136,9 +198,15 @@ function normalizeCharacters(value: unknown): Character[] {
     return [];
   }
 
+  const usedHandles = new Set<string>();
+
   return value.flatMap(item => {
     const character = normalizeCharacter(item);
-    return character ? [character] : [];
+    if (!character) {
+      return [];
+    }
+
+    return [{ ...character, handle: makeUniqueHandle(character.handle, usedHandles) }];
   });
 }
 
@@ -182,6 +250,8 @@ export function saveCharacter(character: CharacterInput): Character {
   if (!normalized) {
     throw new Error("캐릭터 이미지를 찾을 수 없습니다.");
   }
+  assertValidHandle(normalized.handle);
+  assertUniqueHandle(current, id, normalized.handle);
 
   const next = existing
     ? current.map(item => (item.id === id ? normalized : item))
@@ -208,6 +278,27 @@ export function removeCharacter(id: string): Character[] {
 
 export function getCharacter(id: string): Character | null {
   return loadCharacters().find(character => character.id === id) ?? null;
+}
+
+export function getCharacterHandles(library: Character[]): string[] {
+  const seen = new Set<string>();
+  const handles: string[] = [];
+
+  library.forEach(character => {
+    const handle = normalizeHandle(character.handle);
+    if (!handle || seen.has(handle)) {
+      return;
+    }
+    seen.add(handle);
+    handles.push(handle);
+  });
+
+  return handles;
+}
+
+export function findCharacterByHandle(library: Character[], handle: string): Character | null {
+  const normalized = normalizeHandle(handle);
+  return library.find(character => normalizeHandle(character.handle) === normalized) ?? null;
 }
 
 export function subscribeCharacters(callback: (characters: Character[]) => void): () => void {

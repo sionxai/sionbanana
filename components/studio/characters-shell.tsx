@@ -17,6 +17,7 @@ import {
   storeCharacterImageFile
 } from "@/components/studio/character-image-storage";
 import {
+  CHARACTER_HANDLE_PATTERN,
   loadCharacters,
   removeCharacter,
   saveCharacter,
@@ -32,6 +33,7 @@ type DraftSource =
 type CharacterDraft = {
   id?: string;
   name: string;
+  handle: string;
   description: string;
   tagsText: string;
   source: DraftSource | null;
@@ -40,6 +42,7 @@ type CharacterDraft = {
 function createEmptyDraft(): CharacterDraft {
   return {
     name: "",
+    handle: "",
     description: "",
     tagsText: "",
     source: null
@@ -50,6 +53,7 @@ function draftFromCharacter(character: Character): CharacterDraft {
   return {
     id: character.id,
     name: character.name,
+    handle: character.handle,
     description: character.description ?? "",
     tagsText: (character.tags ?? []).join(", "),
     source: { kind: "existing", url: character.primaryImageUrl }
@@ -75,6 +79,10 @@ function parseTags(value: string): string[] | undefined {
 
 function getRecordImageUrl(record: GeneratedImageDocument): string {
   return record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl ?? "";
+}
+
+function normalizeDraftHandle(value: string): string {
+  return value.trim().replace(/^@+/, "");
 }
 
 export function CharactersShell() {
@@ -163,8 +171,17 @@ export function CharactersShell() {
     }
 
     const name = draft.name.trim();
+    const handle = normalizeDraftHandle(draft.handle);
     if (!name) {
       toast.error("캐릭터 이름을 입력해주세요.");
+      return;
+    }
+    if (!handle) {
+      toast.error("캐릭터 핸들을 입력해주세요.");
+      return;
+    }
+    if (!CHARACTER_HANDLE_PATTERN.test(handle)) {
+      toast.error("핸들은 1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다.");
       return;
     }
     if (!draft.source) {
@@ -184,6 +201,7 @@ export function CharactersShell() {
       saveCharacter({
         id: draft.id,
         name,
+        handle,
         description: draft.description.trim() || undefined,
         thumbnailUrl: storedUrl,
         primaryImageUrl: storedUrl,
@@ -243,6 +261,7 @@ export function CharactersShell() {
       {draft ? (
         <CharacterEditor
           draft={draft}
+          characters={characters}
           onChange={setDraft}
           onClose={closeEditor}
           onUploadClick={() => uploadInputRef.current?.click()}
@@ -293,6 +312,7 @@ function CharacterCard({
       <CardContent className="flex flex-col gap-3 p-4">
         <div className="space-y-1">
           <h2 className="line-clamp-1 text-base font-semibold text-foreground">{character.name}</h2>
+          <p className="line-clamp-1 text-xs font-medium text-muted-foreground">@{character.handle}</p>
           {character.description ? (
             <p className="line-clamp-2 min-h-10 text-sm text-muted-foreground">{character.description}</p>
           ) : (
@@ -325,6 +345,7 @@ function CharacterCard({
 
 function CharacterEditor({
   draft,
+  characters,
   onChange,
   onClose,
   onUploadClick,
@@ -337,6 +358,7 @@ function CharacterEditor({
   onPickHistory
 }: {
   draft: CharacterDraft;
+  characters: Character[];
   onChange: (draft: CharacterDraft) => void;
   onClose: () => void;
   onUploadClick: () => void;
@@ -357,6 +379,20 @@ function CharacterEditor({
     }
     return draft.source.url;
   }, [draft.source]);
+  const normalizedHandle = normalizeDraftHandle(draft.handle);
+  const duplicateHandle = normalizedHandle
+    ? characters.some(character => character.id !== draft.id && normalizeDraftHandle(character.handle) === normalizedHandle)
+    : false;
+  const handleStatus = !normalizedHandle
+    ? "핸들을 입력해주세요."
+    : !CHARACTER_HANDLE_PATTERN.test(normalizedHandle)
+      ? "1~32자의 한글, 영문, 숫자, 밑줄만 사용할 수 있습니다."
+      : duplicateHandle
+        ? "이미 사용 중인 핸들입니다."
+        : "사용 가능한 핸들입니다.";
+  const handleStatusTone = normalizedHandle && CHARACTER_HANDLE_PATTERN.test(normalizedHandle) && !duplicateHandle
+    ? "text-emerald-600"
+    : "text-destructive";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
@@ -417,6 +453,17 @@ function CharacterEditor({
                   placeholder="캐릭터 이름"
                   disabled={saving}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="character-handle">핸들</Label>
+                <Input
+                  id="character-handle"
+                  value={draft.handle}
+                  onChange={event => onChange({ ...draft, handle: event.target.value })}
+                  placeholder="민수"
+                  disabled={saving}
+                />
+                <p className={`text-xs ${handleStatusTone}`}>@{normalizedHandle || "handle"} · {handleStatus}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="character-description">설명</Label>
