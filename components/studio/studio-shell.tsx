@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
-import { loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
+import { findCharacterByHandle, loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
+import { parseCharacterMentions } from "@/lib/character-mentions";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
@@ -490,6 +491,17 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
+  const parsedCharacterMentions = useMemo(
+    () => parseCharacterMentions(prompt, characters),
+    [characters, prompt]
+  );
+  const mentionedCharacters = useMemo(
+    () =>
+      parsedCharacterMentions.mentioned
+        .map(handle => findCharacterByHandle(characters, handle))
+        .filter((character): character is Character => Boolean(character?.primaryImageUrl)),
+    [characters, parsedCharacterMentions.mentioned]
+  );
 
   // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
   // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
@@ -501,6 +513,86 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     setCharacters(loadCharacters());
     return subscribeCharacters(setCharacters);
   }, []);
+
+  useEffect(() => {
+    const mentionedById = new Map(mentionedCharacters.map(character => [character.id, character]));
+
+    setReferenceSlots(prev => {
+      const now = new Date().toISOString();
+      let changed = false;
+      let next = prev.map(slot => {
+        if (slot.source !== "character-mention" || !slot.characterId || mentionedById.has(slot.characterId)) {
+          return slot;
+        }
+        changed = true;
+        return { id: slot.id, imageUrl: null, updatedAt: now };
+      });
+
+      const existingMentionIds = new Set(
+        next
+          .filter(slot => slot.source === "character-mention" && slot.characterId && slot.imageUrl)
+          .map(slot => slot.characterId as string)
+      );
+
+      mentionedCharacters.forEach(character => {
+        const existingSlot = next.find(
+          slot => slot.source === "character-mention" && slot.characterId === character.id
+        );
+
+        if (existingSlot) {
+          if (existingSlot.imageUrl !== character.primaryImageUrl) {
+            changed = true;
+            next = next.map(slot =>
+              slot.id === existingSlot.id
+                ? { ...slot, imageUrl: character.primaryImageUrl, updatedAt: now }
+                : slot
+            );
+          }
+          existingMentionIds.add(character.id);
+          return;
+        }
+
+        if (existingMentionIds.has(character.id)) {
+          return;
+        }
+
+        const emptyIndex = next.findIndex(slot => !slot.imageUrl);
+        if (emptyIndex >= 0) {
+          changed = true;
+          next = next.map((slot, index) =>
+            index === emptyIndex
+              ? {
+                  ...slot,
+                  imageUrl: character.primaryImageUrl,
+                  source: "character-mention",
+                  characterId: character.id,
+                  updatedAt: now
+                }
+              : slot
+          );
+          existingMentionIds.add(character.id);
+          return;
+        }
+
+        if (next.length < MAX_REFERENCE_SLOT_COUNT) {
+          changed = true;
+          next = [
+            ...next,
+            {
+              ...createReferenceSlot(),
+              imageUrl: character.primaryImageUrl,
+              source: "character-mention",
+              characterId: character.id,
+              updatedAt: now
+            }
+          ];
+          existingMentionIds.add(character.id);
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [mentionedCharacters]);
 
   useEffect(() => {
     const parts: string[] = [];
@@ -692,16 +784,27 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       if (Array.isArray(parsed)) {
         const normalized = parsed
           .slice(0, MAX_REFERENCE_SLOT_COUNT)
-          .map((item: { id?: unknown; imageUrl?: unknown; updatedAt?: unknown }) => ({
-            id:
-              typeof item?.id === "string"
-                ? (item.id as string)
-                : (typeof crypto !== "undefined" && "randomUUID" in crypto
-                    ? crypto.randomUUID()
-                    : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-            imageUrl: typeof item?.imageUrl === "string" ? (item.imageUrl as string) : null,
-            updatedAt: typeof item?.updatedAt === "string" ? (item.updatedAt as string) : new Date().toISOString()
-          }));
+          .map((item: { id?: unknown; imageUrl?: unknown; updatedAt?: unknown; source?: unknown; characterId?: unknown }) => {
+            const imageUrl = typeof item?.imageUrl === "string" ? (item.imageUrl as string) : null;
+            const source: ReferenceSlotState["source"] =
+              item?.source === "manual" || item?.source === "character-mention"
+                ? item.source
+                : imageUrl
+                  ? "manual"
+                  : undefined;
+            return {
+              id:
+                typeof item?.id === "string"
+                  ? (item.id as string)
+                  : (typeof crypto !== "undefined" && "randomUUID" in crypto
+                      ? crypto.randomUUID()
+                      : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+              imageUrl,
+              updatedAt: typeof item?.updatedAt === "string" ? (item.updatedAt as string) : new Date().toISOString(),
+              source,
+              characterId: typeof item?.characterId === "string" ? (item.characterId as string) : undefined
+            };
+          });
 
         const currentUid = user?.uid ?? null;
         const normalizedFiltered = normalized.filter(slot => {
@@ -757,10 +860,13 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
         if (shouldStripImageUrl) {
           strippedDataUrlCount += 1;
         }
+        const imageUrl = shouldStripImageUrl ? null : slot.imageUrl;
         return {
           id: slot.id,
-          imageUrl: shouldStripImageUrl ? null : slot.imageUrl,
-          updatedAt: slot.updatedAt
+          imageUrl,
+          updatedAt: slot.updatedAt,
+          source: imageUrl ? slot.source ?? "manual" : undefined,
+          characterId: imageUrl ? slot.characterId : undefined
         };
       });
       window.localStorage.setItem(REFERENCE_GALLERY_STORAGE_KEY, JSON.stringify(payload));
@@ -1647,7 +1753,13 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setReferenceSlots(prev =>
         prev.map(item =>
           item.id === targetSlot!.id
-            ? { ...item, imageUrl: storedUrl, updatedAt: new Date().toISOString() }
+            ? {
+                ...item,
+                imageUrl: storedUrl,
+                source: "manual",
+                characterId: undefined,
+                updatedAt: new Date().toISOString()
+              }
             : item
         )
       );
@@ -1685,7 +1797,13 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setReferenceSlots(prev =>
         prev.map(item =>
           item.id === targetSlot.id
-            ? { ...item, imageUrl: character.primaryImageUrl, updatedAt: now }
+            ? {
+                ...item,
+                imageUrl: character.primaryImageUrl,
+                source: "manual",
+                characterId: character.id,
+                updatedAt: now
+              }
             : item
         )
       );
@@ -1693,7 +1811,16 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setReferenceSlots(prev =>
         prev.length >= MAX_REFERENCE_SLOT_COUNT
           ? prev
-          : [...prev, { ...createReferenceSlot(), imageUrl: character.primaryImageUrl, updatedAt: now }]
+          : [
+              ...prev,
+              {
+                ...createReferenceSlot(),
+                imageUrl: character.primaryImageUrl,
+                source: "manual",
+                characterId: character.id,
+                updatedAt: now
+              }
+            ]
       );
     }
 
@@ -1714,7 +1841,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     setReferenceSlots(prev =>
       prev.map(item =>
         item.id === slotId
-          ? { ...item, imageUrl: null, updatedAt: new Date().toISOString() }
+          ? { ...item, imageUrl: null, source: undefined, characterId: undefined, updatedAt: new Date().toISOString() }
           : item
       )
     );
@@ -1734,7 +1861,13 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setReferenceSlots(prev =>
         prev.map(item =>
           item.id === slotId
-            ? { ...item, imageUrl: storedUrl, updatedAt: new Date().toISOString() }
+            ? {
+                ...item,
+                imageUrl: storedUrl,
+                source: "manual",
+                characterId: undefined,
+                updatedAt: new Date().toISOString()
+              }
             : item
         )
       );
@@ -1762,7 +1895,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setReferenceSlots(prev =>
         prev.length >= MAX_REFERENCE_SLOT_COUNT
           ? prev
-          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, updatedAt: now }]
+          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, source: "manual", updatedAt: now }]
       );
       const filledAfter = referenceSlots.filter(item => item.imageUrl).length + 1;
       if (filledAfter >= 5) {

@@ -8,6 +8,8 @@ export interface ReferenceSlotState {
   id: string;
   imageUrl: string | null;
   updatedAt: string;
+  source?: "manual" | "character-mention";
+  characterId?: string;
 }
 
 export function createReferenceSlot(): ReferenceSlotState {
