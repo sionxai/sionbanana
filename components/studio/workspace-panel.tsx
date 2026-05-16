@@ -47,6 +47,7 @@ interface WorkspacePanelProps {
   successRecordId?: string;
   promptDetails?: PromptDetails | null;
   onClickCompare?: (record: GeneratedImageDocument) => void;
+  onRegisterCharacter?: (record: GeneratedImageDocument) => void;
   onDismissGenerationStatus?: () => void;
   onClearComparison?: () => void;
 }
@@ -87,6 +88,7 @@ export function WorkspacePanel({
   successRecordId,
   promptDetails,
   onClickCompare,
+  onRegisterCharacter,
   onDismissGenerationStatus,
   onClearComparison
 }: WorkspacePanelProps) {
@@ -452,6 +454,14 @@ export function WorkspacePanel({
             disabled={imageZoomLevel >= MAX_IMAGE_ZOOM}
           >
             확대
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => record && onRegisterCharacter?.(record)}
+            disabled={!record || !hasAfterImage || !onRegisterCharacter}
+          >
+            캐릭터로 등록
           </Button>
         </div>
 

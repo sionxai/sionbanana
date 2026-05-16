@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
-import { loadCharacters, subscribeCharacters, type Character } from "@/lib/characters";
+import { loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
+import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
 import { GenerationProgressIndicator } from "@/components/studio/generation-progress-indicator";
 import {
   GenerationOptionsPanel,
@@ -2454,6 +2455,49 @@ ${viewInstruction}`;
     }
   };
 
+  const handleRegisterRecordAsCharacter = async (record: GeneratedImageDocument) => {
+    const imageUrl = getRecordGeneratedImageUrl(record);
+    if (!imageUrl) {
+      toast.error("캐릭터로 등록할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    const inputName = window.prompt("캐릭터 이름");
+    if (inputName === null) {
+      return;
+    }
+    const name = inputName.trim();
+    if (!name) {
+      toast.error("캐릭터 이름을 입력해주세요.");
+      return;
+    }
+
+    try {
+      const storedUrl = await copyCharacterImageToStorage(imageUrl);
+      const promptText = getRecordPromptText(record);
+      saveCharacter({
+        name,
+        description: promptText || undefined,
+        thumbnailUrl: storedUrl,
+        primaryImageUrl: storedUrl,
+        shots: [
+          {
+            id: `${record.id}-primary`,
+            url: storedUrl,
+            kind: "other",
+            label: "Primary"
+          }
+        ],
+        tags: [record.mode],
+        source: "studio-result"
+      });
+      toast.success("라이브러리에 추가됨");
+    } catch (error) {
+      console.error("register character error", error);
+      toast.error(error instanceof Error ? error.message : "캐릭터 등록에 실패했습니다.");
+    }
+  };
+
   const handleToggleFavorite = async (recordId: string) => {
     const target = mergedRecords.find(record => record.id === recordId);
     if (!target) {
@@ -2683,6 +2727,13 @@ ${viewInstruction}`;
     }
     await handleSetReferenceFromHistory(previewRecord.id);
     closePreviewRecord();
+  };
+
+  const handleRegisterPreviewAsCharacter = async () => {
+    if (!previewRecord) {
+      return;
+    }
+    await handleRegisterRecordAsCharacter(previewRecord);
   };
 
   const handleDeletePreviewRecord = async () => {
@@ -3254,6 +3305,7 @@ ${viewInstruction}`;
                 : mergedRecords.find(item => item.id !== record.id)?.id ?? null;
             setComparisonImageId(comparisonSource ?? null);
           }}
+          onRegisterCharacter={record => void handleRegisterRecordAsCharacter(record)}
           onDismissGenerationStatus={() => setCurrentRequestId(null)}
           onClearComparison={() => setComparisonImageId(null)}
           />
@@ -3327,6 +3379,14 @@ ${viewInstruction}`;
           onToggleFavorite={handleToggleFavorite}
           onDownload={handleDownloadRecord}
           onDelete={handleDeleteRecord}
+          onRegisterCharacter={recordId => {
+            const target = mergedRecords.find(record => record.id === recordId);
+            if (target) {
+              void handleRegisterRecordAsCharacter(target);
+            } else {
+              toast.error("캐릭터로 등록할 이미지를 찾을 수 없습니다.");
+            }
+          }}
           onDeleteAll={handleDeleteAllRecords}
           comparisonId={comparisonImageId}
           onCompare={handleSetComparison}
@@ -3439,6 +3499,9 @@ ${viewInstruction}`;
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => void handleSetPreviewAsReference()} disabled={!previewImageUrl}>
                   기준이미지 등록
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleRegisterPreviewAsCharacter()} disabled={!previewImageUrl}>
+                  캐릭터로 등록
                 </Button>
                 <Button size="sm" variant="destructive" onClick={() => void handleDeletePreviewRecord()}>
                   삭제

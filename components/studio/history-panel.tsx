@@ -35,6 +35,7 @@ interface HistoryPanelProps {
   onToggleFavorite?: (id: string) => void;
   onDownload?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onRegisterCharacter?: (id: string) => void;
   onDeleteAll?: () => void;
   comparisonId?: string | null;
   onCompare?: (id: string) => void;
@@ -68,6 +69,7 @@ export function HistoryPanel({
   onToggleFavorite,
   onDownload,
   onDelete,
+  onRegisterCharacter,
   onDeleteAll,
   comparisonId,
   onCompare,
@@ -366,6 +368,17 @@ export function HistoryPanel({
               {isComparison ? "비교 해제" : "비교"}
             </Button>
           ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={event => {
+              event.stopPropagation();
+              onRegisterCharacter?.(record.id);
+            }}
+            disabled={!onRegisterCharacter}
+          >
+            캐릭터 등록
+          </Button>
           <Button
             size="sm"
             variant="outline"
