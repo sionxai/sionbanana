@@ -11,6 +11,7 @@ const navItems = [
   { href: "/studio/batch", label: "배치 생성" },
   { href: "/studio/presets", label: "프리셋" },
   { href: "/studio/story", label: "스토리" },
+  { href: "/studio/characters", label: "캐릭터" },
   { href: "/studio/history", label: "생성기록" },
   { href: "/usage", label: "사용량" }
 ];
