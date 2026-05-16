@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { GeneratedImageDocument } from "@/lib/types";
+import type { Character } from "@/lib/characters";
 import { getAspectRatioLabel } from "@/lib/aspect";
 import { Plus } from "lucide-react";
 
@@ -29,6 +30,8 @@ interface HistoryPanelProps {
   onRemoveReference?: () => void;
   hasReference?: boolean;
   onSetReference?: (id: string) => void;
+  characterReferences?: Character[];
+  onSetCharacterReference?: (id: string) => void;
   onToggleFavorite?: (id: string) => void;
   onDownload?: (id: string) => void;
   onDelete?: (id: string) => void;
@@ -60,6 +63,8 @@ export function HistoryPanel({
   onRemoveReference,
   hasReference,
   onSetReference,
+  characterReferences,
+  onSetCharacterReference,
   onToggleFavorite,
   onDownload,
   onDelete,
@@ -109,6 +114,7 @@ export function HistoryPanel({
     }
   }, [displayReferenceImage, referenceImageKey]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [characterPickerOpen, setCharacterPickerOpen] = useState(false);
   const referenceSlotInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -225,6 +231,7 @@ export function HistoryPanel({
   const recentRecords = records.slice(0, RECENT_RECORD_LIMIT);
   const olderRecords = records.slice(RECENT_RECORD_LIMIT);
   const slots = referenceSlots ?? [];
+  const characterOptions = characterReferences ?? [];
   const filledReferenceSlotCount = slots.filter(slot => Boolean(slot.imageUrl)).length;
   const showReferenceLoadWarning = filledReferenceSlotCount >= 5;
   const canAddMoreReferenceSlots = slots.length < referenceSlotsLimit;
@@ -442,6 +449,53 @@ export function HistoryPanel({
                 삭제
               </Button>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => setCharacterPickerOpen(value => !value)}
+            disabled={!onSetCharacterReference}
+          >
+            캐릭터 라이브러리에서
+          </Button>
+          {characterPickerOpen ? (
+            <div className="rounded-xl border bg-muted/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-muted-foreground">캐릭터 선택</p>
+                <span className="text-[11px] text-muted-foreground">{characterOptions.length}개</span>
+              </div>
+              {characterOptions.length ? (
+                <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1">
+                  {characterOptions.map(character => (
+                    <button
+                      key={character.id}
+                      type="button"
+                      className="group overflow-hidden rounded-lg border bg-background text-left transition hover:border-primary"
+                      onClick={() => {
+                        onSetCharacterReference?.(character.id);
+                        setCharacterPickerOpen(false);
+                      }}
+                    >
+                      <div className="relative aspect-square bg-muted">
+                        <NextImage
+                          src={character.thumbnailUrl}
+                          alt={character.name}
+                          fill
+                          sizes="180px"
+                          className="object-cover transition group-hover:scale-105"
+                        />
+                      </div>
+                      <div className="p-2">
+                        <p className="truncate text-xs font-medium text-foreground">{character.name}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-5 text-center text-xs text-muted-foreground">등록된 캐릭터가 없습니다.</p>
+              )}
+            </div>
+          ) : null}
         </div>
         <div
           className="space-y-3"

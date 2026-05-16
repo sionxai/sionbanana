@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
+import { loadCharacters, subscribeCharacters, type Character } from "@/lib/characters";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
@@ -484,6 +485,7 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
     Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
   );
+  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
@@ -493,6 +495,11 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   // 앞부분 텍스트는 보존한다. 사용자가 카테고리 부분을 직접 편집해 ref와 어긋나면
   // basePrompt를 건드리지 않고 새 결과를 끝에 누적해 사용자 의도를 존중한다.
   const lastCategoryGuidanceRef = useRef<string>("");
+
+  useEffect(() => {
+    setCharacters(loadCharacters());
+    return subscribeCharacters(setCharacters);
+  }, []);
 
   useEffect(() => {
     const parts: string[] = [];
@@ -2420,6 +2427,33 @@ ${viewInstruction}`;
     toast.success("기준 이미지를 업데이트했습니다.");
   };
 
+  const handleSetReferenceFromCharacter = async (characterId: string) => {
+    const character = characters.find(item => item.id === characterId);
+    if (!character?.primaryImageUrl) {
+      toast.error("선택한 캐릭터 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
+    setReferenceImageOverride(character.primaryImageUrl);
+
+    try {
+      await promoteReferenceImage(character.primaryImageUrl, {
+        recordId: `character-reference-${character.id}`,
+        metadata: {
+          source: "character-library",
+          characterId: character.id,
+          characterName: character.name
+        }
+      });
+      toast.success("캐릭터를 기준 이미지로 설정했습니다.");
+    } catch (error) {
+      console.error("character reference select error", error);
+      setReferenceImageOverride(previousReferenceUrl);
+      toast.error("캐릭터 기준 이미지를 설정하지 못했습니다.");
+    }
+  };
+
   const handleToggleFavorite = async (recordId: string) => {
     const target = mergedRecords.find(record => record.id === recordId);
     if (!target) {
@@ -3288,6 +3322,8 @@ ${viewInstruction}`;
           onRemoveReference={handleReferenceRemove}
           hasReference={hasReference}
           onSetReference={handleSetReferenceFromHistory}
+          characterReferences={characters}
+          onSetCharacterReference={handleSetReferenceFromCharacter}
           onToggleFavorite={handleToggleFavorite}
           onDownload={handleDownloadRecord}
           onDelete={handleDeleteRecord}
