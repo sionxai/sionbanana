@@ -1672,6 +1672,38 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     });
   };
 
+  const addCharacterImageToReferenceSlot = (character: Character) => {
+    const targetSlot = referenceSlots.find(slot => !slot.imageUrl);
+
+    if (!targetSlot && referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT) {
+      toast.error("참조 슬롯이 가득 찼습니다");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    if (targetSlot) {
+      setReferenceSlots(prev =>
+        prev.map(item =>
+          item.id === targetSlot.id
+            ? { ...item, imageUrl: character.primaryImageUrl, updatedAt: now }
+            : item
+        )
+      );
+    } else {
+      setReferenceSlots(prev =>
+        prev.length >= MAX_REFERENCE_SLOT_COUNT
+          ? prev
+          : [...prev, { ...createReferenceSlot(), imageUrl: character.primaryImageUrl, updatedAt: now }]
+      );
+    }
+
+    const filledAfter = referenceSlots.filter(slot => slot.imageUrl && slot.id !== targetSlot?.id).length + 1;
+    if (filledAfter >= 5) {
+      toast.warning("참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 안정적인 작업은 1-4장을 권장합니다.");
+    }
+    toast.success("캐릭터를 참조 슬롯에 추가했습니다.");
+  };
+
   const handleReferenceSlotClear = (slotId: string) => {
     const slot = referenceSlots.find(item => item.id === slotId);
     if (!slot?.imageUrl) {
@@ -2428,31 +2460,14 @@ ${viewInstruction}`;
     toast.success("기준 이미지를 업데이트했습니다.");
   };
 
-  const handleSetReferenceFromCharacter = async (characterId: string) => {
+  const handleSetReferenceFromCharacter = (characterId: string) => {
     const character = characters.find(item => item.id === characterId);
     if (!character?.primaryImageUrl) {
       toast.error("선택한 캐릭터 이미지를 찾을 수 없습니다.");
       return;
     }
 
-    const previousReferenceUrl = referenceImageState.url ?? referenceRecord?.imageUrl ?? referenceRecord?.originalImageUrl ?? null;
-    setReferenceImageOverride(character.primaryImageUrl);
-
-    try {
-      await promoteReferenceImage(character.primaryImageUrl, {
-        recordId: `character-reference-${character.id}`,
-        metadata: {
-          source: "character-library",
-          characterId: character.id,
-          characterName: character.name
-        }
-      });
-      toast.success("캐릭터를 기준 이미지로 설정했습니다.");
-    } catch (error) {
-      console.error("character reference select error", error);
-      setReferenceImageOverride(previousReferenceUrl);
-      toast.error("캐릭터 기준 이미지를 설정하지 못했습니다.");
-    }
+    addCharacterImageToReferenceSlot(character);
   };
 
   const handleRegisterRecordAsCharacter = async (record: GeneratedImageDocument) => {
