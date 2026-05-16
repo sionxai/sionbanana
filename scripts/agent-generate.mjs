@@ -17,7 +17,13 @@ async function main() {
     }
 
     const stdinConfig = await readStdinJsonIfAvailable();
-    const config = normalizeConfig({ ...stdinConfig, ...cli });
+    const rawConfig = { ...stdinConfig, ...cli };
+    if (rawConfig.buildIndex) {
+      await buildCategoryIndex(rawConfig.buildIndex);
+      return;
+    }
+
+    const config = normalizeConfig(rawConfig);
     const server = await findHealthyServer(config.port, config.portExplicit);
     const idempotencyKey = createIdempotencyKey(config.slug);
     const payload = buildGeneratePayload(config, idempotencyKey);
@@ -218,6 +224,75 @@ function normalizeReferenceGallery(value) {
       .filter(Boolean);
   }
   throw new Error("--reference-gallery must be a comma-separated string or JSON array");
+}
+
+async function buildCategoryIndex(rawCategory) {
+  const category = asTrimmedString(rawCategory);
+  if (!category) {
+    throw new Error("--build-index requires a category");
+  }
+
+  const runsRoot = path.join(getDataRoot(), "agent-runs");
+  const entries = await fs.readdir(runsRoot, { withFileTypes: true });
+  const runs = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const runDir = path.join(runsRoot, entry.name);
+    const manifestPath = path.join(runDir, "manifest.json");
+    if (!(await exists(manifestPath))) {
+      continue;
+    }
+
+    const manifest = await readJsonFile(manifestPath);
+    const manifestCategory = asTrimmedString(manifest.category);
+    const manifestSlug = asTrimmedString(manifest.slug);
+    if (manifestCategory !== category || !entry.name.endsWith(`-${manifestSlug}`)) {
+      continue;
+    }
+
+    const firstImage = Array.isArray(manifest.images) ? manifest.images[0] : null;
+    const imageRelativePath = firstImage && asTrimmedString(firstImage.relativePath);
+    runs.push({
+      dirName: entry.name,
+      manifestPath,
+      manifest,
+      imageRelativePath: imageRelativePath || null
+    });
+  }
+
+  runs.sort((left, right) => {
+    const leftTime = Date.parse(left.manifest.createdAt);
+    const rightTime = Date.parse(right.manifest.createdAt);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    return left.dirName.localeCompare(right.dirName);
+  });
+
+  if (runs.length === 0) {
+    throw new Error(`No agent runs found for category: ${category}`);
+  }
+
+  const safeCategory = sanitizeSlug(category);
+  const outputPath = path.join(runsRoot, `_${safeCategory}-index.html`);
+  await fs.writeFile(outputPath, renderIndexHtml(category, runs), "utf8");
+
+  printJson({
+    ok: true,
+    category,
+    count: runs.length,
+    indexHtmlPath: outputPath,
+    manifestPaths: runs.map(run => run.manifestPath)
+  });
+}
+
+async function readJsonFile(filePath) {
+  const raw = await fs.readFile(filePath, "utf8");
+  return JSON.parse(raw);
 }
 
 async function findHealthyServer(preferredPort, explicit) {
@@ -593,6 +668,121 @@ ${metadataRows}
 `;
 }
 
+function renderIndexHtml(category, runs) {
+  const promptSummary = renderPromptSummary(runs);
+  const stats = buildIndexStats(runs);
+  const cards = runs
+    .map((run, index) => {
+      const number = String(index + 1).padStart(2, "0");
+      const imageSrc = run.imageRelativePath
+        ? `./${toPosixPath(path.join(run.dirName, run.imageRelativePath))}`
+        : "";
+      const reviewHref = `./${toPosixPath(path.join(run.dirName, "review.html"))}`;
+      const timestamp = formatIndexTimestamp(run.manifest.createdAt);
+      const imageMarkup = imageSrc
+        ? `<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(number)}" loading="lazy">`
+        : `<div class="missing-image">No image</div>`;
+
+      return `<div class="card">
+  <label class="select" for="pick-${escapeAttr(number)}">
+    <input id="pick-${escapeAttr(number)}" type="checkbox" value="${escapeAttr(number)}">
+    <span>선택</span>
+  </label>
+  ${imageMarkup}
+  <div class="meta">
+    <div class="num">#${escapeHtml(number)}</div>
+    <div class="ts">${escapeHtml(timestamp)}</div>
+    <a href="${escapeAttr(reviewHref)}" class="link">상세 →</a>
+  </div>
+</div>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(category)} - ${runs.length}장</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0a0a;color:#eee;padding:32px;margin:0}
+h1{margin:0 0 8px;font-weight:600}
+.subtitle{color:#888;margin:0 0 18px;font-size:14px}
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 18px}
+button{appearance:none;border:1px solid #444;background:#f5b342;color:#111;border-radius:6px;padding:9px 14px;font-weight:700;cursor:pointer}
+button:hover{background:#ffc464}
+#copy-status{color:#9ad79f;font-size:13px}
+.prompt-box{background:#1a1a1a;padding:16px 20px;border-radius:8px;margin-bottom:32px;font-size:14px;line-height:1.6;border:1px solid #333}
+.prompt-box strong{color:#ffa500}
+.prompt-box ol{margin:8px 0 0 22px;padding:0}
+.prompt-box li{margin:4px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.card{position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;border:1px solid #333;transition:transform .2s}
+.card:hover{transform:translateY(-2px);border-color:#555}
+.card img,.missing-image{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#111}
+.missing-image{display:grid;place-items:center;color:#777}
+.select{position:absolute;top:10px;left:10px;z-index:1;display:flex;align-items:center;gap:7px;background:rgba(0,0,0,.72);border:1px solid #555;border-radius:999px;padding:7px 10px;color:#fff;font-size:12px;cursor:pointer}
+.select input{width:16px;height:16px;margin:0;accent-color:#f5b342}
+.card .meta{padding:14px 16px}
+.card .num{font-size:18px;font-weight:600;color:#fff;margin-bottom:4px}
+.card .ts{font-size:11px;color:#888;font-family:monospace}
+.card .link{display:inline-block;margin-top:8px;padding:4px 8px;background:#2a2a2a;border-radius:4px;color:#aaa;text-decoration:none;font-size:12px}
+.card .link:hover{background:#3a3a3a;color:#fff}
+@media(max-width:640px){body{padding:20px}.grid{grid-template-columns:1fr}}
+</style></head><body>
+<h1>${escapeHtml(category)} — ${runs.length}장 시도</h1>
+<p class="subtitle">${escapeHtml(stats)}</p>
+<div class="toolbar">
+  <button id="copy-selected" type="button">선택 복사</button>
+  <span id="copy-status" aria-live="polite"></span>
+</div>
+<div class="prompt-box">${promptSummary}</div>
+<div class="grid">
+${cards}
+</div>
+<script>
+document.getElementById('copy-selected').addEventListener('click', () => {
+  const nums = [...document.querySelectorAll('.card input[type=checkbox]:checked')]
+    .map(el => '#' + el.value).join(', ');
+  if (!nums) return alert('선택된 항목이 없습니다');
+  const text = '2k로 업스케일: ' + nums;
+  navigator.clipboard.writeText(text);
+  document.getElementById('copy-status').textContent = '복사됨: ' + text;
+});
+</script>
+</body></html>
+`;
+}
+
+function renderPromptSummary(runs) {
+  const prompts = Array.from(new Set(runs.map(run => asTrimmedString(run.manifest.prompt)).filter(Boolean)));
+  if (prompts.length === 0) {
+    return "<strong>Prompt:</strong> ";
+  }
+  if (prompts.length === 1) {
+    return `<strong>Prompt:</strong> ${escapeHtml(prompts[0])}`;
+  }
+
+  const items = prompts
+    .map(prompt => `<li>${escapeHtml(prompt)}</li>`)
+    .join("");
+  return `<strong>Prompts:</strong> ${prompts.length} unique<ol>${items}</ol>`;
+}
+
+function buildIndexStats(runs) {
+  const createdDates = runs
+    .map(run => Date.parse(run.manifest.createdAt))
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  const promptCount = new Set(runs.map(run => asTrimmedString(run.manifest.prompt)).filter(Boolean)).size;
+  const start = createdDates.length > 0 ? new Date(createdDates[0]).toISOString().slice(0, 19).replace("T", " ") : "";
+  const end = createdDates.length > 0 ? new Date(createdDates[createdDates.length - 1]).toISOString().slice(0, 19).replace("T", " ") : "";
+  const range = start && end ? ` · ${start} UTC - ${end} UTC` : "";
+  return `시온바나나 자동화 · ${runs.length} runs · ${promptCount} prompts${range}`;
+}
+
+function formatIndexTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return asTrimmedString(value);
+  }
+  return `${date.toISOString().slice(11, 19)} UTC`;
+}
+
 function createIdempotencyKey(slug) {
   const stamp = safeTimestamp(new Date().toISOString());
   const random = Math.random().toString(36).slice(2, 10);
@@ -617,6 +807,10 @@ function sanitizeFileName(value) {
   const name = parsed.name.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "image";
   const ext = parsed.ext && /^[.][A-Za-z0-9]+$/.test(parsed.ext) ? parsed.ext.toLowerCase() : ".png";
   return `${name}${ext}`;
+}
+
+function toPosixPath(value) {
+  return value.replace(/\\/g, "/");
 }
 
 function asTrimmedString(value) {
@@ -650,6 +844,7 @@ function printHelp() {
 
 Options:
   --prompt              Required generation prompt
+  --build-index         Build data/agent-runs/_{category}-index.html
   --reference           Optional /api/images/<id> reference URL
   --reference-gallery   Optional comma-separated /api/images/<id> URLs
   --category            Optional classification label
