@@ -7,9 +7,7 @@ import { resizeImageToDataUrl } from "@/lib/image-resize";
 import {
   getLocalImageIdForRecord,
   getRecordGeneratedImageUrl,
-  getRecordPromptText,
-  isDataUrl,
-  mergeReferenceGalleryUrls
+  getRecordPromptText
 } from "@/lib/studio-helpers/url";
 import {
   applyCameraPromptDirectives,
@@ -37,6 +35,7 @@ import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/st
 import { useResizable } from "@/hooks/use-resizable";
 import { useCharacterMentions } from "./use-character-mentions";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
+import { useReferenceSlots } from "./use-reference-slots";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi, GENERATE_TIMEOUT_MS } from "@/hooks/use-generate-image";
 import { toast } from "sonner";
@@ -63,7 +62,6 @@ import {
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
   createReferenceSlot,
-  type ReferenceSlotState
 } from "@/lib/studio-helpers/constants";
 import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections, ViewSpec, PromptDetails } from "@/components/studio/types";
 import {
@@ -230,9 +228,9 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   // 같은 id가 localRecords/records에 있으면 mergeHistoryRecords가 알아서 secondary skip.
   const [diskRecords, setDiskRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
-  const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
-    Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
-  );
+  const { referenceSlots, setReferenceSlots, collectReferenceGalleryUrls } = useReferenceSlots({
+    userUid: user?.uid ?? null
+  });
   const { characters, characterMentionChips } = useCharacterMentions({
     prompt,
     referenceSlots,
@@ -307,7 +305,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
   const [view360BatchPending, setView360BatchPending] = useState(false);
   const [comparisonImageId, setComparisonImageId] = useState<string | null>(null);
-  const referenceSlotsPersistWarningShownRef = useRef(false);
   const historySyncSourceRef = useRef<string | null>(null);
   const pendingSelectedImageIdRef = useRef<string | null>(null);
   const [selectedRecordOverride, setSelectedRecordOverride] = useState<GeneratedImageDocument | null>(null);
@@ -412,69 +409,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     lastUidRef.current = currentUid;
   }, [user?.uid, setReferenceSlots]);
 
-
-  const collectReferenceGalleryUrls = () =>
-    mergeReferenceGalleryUrls(referenceSlots.map(slot => slot.imageUrl));
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    try {
-      const raw = window.localStorage.getItem(REFERENCE_GALLERY_STORAGE_KEY);
-      if (!raw) {
-        setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
-        return;
-      }
-
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const normalized = parsed
-          .slice(0, MAX_REFERENCE_SLOT_COUNT)
-          .map((item: { id?: unknown; imageUrl?: unknown; updatedAt?: unknown; source?: unknown; characterId?: unknown }) => {
-            const imageUrl = typeof item?.imageUrl === "string" ? (item.imageUrl as string) : null;
-            const source: ReferenceSlotState["source"] =
-              item?.source === "manual" || item?.source === "character-mention"
-                ? item.source
-                : imageUrl
-                  ? "manual"
-                  : undefined;
-            return {
-              id:
-                typeof item?.id === "string"
-                  ? (item.id as string)
-                  : (typeof crypto !== "undefined" && "randomUUID" in crypto
-                      ? crypto.randomUUID()
-                      : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-              imageUrl,
-              updatedAt: typeof item?.updatedAt === "string" ? (item.updatedAt as string) : new Date().toISOString(),
-              source,
-              characterId: typeof item?.characterId === "string" ? (item.characterId as string) : undefined
-            };
-          });
-
-        const currentUid = user?.uid ?? null;
-        const normalizedFiltered = normalized.filter(slot => {
-          if (!slot.imageUrl) return true;
-          if (!currentUid) return false;
-          const url = slot.imageUrl;
-          return url.startsWith("data:") || url.startsWith("/api/images/") || url.includes(`/users/${currentUid}/`);
-        });
-
-        const ensured = normalizedFiltered.length
-          ? normalizedFiltered
-          : Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot());
-        setReferenceSlots(ensured);
-      } else {
-        setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
-      }
-    } catch (error) {
-      console.warn("Failed to load reference slots", error);
-      setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
-    }
-  }, [user?.uid, setReferenceSlots]);
-
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -495,40 +429,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       setHistoryHydrated(true);
     }
   }, [user?.uid]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    try {
-      let strippedDataUrlCount = 0;
-      const payload = referenceSlots.map(slot => {
-        const shouldStripImageUrl = isDataUrl(slot.imageUrl);
-        if (shouldStripImageUrl) {
-          strippedDataUrlCount += 1;
-        }
-        const imageUrl = shouldStripImageUrl ? null : slot.imageUrl;
-        return {
-          id: slot.id,
-          imageUrl,
-          updatedAt: slot.updatedAt,
-          source: imageUrl ? slot.source ?? "manual" : undefined,
-          characterId: imageUrl ? slot.characterId : undefined
-        };
-      });
-      window.localStorage.setItem(REFERENCE_GALLERY_STORAGE_KEY, JSON.stringify(payload));
-      if (strippedDataUrlCount > 0) {
-        console.warn(`Skipped ${strippedDataUrlCount} data URL reference slot(s) while persisting localStorage.`);
-      }
-    } catch (error) {
-      console.warn("Failed to persist reference slots", error);
-      if (!referenceSlotsPersistWarningShownRef.current) {
-        referenceSlotsPersistWarningShownRef.current = true;
-        toast.warning("참조 이미지 브라우저 저장 공간이 부족해 일부 저장을 건너뛰었습니다.");
-      }
-    }
-  }, [referenceSlots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
