@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
-import { findCharacterByHandle, loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
-import { parseCharacterMentions } from "@/lib/character-mentions";
+import { saveCharacter, type Character } from "@/lib/characters";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import {
   getLocalImageIdForRecord,
@@ -23,7 +22,7 @@ import {
   normalizeCameraSettings,
   type NormalizedCameraSettings
 } from "@/lib/studio-helpers/prompt";
-import { PromptPanel, type CharacterMentionChip } from "@/components/studio/prompt-panel";
+import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
 import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
@@ -36,6 +35,7 @@ import {
 import { SketchCanvas } from "@/components/studio/sketch-canvas";
 import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { useResizable } from "@/hooks/use-resizable";
+import { useCharacterMentions } from "./use-character-mentions";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi, GENERATE_TIMEOUT_MS } from "@/hooks/use-generate-image";
@@ -233,146 +233,20 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
     Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
   );
-  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
+  const { characters, characterMentionChips } = useCharacterMentions({
+    prompt,
+    referenceSlots,
+    setReferenceSlots
+  });
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
-  const parsedCharacterMentions = useMemo(
-    () => parseCharacterMentions(prompt, characters),
-    [characters, prompt]
-  );
-  const mentionedCharacters = useMemo(
-    () =>
-      parsedCharacterMentions.mentioned
-        .map(handle => findCharacterByHandle(characters, handle))
-        .filter((character): character is Character => Boolean(character?.primaryImageUrl)),
-    [characters, parsedCharacterMentions.mentioned]
-  );
-  const characterMentionChips = useMemo<CharacterMentionChip[]>(() => {
-    const chips: CharacterMentionChip[] = [];
-    const seen = new Set<string>();
-
-    parsedCharacterMentions.mentioned.forEach(handle => {
-      if (seen.has(handle)) {
-        return;
-      }
-      seen.add(handle);
-      const character = findCharacterByHandle(characters, handle);
-      if (!character) {
-        chips.push({ handle, status: "invalid" });
-        return;
-      }
-
-      const attached = referenceSlots.some(
-        slot => slot.source === "character-mention" && slot.characterId === character.id && Boolean(slot.imageUrl)
-      );
-      chips.push({
-        handle,
-        status: character.primaryImageUrl && attached ? "attached" : "missing-image"
-      });
-    });
-
-    parsedCharacterMentions.invalid.forEach(handle => {
-      if (seen.has(handle)) {
-        return;
-      }
-      seen.add(handle);
-      chips.push({ handle, status: "invalid" });
-    });
-
-    return chips;
-  }, [characters, parsedCharacterMentions.invalid, parsedCharacterMentions.mentioned, referenceSlots]);
 
   // 카테고리(조명/포즈/카메라)가 마지막으로 textarea 끝에 채워준 텍스트.
   // 카테고리 토글 시 이 부분만 잘라내고 새 빌드 결과로 교체해서, 사용자가 직접 입력한
   // 앞부분 텍스트는 보존한다. 사용자가 카테고리 부분을 직접 편집해 ref와 어긋나면
   // basePrompt를 건드리지 않고 새 결과를 끝에 누적해 사용자 의도를 존중한다.
   const lastCategoryGuidanceRef = useRef<string>("");
-
-  useEffect(() => {
-    setCharacters(loadCharacters());
-    return subscribeCharacters(setCharacters);
-  }, []);
-
-  useEffect(() => {
-    const mentionedById = new Map(mentionedCharacters.map(character => [character.id, character]));
-
-    setReferenceSlots(prev => {
-      const now = new Date().toISOString();
-      let changed = false;
-      let next = prev.map(slot => {
-        if (slot.source !== "character-mention" || !slot.characterId || mentionedById.has(slot.characterId)) {
-          return slot;
-        }
-        changed = true;
-        return { id: slot.id, imageUrl: null, updatedAt: now };
-      });
-
-      const existingMentionIds = new Set(
-        next
-          .filter(slot => slot.source === "character-mention" && slot.characterId && slot.imageUrl)
-          .map(slot => slot.characterId as string)
-      );
-
-      mentionedCharacters.forEach(character => {
-        const existingSlot = next.find(
-          slot => slot.source === "character-mention" && slot.characterId === character.id
-        );
-
-        if (existingSlot) {
-          if (existingSlot.imageUrl !== character.primaryImageUrl) {
-            changed = true;
-            next = next.map(slot =>
-              slot.id === existingSlot.id
-                ? { ...slot, imageUrl: character.primaryImageUrl, updatedAt: now }
-                : slot
-            );
-          }
-          existingMentionIds.add(character.id);
-          return;
-        }
-
-        if (existingMentionIds.has(character.id)) {
-          return;
-        }
-
-        const emptyIndex = next.findIndex(slot => !slot.imageUrl);
-        if (emptyIndex >= 0) {
-          changed = true;
-          next = next.map((slot, index) =>
-            index === emptyIndex
-              ? {
-                  ...slot,
-                  imageUrl: character.primaryImageUrl,
-                  source: "character-mention",
-                  characterId: character.id,
-                  updatedAt: now
-                }
-              : slot
-          );
-          existingMentionIds.add(character.id);
-          return;
-        }
-
-        if (next.length < MAX_REFERENCE_SLOT_COUNT) {
-          changed = true;
-          next = [
-            ...next,
-            {
-              ...createReferenceSlot(),
-              imageUrl: character.primaryImageUrl,
-              source: "character-mention",
-              characterId: character.id,
-              updatedAt: now
-            }
-          ];
-          existingMentionIds.add(character.id);
-        }
-      });
-
-      return changed ? next : prev;
-    });
-  }, [mentionedCharacters]);
 
   useEffect(() => {
     const parts: string[] = [];
