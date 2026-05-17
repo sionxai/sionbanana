@@ -25,10 +25,10 @@ import {
   DEFAULT_ZOOM_LEVEL,
   formatAperture
 } from "@/lib/camera";
-import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
 import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections } from "@/components/studio/types";
 import { usePresetLibrary } from "@/components/studio/preset-library-context";
 import type { ExternalPresetOption } from "@/components/studio/external-preset-config";
+import { AspectRatioSelector } from "@/components/studio/blocks/aspect-ratio-selector";
 
 const CAMERA_ANGLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: DEFAULT_CAMERA_ANGLE, label: "기본값" },
@@ -655,32 +655,7 @@ export function PromptPanel({
               </Button>
             </div>
           </div>
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">비율 프리셋</Label>
-            <ToggleGroup
-              type="single"
-              value={aspectRatio}
-              onValueChange={value => value && onAspectRatioChange(value as AspectRatioPreset)}
-              className="flex flex-wrap gap-2"
-            >
-              {ASPECT_RATIO_PRESETS.map(preset => (
-                <ToggleGroupItem key={preset.value} value={preset.value}>
-                  {preset.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-dashed px-2 py-1 text-[11px]"
-                onClick={() => onAspectRatioChange(DEFAULT_ASPECT_RATIO)}
-                disabled={aspectRatio === DEFAULT_ASPECT_RATIO}
-              >
-                기본값 {ASPECT_RATIO_PRESETS.find(item => item.value === DEFAULT_ASPECT_RATIO)?.label ?? "원본 그대로"}
-              </Button>
-            </div>
-          </div>
+          <AspectRatioSelector value={aspectRatio} onChange={onAspectRatioChange} />
         </CardContent>
       </Card>
     ) : null;
