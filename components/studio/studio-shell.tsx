@@ -39,9 +39,6 @@ import { useReferenceSlots } from "./use-reference-slots";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import { callGenerateApi, GENERATE_TIMEOUT_MS } from "@/hooks/use-generate-image";
 import { toast } from "sonner";
-// 로컬 단일 사용자 환경 — 인증 stub
-const LOCAL_AUTH = { user: { uid: "local" } } as const;
-const useLocalUser = () => LOCAL_AUTH;
 import {
   APERTURE_DEFAULT,
   APERTURE_MAX,
@@ -61,9 +58,16 @@ import {
   MAX_REFERENCE_SLOT_COUNT,
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
-  createReferenceSlot,
+  createReferenceSlot
 } from "@/lib/studio-helpers/constants";
-import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections, ViewSpec, PromptDetails } from "@/components/studio/types";
+import type {
+  LightingPresetCategory,
+  LightingSelections,
+  PosePresetCategory,
+  PoseSelections,
+  PromptDetails,
+  ViewSpec
+} from "@/components/studio/types";
 import {
   CHARACTER_BASE_PROMPT_FALLBACK,
   CHARACTER_NEGATIVE_ENFORCEMENT,
@@ -79,12 +83,8 @@ import {
   CAMERA_MODE_NEGATIVE_GUARD,
   CAMERA_MODE_PROMPT_GUIDELINE
 } from "@/components/studio/camera-config";
-import {
-  LIGHTING_MODE_BASE_PROMPT
-} from "@/components/studio/lighting-config";
-import {
-  POSE_MODE_BASE_PROMPT
-} from "@/components/studio/pose-config";
+import { LIGHTING_MODE_BASE_PROMPT } from "@/components/studio/lighting-config";
+import { POSE_MODE_BASE_PROMPT } from "@/components/studio/pose-config";
 import {
   REFERENCE_SYNC_EVENT,
   REFERENCE_SYNC_STORAGE_KEY,
@@ -92,7 +92,14 @@ import {
   readStoredReference,
   type ReferenceSyncPayload
 } from "@/components/studio/reference-sync";
-import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persistRecordsMerge, removeRecordFromLocalStorage, type HistorySyncPayload } from "@/components/studio/history-sync";
+import {
+  HISTORY_SYNC_EVENT,
+  broadcastHistoryUpdate,
+  mergeHistoryRecords,
+  persistRecordsMerge,
+  removeRecordFromLocalStorage,
+  type HistorySyncPayload
+} from "@/components/studio/history-sync";
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 import { ImagePreviewModal } from "@/components/studio/blocks/image-preview-modal";
 import { StudioWorkspaceHeader } from "@/components/studio/blocks/studio-workspace-header";
@@ -106,6 +113,9 @@ import {
 type StoryReferenceUploadResponse =
   | { ok: true; imageUrl: string; id: string }
   | { ok: false; reason?: string };
+
+const LOCAL_AUTH = { user: { uid: "local" } } as const;
+const useLocalUser = () => LOCAL_AUTH;
 
 async function uploadReferenceFileToImageUrl(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) {
@@ -192,6 +202,52 @@ type ReferenceImageState = {
   source: "override" | "derived";
 };
 
+type ReferenceRequirement = "none" | "primary" | "any";
+
+type ViewBatchOutcome = {
+  status: "success" | "failed" | "network" | "error" | "canceled";
+  label: string;
+  reason?: string;
+};
+
+interface RunViewBatchParams {
+  views: ViewSpec[];
+  actionLabel: string;
+  batchLabel: string;
+  basePromptDefault: string;
+  targetModel: string;
+  referenceImageForRequest: string | null;
+  uniqueGalleryReferences: string[];
+  effectiveCameraAngle: string | undefined;
+  cameraPayload: CameraSettingsPayload;
+  apertureLabel: string;
+  shouldApplyAspectRatio: boolean;
+  aspectRatioValue: AspectRatioPreset;
+  aspectRatioLabel: string;
+  referenceMetadata: { referenceId?: string | null };
+  referenceRecord: GeneratedImageDocument | null;
+  fallbackCandidate: GeneratedImageDocument | null;
+  setPending: (value: boolean) => void;
+  referenceRequirement?: ReferenceRequirement;
+  missingReferenceMessage?: string;
+  promptFallback?: string;
+  singleViewGuideline?: string;
+  negativePromptEnforcement?: string;
+  perViewToast?: boolean;
+  parallel?: boolean;
+  disableGpt?: boolean;
+  onViewProgress?: (view: ViewSpec, index: number, total: number) => void;
+  onViewResult?: (
+    view: ViewSpec,
+    index: number,
+    total: number,
+    outcome: ViewBatchOutcome
+  ) => void;
+  onRecordGenerated?: (record: GeneratedImageDocument) => void;
+  interRequestDelayMs?: number;
+  abortSignal?: AbortSignal;
+}
+
 function StudioShellInner() {
   const { user } = useLocalUser();
   const { buildLightingInstruction, buildPoseInstruction } = usePresetLibrary();
@@ -220,9 +276,9 @@ function StudioShellInner() {
     expression: ["default"],
     posture: ["default"]
   });
-const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
-const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
-const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
+  const [selectedImageId, setSelectedImageIdState] = useState<string | null>(null);
+  const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
+  const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   // 디스크(data/images/)에 있지만 localStorage에는 없는 record를 fallback으로 채워주는 list.
   // 같은 id가 localRecords/records에 있으면 mergeHistoryRecords가 알아서 secondary skip.
@@ -305,15 +361,24 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const [characterBatchPending, setCharacterBatchPending] = useState(false);
   const [view360BatchPending, setView360BatchPending] = useState(false);
   const [comparisonImageId, setComparisonImageId] = useState<string | null>(null);
-  const historySyncSourceRef = useRef<string | null>(null);
   const pendingSelectedImageIdRef = useRef<string | null>(null);
   const [selectedRecordOverride, setSelectedRecordOverride] = useState<GeneratedImageDocument | null>(null);
   const [freshlyGeneratedRecord, setFreshlyGeneratedRecord] = useState<GeneratedImageDocument | null>(null);
-  const { snapshot: generationSnapshot, isGenerating, inflightCount, showSuccessFor, start: startGeneration } = useGenerationCoordinator();
+  const {
+    snapshot: generationSnapshot,
+    isGenerating,
+    inflightCount,
+    showSuccessFor,
+    start: startGeneration
+  } = useGenerationCoordinator();
   const [currentRequestId, setCurrentRequestId] = useState<number | null>(null);
-  const [activeGuard, setActiveGuard] = useState<{ requestId: number; onSuccess: (recordId: string) => void; onError: (message?: string) => void; timeoutId?: NodeJS.Timeout } | null>(null);
+  const [activeGuard, setActiveGuard] = useState<{
+    requestId: number;
+    onSuccess: (recordId: string) => void;
+    onError: (message?: string) => void;
+    timeoutId?: NodeJS.Timeout;
+  } | null>(null);
 
-  // Resizable layout hook
   const resizable = useResizable({
     containerRef,
     storageKey: "studio-panel-sizes",
@@ -325,7 +390,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     maxRightWidth: 500
   });
 
-  // Helper function to clear active guard and timeout
   const clearActiveGuard = useCallback(() => {
     setActiveGuard(prev => {
       if (prev?.timeoutId) {
@@ -335,12 +399,10 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     });
   }, []);
 
-  // Now we can safely use activeGuard in useGeneratedImages
   const { records, loading } = useGeneratedImages({
     onNewRecord: useCallback(
       (record: GeneratedImageDocument) => {
         if (activeGuard) {
-
           if (activeGuard.timeoutId) {
             clearTimeout(activeGuard.timeoutId);
           }
@@ -448,8 +510,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
       if (!incoming.length) {
         return;
       }
-
-      historySyncSourceRef.current = detail.source ?? null;
 
       setLocalRecords(prev => {
         const incomingMap = new Map(incoming.map(record => [record.id, record]));
@@ -562,13 +622,11 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     if (!selectedRecordOverride) {
       return;
     }
-    // Only clear override when the record is actually available in merged records
     if (selectedImageId && mergedRecords.some(record => record.id === selectedImageId)) {
       setSelectedRecordOverride(null);
     }
   }, [mergedRecords, selectedImageId, selectedRecordOverride]);
 
-  // Clear freshly generated record when it's available in merged records
   useEffect(() => {
     if (!freshlyGeneratedRecord) {
       return;
@@ -579,15 +637,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   }, [mergedRecords, freshlyGeneratedRecord]);
 
   const baseSelectedRecord: GeneratedImageDocument | null = useMemo(() => {
-    // First priority: freshly generated record when generation just completed
     if (freshlyGeneratedRecord && selectedImageId === freshlyGeneratedRecord.id) {
       return freshlyGeneratedRecord;
     }
-    // Second priority: override for newly generated images
     if (selectedRecordOverride && selectedRecordOverride.id === selectedImageId) {
       return selectedRecordOverride;
     }
-    // Third priority: from history records
     const fromHistory = historyRecords.find(record => record.id === selectedImageId) ?? null;
     if (fromHistory) {
       return fromHistory;
@@ -666,10 +721,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   const showGenerationSuccess = showSuccessFor(currentRequestId);
   const successRecordId = generationSnapshot.resultRecordId ?? null;
 
-  // Store the latest new record for processing
   const [newRecordToProcess, setNewRecordToProcess] = useState<GeneratedImageDocument | null>(null);
   const lastAutoSelectedIdRef = useRef<string | null>(null);
-
 
   const buildReferenceEntry = useCallback((record: GeneratedImageDocument): GeneratedImageDocument => {
     const metadata = { ...(record.metadata ?? {}) } as Record<string, unknown>;
@@ -709,13 +762,12 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     [buildReferenceEntry]
   );
 
-  // Process new record after mergeLocalRecord and selectImageAuto are defined
   useEffect(() => {
     if (newRecordToProcess) {
       mergeLocalRecord(newRecordToProcess, { promoteToReference: false });
       selectImageAuto(newRecordToProcess.id, newRecordToProcess);
       setFreshlyGeneratedRecord(newRecordToProcess);
-      setNewRecordToProcess(null); // Clear after processing
+      setNewRecordToProcess(null);
     }
   }, [newRecordToProcess, mergeLocalRecord, selectImageAuto]);
 
@@ -739,37 +791,37 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
   }, [generationSnapshot.resultRecordId, mergedRecords, selectImageAuto]);
 
   const promoteReferenceImage = async (
-  imageUrl: string,
-  { recordId, metadata }: { recordId?: string; metadata?: Record<string, unknown> } = {}
-) => {
-  const id =
-    recordId ??
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `reference-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  const now = new Date().toISOString();
-  const baseMetadata: Record<string, unknown> = { ...(metadata ?? {}) };
+    imageUrl: string,
+    { recordId, metadata }: { recordId?: string; metadata?: Record<string, unknown> } = {}
+  ) => {
+    const id =
+      recordId ??
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `reference-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const now = new Date().toISOString();
+    const baseMetadata: Record<string, unknown> = { ...(metadata ?? {}) };
 
-  const baseRecord: GeneratedImageDocument = {
-    id,
-    userId: user?.uid ?? "local",
-    mode: "create",
-    promptMeta: {
-      rawPrompt: "사용자 기준 이미지",
-      refinedPrompt: "사용자 기준 이미지"
-    },
-    status: "completed",
-    imageUrl,
-    thumbnailUrl: imageUrl,
-    originalImageUrl: imageUrl,
-    metadata: baseMetadata,
-    model: "reference-upload",
-    createdAt: now,
-    updatedAt: now
+    const baseRecord: GeneratedImageDocument = {
+      id,
+      userId: user?.uid ?? "local",
+      mode: "create",
+      promptMeta: {
+        rawPrompt: "사용자 기준 이미지",
+        refinedPrompt: "사용자 기준 이미지"
+      },
+      status: "completed",
+      imageUrl,
+      thumbnailUrl: imageUrl,
+      originalImageUrl: imageUrl,
+      metadata: baseMetadata,
+      model: "reference-upload",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    mergeLocalRecord(baseRecord, { promoteToReference: true });
   };
-
-  mergeLocalRecord(baseRecord, { promoteToReference: true });
-};
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1283,10 +1335,8 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
 
   const handleSketchSave = async (dataUrl: string) => {
     try {
-      // 빈 참조 슬롯 찾기
       let targetSlot = referenceSlots.find(slot => !slot.imageUrl);
 
-      // 빈 슬롯이 없으면 새로 추가
       if (!targetSlot) {
         if (referenceSlots.length >= MAX_REFERENCE_SLOT_COUNT) {
           toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
@@ -1299,7 +1349,6 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
 
       const storedUrl = dataUrl;
 
-      // 참조 슬롯에 스케치 추가
       setReferenceSlots(prev =>
         prev.map(item =>
           item.id === targetSlot!.id
@@ -1483,84 +1532,38 @@ const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(D
     }
   };
 
-  type ReferenceRequirement = "none" | "primary" | "any";
-
-  type ViewBatchOutcome = {
-    status: "success" | "failed" | "network" | "error" | "canceled";
-    label: string;
-    reason?: string;
-  };
-
-interface RunViewBatchParams {
-  views: ViewSpec[];
-  actionLabel: string;
-  batchLabel: string;
-  basePromptDefault: string;
-  targetModel: string;
-  referenceImageForRequest: string | null;
-  uniqueGalleryReferences: string[];
-  effectiveCameraAngle: string | undefined;
-  cameraPayload: CameraSettingsPayload;
-  apertureLabel: string;
-  shouldApplyAspectRatio: boolean;
-  aspectRatioValue: AspectRatioPreset;
-  aspectRatioLabel: string;
-  referenceMetadata: { referenceId?: string | null };
-  referenceRecord: GeneratedImageDocument | null;
-  fallbackCandidate: GeneratedImageDocument | null;
-  setPending: (value: boolean) => void;
-  referenceRequirement?: ReferenceRequirement;
-  missingReferenceMessage?: string;
-  promptFallback?: string;
-  singleViewGuideline?: string;
-  negativePromptEnforcement?: string;
-  perViewToast?: boolean;
-  parallel?: boolean;
-  disableGpt?: boolean;
-  onViewProgress?: (view: ViewSpec, index: number, total: number) => void;
-  onViewResult?: (
-    view: ViewSpec,
-    index: number,
-    total: number,
-    outcome: ViewBatchOutcome
-  ) => void;
-  onRecordGenerated?: (record: GeneratedImageDocument) => void;
-  interRequestDelayMs?: number;
-  abortSignal?: AbortSignal;
-}
-
-const runViewBatch = async ({
-  views,
-  actionLabel,
-  batchLabel,
-  basePromptDefault,
-  targetModel,
-  referenceImageForRequest,
-  uniqueGalleryReferences,
-  effectiveCameraAngle,
-  cameraPayload,
-  apertureLabel,
-  shouldApplyAspectRatio,
-  aspectRatioValue,
-  aspectRatioLabel,
-  referenceMetadata,
-  referenceRecord: referenceRecordParam,
-  fallbackCandidate,
-  setPending,
-  referenceRequirement = "none",
-  missingReferenceMessage,
-  promptFallback = CHARACTER_BASE_PROMPT_FALLBACK,
-  singleViewGuideline = CHARACTER_SINGLE_VIEW_GUIDELINE,
-  negativePromptEnforcement = CHARACTER_NEGATIVE_ENFORCEMENT,
-  perViewToast = false,
-  parallel = false,
-  disableGpt = false,
-  onViewProgress,
-  onViewResult,
-  onRecordGenerated,
-  interRequestDelayMs = 0,
-  abortSignal
-}: RunViewBatchParams) => {
+  const runViewBatch = async ({
+    views,
+    actionLabel,
+    batchLabel,
+    basePromptDefault,
+    targetModel,
+    referenceImageForRequest,
+    uniqueGalleryReferences,
+    effectiveCameraAngle,
+    cameraPayload,
+    apertureLabel,
+    shouldApplyAspectRatio,
+    aspectRatioValue,
+    aspectRatioLabel,
+    referenceMetadata,
+    referenceRecord: referenceRecordParam,
+    fallbackCandidate,
+    setPending,
+    referenceRequirement = "none",
+    missingReferenceMessage,
+    promptFallback = CHARACTER_BASE_PROMPT_FALLBACK,
+    singleViewGuideline = CHARACTER_SINGLE_VIEW_GUIDELINE,
+    negativePromptEnforcement = CHARACTER_NEGATIVE_ENFORCEMENT,
+    perViewToast = false,
+    parallel = false,
+    disableGpt = false,
+    onViewProgress,
+    onViewResult,
+    onRecordGenerated,
+    interRequestDelayMs = 0,
+    abortSignal
+  }: RunViewBatchParams) => {
     if (abortSignal?.aborted) {
       return;
     }
@@ -2216,23 +2219,23 @@ ${viewInstruction}`;
       return [updatedRecord, ...prev];
     });
 
-  if (historyView === "favorite") {
-    const nextFavorites = historyRecordsAll
-      .map(record => (record.id === recordId ? updatedRecord : record))
-      .filter(record => record.metadata?.favorite === true);
+    if (historyView === "favorite") {
+      const nextFavorites = historyRecordsAll
+        .map(record => (record.id === recordId ? updatedRecord : record))
+        .filter(record => record.metadata?.favorite === true);
 
-    if (!nextFavorite) {
-      if (selectedImageId === recordId) {
-        const fallbackId = nextFavorites.find(item => item.id !== recordId)?.id ?? null;
-        selectImage(fallbackId);
-      }
-    } else if (!selectedImageId) {
-      const firstFavorite = nextFavorites[0];
-      if (firstFavorite) {
-        selectImage(firstFavorite.id);
+      if (!nextFavorite) {
+        if (selectedImageId === recordId) {
+          const fallbackId = nextFavorites.find(item => item.id !== recordId)?.id ?? null;
+          selectImage(fallbackId);
+        }
+      } else if (!selectedImageId) {
+        const firstFavorite = nextFavorites[0];
+        if (firstFavorite) {
+          selectImage(firstFavorite.id);
+        }
       }
     }
-  }
 
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
@@ -2700,14 +2703,12 @@ ${viewInstruction}`;
     const referenceId = referenceRecord.id ?? REFERENCE_IMAGE_DOC_ID;
 
     try {
-      // Remove from local records (including any record with isReference metadata)
       setLocalRecords(prev => prev.filter(record =>
         record.id !== REFERENCE_IMAGE_DOC_ID &&
         record.id !== referenceId &&
         record.metadata?.isReference !== true
       ));
 
-      // Clear from localStorage
       try {
         const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
         if (stored) {
@@ -2725,7 +2726,6 @@ ${viewInstruction}`;
         console.warn("Failed to update localStorage", error);
       }
 
-      // Clear reference state
       setReferenceImageOverride(null);
       broadcastReferenceUpdate(null, "studio");
       setSelectedRecordOverride(null);
