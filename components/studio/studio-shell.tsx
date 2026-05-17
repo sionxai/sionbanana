@@ -67,9 +67,9 @@ import {
   MAX_REFERENCE_SLOT_COUNT,
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
-  ReferenceSlotState,
-  createReferenceSlot
-} from "@/components/studio/constants";
+  createReferenceSlot,
+  type ReferenceSlotState
+} from "@/lib/studio-helpers/constants";
 import type { LightingPresetCategory, LightingSelections, PosePresetCategory, PoseSelections, ViewSpec, PromptDetails } from "@/components/studio/types";
 import {
   CHARACTER_BASE_PROMPT_FALLBACK,
