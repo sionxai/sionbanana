@@ -30,6 +30,24 @@ async function postCharacterImage(dataUrl: string, mime: string): Promise<string
   return body.imageUrl;
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const base64 = arrayBufferToBase64(await blob.arrayBuffer());
+  return `data:${blob.type};base64,${base64}`;
+}
+
 export async function storeCharacterImageFile(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) {
     throw new Error("이미지 파일만 업로드할 수 있습니다.");
@@ -62,6 +80,5 @@ export async function copyCharacterImageToStorage(imageUrl: string): Promise<str
     throw new Error("이미지 파일만 저장할 수 있습니다.");
   }
 
-  const file = new File([blob], "character-import", { type: blob.type });
-  return storeCharacterImageFile(file);
+  return postCharacterImage(await blobToDataUrl(blob), blob.type);
 }

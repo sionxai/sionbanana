@@ -148,6 +148,30 @@ function getRecordPromptText(record: GeneratedImageDocument | null): string {
   return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
 }
 
+function promptCharacterRegistration(): { name: string; handle: string } | null {
+  const inputName = window.prompt("캐릭터 이름");
+  if (inputName === null) {
+    return null;
+  }
+  const name = inputName.trim();
+  if (!name) {
+    toast.error("캐릭터 이름을 입력해주세요.");
+    return null;
+  }
+
+  const inputHandle = window.prompt("핸들 (영문/한글, 1~32자)");
+  if (inputHandle === null) {
+    return null;
+  }
+  const handle = inputHandle.trim().replace(/^@+/, "");
+  if (!handle) {
+    toast.error("캐릭터 핸들을 입력해주세요.");
+    return null;
+  }
+
+  return { name, handle };
+}
+
 function buildCharacterReferencePrompt(
   promptText: string,
   mentionSource: string,
@@ -2673,13 +2697,8 @@ ${viewInstruction}`;
       return;
     }
 
-    const inputName = window.prompt("캐릭터 이름");
-    if (inputName === null) {
-      return;
-    }
-    const name = inputName.trim();
-    if (!name) {
-      toast.error("캐릭터 이름을 입력해주세요.");
+    const registration = promptCharacterRegistration();
+    if (!registration) {
       return;
     }
 
@@ -2687,7 +2706,8 @@ ${viewInstruction}`;
       const storedUrl = await copyCharacterImageToStorage(imageUrl);
       const promptText = getRecordPromptText(record);
       saveCharacter({
-        name,
+        name: registration.name,
+        handle: registration.handle,
         description: promptText || undefined,
         thumbnailUrl: storedUrl,
         primaryImageUrl: storedUrl,
@@ -2702,7 +2722,7 @@ ${viewInstruction}`;
         tags: [record.mode],
         source: "studio-result"
       });
-      toast.success("라이브러리에 추가됨");
+      toast.success("캐릭터 라이브러리에 등록됨");
     } catch (error) {
       console.error("register character error", error);
       toast.error(error instanceof Error ? error.message : "캐릭터 등록에 실패했습니다.");
