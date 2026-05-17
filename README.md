@@ -56,6 +56,20 @@ curl http://localhost:3000/api/health
 
 응답에 `codex.authenticated: true` 가 보이면 OK. `false`면 `npx @openai/codex login`을 다시 실행.
 
+### 테스트
+
+pure 함수 단위 테스트는 Node.js 내장 test runner로 실행한다.
+
+```bash
+npm test
+```
+
+타입 정합성은 기존 TypeScript 설정으로 확인한다.
+
+```bash
+npm run typecheck
+```
+
 ## 주요 페이지
 
 - `/studio` — 단일 이미지 생성
