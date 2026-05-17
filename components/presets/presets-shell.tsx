@@ -55,7 +55,9 @@ import {
   removeRecordFromLocalStorage,
   type HistorySyncPayload
 } from "@/components/studio/history-sync";
+import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
 import { cn } from "@/lib/utils";
+import { saveCharacter } from "@/lib/characters";
 import { Download, Image as ImageIcon, Plus, Sparkles, Stars, Zap, ZoomIn } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsList } from "@/components/ui/tabs";
@@ -580,6 +582,35 @@ function getRecordGeneratedImageUrl(record?: GeneratedImageDocument | null): str
 
 function getRecordPromptText(record?: GeneratedImageDocument | null): string {
   return record?.promptMeta?.refinedPrompt || record?.promptMeta?.rawPrompt || "";
+}
+
+function isCharacterSheetRecord(record?: GeneratedImageDocument | null): boolean {
+  const action = record?.metadata?.action;
+  return typeof action === "string" && action.startsWith("character-sheet");
+}
+
+function promptCharacterRegistration(): { name: string; handle: string } | null {
+  const inputName = window.prompt("캐릭터 이름");
+  if (inputName === null) {
+    return null;
+  }
+  const name = inputName.trim();
+  if (!name) {
+    toast.error("캐릭터 이름을 입력해주세요.");
+    return null;
+  }
+
+  const inputHandle = window.prompt("핸들 (영문/한글, 1~32자)");
+  if (inputHandle === null) {
+    return null;
+  }
+  const handle = inputHandle.trim().replace(/^@+/, "");
+  if (!handle) {
+    toast.error("캐릭터 핸들을 입력해주세요.");
+    return null;
+  }
+
+  return { name, handle };
 }
 
 type PresetApiImage = {
@@ -1703,6 +1734,51 @@ type ReferenceImageState = {
     void handleDownloadRecord(previewRecord);
   };
 
+  const handleRegisterRecordAsCharacter = async (record: GeneratedImageDocument) => {
+    const imageUrl = getRecordGeneratedImageUrl(record);
+    if (!imageUrl) {
+      toast.error("캐릭터로 등록할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    const registration = promptCharacterRegistration();
+    if (!registration) {
+      return;
+    }
+
+    try {
+      const storedUrl = await copyCharacterImageToStorage(imageUrl);
+      const promptText = getRecordPromptText(record);
+      const viewLabel = record.metadata?.characterViewLabel;
+      const tags = ["character-sheet", typeof viewLabel === "string" ? viewLabel : undefined].filter(
+        (tag): tag is string => Boolean(tag)
+      );
+
+      saveCharacter({
+        name: registration.name,
+        handle: registration.handle,
+        description: promptText || undefined,
+        thumbnailUrl: storedUrl,
+        primaryImageUrl: storedUrl,
+        sheetUrl: storedUrl,
+        shots: [
+          {
+            id: `${record.id}-sheet`,
+            url: storedUrl,
+            kind: "sheet",
+            label: typeof viewLabel === "string" ? viewLabel : "Character sheet"
+          }
+        ],
+        tags,
+        source: "preset-sheet"
+      });
+      toast.success("캐릭터 라이브러리에 등록됨");
+    } catch (error) {
+      console.error("preset character register error", error);
+      toast.error(error instanceof Error ? error.message : "캐릭터 등록에 실패했습니다.");
+    }
+  };
+
   const handleDeletePreviewRecord = async () => {
     if (!previewRecord) {
       return;
@@ -2608,6 +2684,7 @@ type ReferenceImageState = {
               (record.promptMeta?.refinedPrompt as string | undefined) ??
               (record.promptMeta?.rawPrompt as string | undefined) ??
               "";
+            const canRegisterCharacter = isCharacterSheetRecord(record);
             return (
               <div
                 key={record.id}
@@ -2656,6 +2733,21 @@ type ReferenceImageState = {
                     >
                       <ImageIcon className="h-4 w-4" />
                     </Button>
+                    {canRegisterCharacter ? (
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        title="캐릭터로 등록"
+                        aria-label="캐릭터로 등록"
+                        onClick={event => {
+                          event.stopPropagation();
+                          void handleRegisterRecordAsCharacter(record);
+                        }}
+                        disabled={batchPending}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    ) : null}
                     <Button
                       size="icon"
                       variant="secondary"
@@ -2788,6 +2880,11 @@ type ReferenceImageState = {
                 <Button size="sm" variant="outline" onClick={() => void handleSetPreviewAsReference()} disabled={!previewImageUrl || batchPending}>
                   기준이미지 등록
                 </Button>
+                {isCharacterSheetRecord(previewRecord) ? (
+                  <Button size="sm" variant="outline" onClick={() => void handleRegisterRecordAsCharacter(previewRecord)} disabled={!previewImageUrl || batchPending}>
+                    캐릭터로 등록
+                  </Button>
+                ) : null}
                 <Button size="sm" variant="outline" onClick={() => void handleCopyPreviewPrompt()} disabled={!previewPromptText}>
                   프롬프트 복사
                 </Button>
