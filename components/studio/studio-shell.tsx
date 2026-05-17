@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AspectRatioPreset, GenerationMode, GeneratedImageDocument } from "@/lib/types";
 import { findCharacterByHandle, loadCharacters, saveCharacter, subscribeCharacters, type Character } from "@/lib/characters";
 import { parseCharacterMentions } from "@/lib/character-mentions";
@@ -35,7 +34,6 @@ import {
   type GenerationOptionsValue
 } from "@/components/studio/generation-options-panel";
 import { SketchCanvas } from "@/components/studio/sketch-canvas";
-import { DragHandle } from "@/components/studio/drag-handle";
 import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { useResizable } from "@/hooks/use-resizable";
 import { useGenerationCoordinator } from "./use-generation-coordinator";
@@ -100,6 +98,12 @@ import { HISTORY_SYNC_EVENT, broadcastHistoryUpdate, mergeHistoryRecords, persis
 import { PresetLibraryProvider, usePresetLibrary } from "@/components/studio/preset-library-context";
 import { ImagePreviewModal } from "@/components/studio/blocks/image-preview-modal";
 import { StudioWorkspaceHeader } from "@/components/studio/blocks/studio-workspace-header";
+import {
+  StudioShellCenterPanel,
+  StudioShellCollapsedRail,
+  StudioShellDragDivider,
+  StudioShellSidePanel
+} from "@/components/studio/blocks/studio-shell-panels";
 
 type StoryReferenceUploadResponse =
   | { ok: true; imageUrl: string; id: string }
@@ -3038,29 +3042,12 @@ ${viewInstruction}`;
         ref={containerRef}
         className="flex flex-1 flex-col gap-0 p-4 pb-40 lg:flex-row lg:pb-4"
       >
-        {/* Left Panel - Prompt Panel */}
-        <div
-          className={cn(
-            "relative w-full lg:flex-shrink-0 lg:w-[var(--left-panel-width)]",
-            resizable.isCollapsed.left && "lg:hidden"
-          )}
-          style={{
-            "--left-panel-width": `${resizable.leftWidth}px`
-          } as CSSProperties}
+        <StudioShellSidePanel
+          side="left"
+          width={resizable.leftWidth}
+          collapsed={resizable.isCollapsed.left}
+          onToggle={resizable.toggleLeftPanel}
         >
-          {/* Panel Collapse Button */}
-          <button
-            onClick={resizable.toggleLeftPanel}
-            className={cn(
-              "absolute top-4 -right-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
-              "bg-background border border-border shadow-sm",
-              "items-center justify-center text-xs",
-              "hover:bg-accent transition-colors"
-            )}
-            title="패널 접기"
-          >
-            ←
-          </button>
           {activeMode === "sketch" ? (
             <SketchCanvas
               onSaveSketch={handleSketchSave}
@@ -3103,45 +3090,21 @@ ${viewInstruction}`;
               characterMentionChips={characterMentionChips}
             />
           )}
-        </div>
+        </StudioShellSidePanel>
 
-        {/* Left Panel Expand Button (when collapsed) */}
-        {resizable.isCollapsed.left && (
-          <div className="hidden lg:flex">
-            <button
-              onClick={resizable.toggleLeftPanel}
-              className={cn(
-                "w-6 h-full flex items-center justify-center",
-                "bg-background border-r border-border",
-                "hover:bg-accent transition-colors",
-                "text-xs"
-              )}
-              title="패널 펼치기"
-            >
-              →
-            </button>
-          </div>
-        )}
+        <StudioShellCollapsedRail
+          side="left"
+          collapsed={resizable.isCollapsed.left}
+          onToggle={resizable.toggleLeftPanel}
+        />
 
-        {/* Left Drag Handle */}
-        {!resizable.isCollapsed.left && (
-          <div className="hidden lg:flex">
-            <DragHandle
-              orientation="vertical"
-              onDrag={resizable.handleLeftDrag}
-              onDragEnd={() => {}}
-              onDoubleClick={resizable.resetToDefault}
-            />
-          </div>
-        )}
+        <StudioShellDragDivider
+          visible={!resizable.isCollapsed.left}
+          onDrag={resizable.handleLeftDrag}
+          onReset={resizable.resetToDefault}
+        />
 
-        {/* Center Panel - Workspace Panel */}
-        <div
-          className="w-full flex-1 min-w-0 px-2 lg:w-[var(--center-panel-width)]"
-          style={{
-            "--center-panel-width": `${resizable.centerWidth}px`
-          } as CSSProperties}
-        >
+        <StudioShellCenterPanel width={resizable.centerWidth}>
           <WorkspacePanel
           mode={activeMode}
           record={selectedRecord}
@@ -3178,61 +3141,26 @@ ${viewInstruction}`;
           onDismissGenerationStatus={() => setCurrentRequestId(null)}
           onClearComparison={() => setComparisonImageId(null)}
           />
-        </div>
+        </StudioShellCenterPanel>
 
-        {/* Right Drag Handle */}
-        {!resizable.isCollapsed.right && (
-          <div className="hidden lg:flex">
-            <DragHandle
-              orientation="vertical"
-              onDrag={resizable.handleRightDrag}
-              onDragEnd={() => {}}
-              onDoubleClick={resizable.resetToDefault}
-            />
-          </div>
-        )}
+        <StudioShellDragDivider
+          visible={!resizable.isCollapsed.right}
+          onDrag={resizable.handleRightDrag}
+          onReset={resizable.resetToDefault}
+        />
 
-        {/* Right Panel Expand Button (when collapsed) */}
-        {resizable.isCollapsed.right && (
-          <div className="hidden lg:flex">
-            <button
-              onClick={resizable.toggleRightPanel}
-              className={cn(
-                "w-6 h-full flex items-center justify-center",
-                "bg-background border-l border-border",
-                "hover:bg-accent transition-colors",
-                "text-xs"
-              )}
-              title="패널 펼치기"
-            >
-              ←
-            </button>
-          </div>
-        )}
+        <StudioShellCollapsedRail
+          side="right"
+          collapsed={resizable.isCollapsed.right}
+          onToggle={resizable.toggleRightPanel}
+        />
 
-        {/* Right Panel - History Panel */}
-        <div
-          className={cn(
-            "relative mt-4 w-full flex-shrink-0 lg:mt-0 lg:w-[var(--right-panel-width)]",
-            resizable.isCollapsed.right && "lg:hidden"
-          )}
-          style={{
-            "--right-panel-width": `${resizable.rightWidth}px`
-          } as CSSProperties}
+        <StudioShellSidePanel
+          side="right"
+          width={resizable.rightWidth}
+          collapsed={resizable.isCollapsed.right}
+          onToggle={resizable.toggleRightPanel}
         >
-          {/* Panel Collapse Button */}
-          <button
-            onClick={resizable.toggleRightPanel}
-            className={cn(
-              "absolute top-4 -left-3 z-10 hidden h-6 w-6 rounded-full lg:flex",
-              "bg-background border border-border shadow-sm",
-              "items-center justify-center text-xs",
-              "hover:bg-accent transition-colors"
-            )}
-            title="패널 접기"
-          >
-            →
-          </button>
           <HistoryPanel
           records={historyRecords}
           selectedId={selectedImageId}
@@ -3273,7 +3201,7 @@ ${viewInstruction}`;
           emptyStateMessage={user ? "생성된 이미지가 아직 없습니다." : "로그인하여 생성 기록을 확인하세요."}
           emptyStateFavoriteMessage={user ? "즐겨찾기에 추가한 이미지가 없습니다." : "로그인 후 즐겨찾기를 사용할 수 있습니다."}
           />
-        </div>
+        </StudioShellSidePanel>
       </div>
 
       {previewRecord ? (
