@@ -11,14 +11,9 @@ import { cn } from "@/lib/utils";
 import type { GeneratedImageDocument } from "@/lib/types";
 import type { Character } from "@/lib/characters";
 import { getAspectRatioLabel } from "@/lib/aspect";
-import { Plus } from "lucide-react";
+import { ReferenceSlotGallery, type ReferenceSlotView } from "@/components/studio/blocks/reference-slot-gallery";
 
 const RECENT_RECORD_LIMIT = 3;
-
-interface ReferenceSlotView {
-  id: string;
-  imageUrl: string | null;
-}
 
 interface HistoryPanelProps {
   records: GeneratedImageDocument[];
@@ -234,9 +229,6 @@ export function HistoryPanel({
   const olderRecords = records.slice(RECENT_RECORD_LIMIT);
   const slots = referenceSlots ?? [];
   const characterOptions = characterReferences ?? [];
-  const filledReferenceSlotCount = slots.filter(slot => Boolean(slot.imageUrl)).length;
-  const showReferenceLoadWarning = filledReferenceSlotCount >= 5;
-  const canAddMoreReferenceSlots = slots.length < referenceSlotsLimit;
   const emptyMessageAll = emptyStateMessage ?? "생성된 이미지가 아직 없습니다.";
   const emptyMessageFavorite = emptyStateFavoriteMessage ?? "즐겨찾기에 추가한 이미지가 없습니다.";
 
@@ -510,125 +502,18 @@ export function HistoryPanel({
             </div>
           ) : null}
         </div>
-        <div
-          className="space-y-3"
+        <ReferenceSlotGallery
+          slots={slots}
+          limit={referenceSlotsLimit}
+          inputRefs={referenceSlotInputs}
+          onAdd={onReferenceSlotAdd}
+          onUpload={onReferenceSlotUpload}
+          onClear={onReferenceSlotClear}
+          onSelect={onReferenceSlotSelect}
           onDragOver={handleReferenceSlotDragOver}
-          onDrop={event => void handleReferenceSlotCreateDrop(event)}
-        >
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <p className="text-xs font-semibold text-muted-foreground">참조 이미지</p>
-              <p className="text-[11px] text-muted-foreground">
-                권장 1-4장 · 최대 {referenceSlotsLimit}장 · 현재 {filledReferenceSlotCount}장
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-[11px]"
-              onClick={() => onReferenceSlotAdd?.()}
-              onDragOver={handleReferenceSlotDragOver}
-              onDrop={event => void handleReferenceSlotCreateDrop(event)}
-              disabled={!canAddMoreReferenceSlots || !onReferenceSlotAdd}
-            >
-              슬롯 추가
-            </Button>
-          </div>
-          {showReferenceLoadWarning ? (
-            <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
-              참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 8장은 가능하지만 2분 이상 걸릴 수 있어요.
-            </div>
-          ) : null}
-          <div className="grid grid-cols-3 gap-2">
-            {slots.map(slot => (
-              <div key={slot.id} className="space-y-1">
-                <div
-                  className="group relative aspect-square overflow-hidden rounded-lg border bg-muted/40"
-                  onDragOver={handleReferenceSlotDragOver}
-                  onDrop={event => void handleReferenceSlotDrop(event, slot.id)}
-                >
-                  {slot.imageUrl ? (
-                    <NextImage src={slot.imageUrl} alt="reference slot" fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover" unoptimized />
-                  ) : (
-                    <EmptyState label="참조 이미지" />
-                  )}
-                  <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-background/70 opacity-0 transition group-hover:opacity-100">
-                    <div className="pointer-events-auto flex flex-col gap-1 p-2">
-                      <Button
-                        size="sm"
-                        className="h-7 px-2 text-[11px]"
-                        onClick={() => slot.imageUrl && void onReferenceSlotSelect?.(slot.id)}
-                        disabled={!slot.imageUrl || !onReferenceSlotSelect}
-                      >
-                        기준으로 사용
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="h-7 px-2 text-[11px]"
-                        onClick={() => onReferenceSlotClear?.(slot.id)}
-                        disabled={!slot.imageUrl || !onReferenceSlotClear}
-                      >
-                        삭제
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1 h-7 px-2 text-[11px]"
-                    onClick={() => referenceSlotInputs.current[slot.id]?.click()}
-                    disabled={!onReferenceSlotUpload}
-                  >
-                    업로드
-                  </Button>
-                  {slot.imageUrl ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="flex-1 h-7 px-2 text-[11px]"
-                      onClick={() => void onReferenceSlotSelect?.(slot.id)}
-                      disabled={!onReferenceSlotSelect}
-                    >
-                      사용
-                    </Button>
-                  ) : null}
-                </div>
-                <input
-                  ref={node => {
-                    referenceSlotInputs.current[slot.id] = node;
-                  }}
-                  id={`reference-slot-${slot.id}`}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={event => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      void onReferenceSlotUpload?.(slot.id, file);
-                    }
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-            ))}
-            {canAddMoreReferenceSlots ? (
-              <button
-                type="button"
-                className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed bg-muted/20 text-muted-foreground transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => onReferenceSlotAdd?.()}
-                onDragOver={handleReferenceSlotDragOver}
-                onDrop={event => void handleReferenceSlotCreateDrop(event)}
-                disabled={!onReferenceSlotAdd}
-                aria-label="참조 슬롯 추가"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
-        </div>
+          onCreateDrop={event => void handleReferenceSlotCreateDrop(event)}
+          onSlotDrop={(event, slotId) => void handleReferenceSlotDrop(event, slotId)}
+        />
         <Button variant="outline" className="w-full" size="sm">
           모든 이미지 다운로드
         </Button>
