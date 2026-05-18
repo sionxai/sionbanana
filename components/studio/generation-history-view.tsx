@@ -5,7 +5,13 @@ import Image from "next/image";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
-import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
+import {
+  getHistoryRecordTags,
+  getHistoryTagOptions,
+  isHistoryRecordFavorite,
+  setHistoryRecordFavorite,
+  setHistoryRecordTags
+} from "@/lib/history-records";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +31,7 @@ function getLocalImageId(url?: string | null): string | null {
 }
 
 type ModeFilterValue = "all" | GenerationMode;
+type FavoriteFilterValue = "all" | "favorite";
 type TimeframeValue = "all" | "1d" | "7d" | "30d" | "90d";
 
 const MODE_LABEL: Record<GenerationMode, string> = {
@@ -205,6 +212,8 @@ function GalleryCard({
 }) {
   const previewUrl = record.thumbnailUrl ?? record.imageUrl ?? record.originalImageUrl;
   const promptPreview = record.promptMeta?.refinedPrompt ?? record.promptMeta?.rawPrompt ?? "";
+  const isFavorite = isHistoryRecordFavorite(record);
+  const tags = getHistoryRecordTags(record);
 
   const handleCardClick = () => {
     onSelect(record);
@@ -249,6 +258,11 @@ function GalleryCard({
             aria-label="이미지 선택"
           />
         </div>
+        {isFavorite ? (
+          <Badge className="pointer-events-none absolute right-3 top-3 z-20 bg-background/90 text-foreground shadow">
+            ★
+          </Badge>
+        ) : null}
         {previewUrl ? (
           <Image
             src={previewUrl}
@@ -267,11 +281,23 @@ function GalleryCard({
           </div>
         ) : null}
       </div>
-      <div className="flex items-center justify-between gap-2 px-3 py-3 text-xs text-muted-foreground">
-        <span className="truncate">{formatDate(record.createdAt)}</span>
-        <Badge variant="outline" className="uppercase tracking-wide">
-          {record.mode}
-        </Badge>
+      <div className="flex flex-col gap-2 px-3 py-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate">{formatDate(record.createdAt)}</span>
+          <Badge variant="outline" className="uppercase tracking-wide">
+            {record.mode}
+          </Badge>
+        </div>
+        {tags.length ? (
+          <div className="flex flex-wrap gap-1">
+            {tags.slice(0, 3).map(tag => (
+              <Badge key={tag} variant="secondary" className="max-w-full truncate text-[10px]">
+                #{tag}
+              </Badge>
+            ))}
+            {tags.length > 3 ? <Badge variant="outline">+{tags.length - 3}</Badge> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -282,7 +308,9 @@ export function GenerationHistoryView() {
   const { user } = useLocalUser();
   const [selectedRecord, setSelectedRecord] = useState<GeneratedImageDocument | null>(null);
   const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
+  const [favoriteFilter, setFavoriteFilter] = useState<FavoriteFilterValue>("all");
   const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
+  const [tagFilter, setTagFilter] = useState("all");
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
@@ -300,8 +328,18 @@ export function GenerationHistoryView() {
     return [...localRecords].sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
   }, [localRecords]);
 
+  const tagOptions = useMemo(() => getHistoryTagOptions(historyItems), [historyItems]);
+
   const filteredItems = useMemo(() => {
     let items = historyItems;
+
+    if (favoriteFilter === "favorite") {
+      items = items.filter(isHistoryRecordFavorite);
+    }
+
+    if (tagFilter !== "all") {
+      items = items.filter(record => getHistoryRecordTags(record).includes(tagFilter));
+    }
 
     if (modeFilter !== "all") {
       items = items.filter(record => record.mode === modeFilter);
@@ -313,11 +351,17 @@ export function GenerationHistoryView() {
     }
 
     return items;
-  }, [historyItems, modeFilter, timeframeFilter]);
+  }, [favoriteFilter, historyItems, modeFilter, tagFilter, timeframeFilter]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [modeFilter, timeframeFilter, historyItems.length]);
+  }, [favoriteFilter, modeFilter, tagFilter, timeframeFilter, historyItems.length]);
+
+  useEffect(() => {
+    if (tagFilter !== "all" && !tagOptions.includes(tagFilter)) {
+      setTagFilter("all");
+    }
+  }, [tagFilter, tagOptions]);
 
   const displayedItems = useMemo(
     () => filteredItems.slice(0, visibleCount),
@@ -537,6 +581,18 @@ export function GenerationHistoryView() {
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
+  const handleEditTags = (record: GeneratedImageDocument) => {
+    const currentTags = getHistoryRecordTags(record);
+    const input = window.prompt("태그 (쉼표 또는 줄바꿈으로 구분)", currentTags.join(", "));
+    if (input === null) {
+      return;
+    }
+
+    const updatedRecord = setHistoryRecordTags(record, input);
+    replaceRecord(updatedRecord);
+    toast.success(getHistoryRecordTags(updatedRecord).length ? "태그를 저장했습니다." : "태그를 비웠습니다.");
+  };
+
   const handleDeleteRecord = async (record: GeneratedImageDocument) => {
     if (!user) {
       toast.error("로그인이 필요합니다.");
@@ -602,6 +658,7 @@ export function GenerationHistoryView() {
   const originalImageUrl = selectedRecord
     ? selectedRecord.originalImageUrl ?? selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? ""
     : "";
+  const selectedTags = selectedRecord ? getHistoryRecordTags(selectedRecord) : [];
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 pb-28">
@@ -620,6 +677,20 @@ export function GenerationHistoryView() {
           </span>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">즐겨찾기</span>
+            <ToggleGroup
+              type="single"
+              value={favoriteFilter}
+              onValueChange={value => setFavoriteFilter((value as FavoriteFilterValue) || "all")}
+              className="flex flex-wrap gap-2"
+              aria-label="즐겨찾기 필터"
+            >
+              <ToggleGroupItem value="all">전체</ToggleGroupItem>
+              <ToggleGroupItem value="favorite">즐겨찾기만</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           <div className="flex flex-col gap-2">
             <span className="text-xs font-medium text-muted-foreground">생성 모드</span>
             <ToggleGroup
@@ -660,6 +731,22 @@ export function GenerationHistoryView() {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+          </div>
+
+          <div className="flex min-w-[180px] flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">태그</span>
+            <select
+              value={tagFilter}
+              onChange={event => setTagFilter(event.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="all">전체 태그</option>
+              {tagOptions.map(tag => (
+                <option key={tag} value={tag}>
+                  #{tag}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
@@ -917,7 +1004,19 @@ export function GenerationHistoryView() {
                   >
                     {isHistoryRecordFavorite(selectedRecord) ? "즐겨찾기 해제" : "즐겨찾기"}
                   </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleEditTags(selectedRecord)}>
+                    태그 편집
+                  </Button>
                 </div>
+                {selectedTags.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {selectedTags.map(tag => (
+                      <Badge key={tag} variant="secondary">
+                        #{tag}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

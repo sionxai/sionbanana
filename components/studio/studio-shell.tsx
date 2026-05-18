@@ -52,7 +52,13 @@ import {
   getDirectionalLabel
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO, getAspectRatioDimensions, getAspectRatioLabel } from "@/lib/aspect";
-import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
+import {
+  getHistoryTagOptions,
+  getHistoryRecordTags,
+  isHistoryRecordFavorite,
+  setHistoryRecordFavorite,
+  setHistoryRecordTags
+} from "@/lib/history-records";
 import {
   INITIAL_REFERENCE_SLOT_COUNT,
   LOCAL_STORAGE_KEY,
@@ -572,16 +578,31 @@ function StudioShellInner() {
   }, [localRecords, records, diskRecords, user?.uid]);
 
   const [historyView, setHistoryView] = useState<"all" | "favorite">("all");
+  const [historyTagFilter, setHistoryTagFilter] = useState("all");
 
   const historyRecordsAll = useMemo(() => {
     return mergedRecords.filter(record => record.id !== REFERENCE_IMAGE_DOC_ID);
   }, [mergedRecords]);
 
+  const historyTagOptions = useMemo(() => getHistoryTagOptions(historyRecordsAll), [historyRecordsAll]);
+
   const historyRecords = useMemo(() => {
-    return historyView === "favorite"
+    let nextRecords = historyView === "favorite"
       ? historyRecordsAll.filter(isHistoryRecordFavorite)
       : historyRecordsAll;
-  }, [historyRecordsAll, historyView]);
+
+    if (historyTagFilter !== "all") {
+      nextRecords = nextRecords.filter(record => getHistoryRecordTags(record).includes(historyTagFilter));
+    }
+
+    return nextRecords;
+  }, [historyRecordsAll, historyTagFilter, historyView]);
+
+  useEffect(() => {
+    if (historyTagFilter !== "all" && !historyTagOptions.includes(historyTagFilter)) {
+      setHistoryTagFilter("all");
+    }
+  }, [historyTagFilter, historyTagOptions]);
 
   useEffect(() => {
     setLocalRecords(prev => prev.filter(item => !records.some(record => record.id === item.id)));
@@ -2237,6 +2258,25 @@ ${viewInstruction}`;
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
 
+  const handleUpdateRecordTags = (recordId: string, tags: string[]) => {
+    const target = mergedRecords.find(record => record.id === recordId);
+    if (!target) {
+      toast.error("기록을 찾을 수 없습니다.");
+      return;
+    }
+
+    const updatedRecord = setHistoryRecordTags(target, tags);
+    setLocalRecords(prev => {
+      const exists = prev.some(record => record.id === recordId);
+      if (exists) {
+        return prev.map(record => (record.id === recordId ? updatedRecord : record));
+      }
+      return [updatedRecord, ...prev];
+    });
+
+    toast.success(tags.length ? "태그를 저장했습니다." : "태그를 비웠습니다.");
+  };
+
   const handleSetComparison = (recordId: string) => {
     setComparisonImageId(current => (current === recordId ? null : recordId));
     const target = mergedRecords.find(record => record.id === recordId);
@@ -2961,6 +3001,10 @@ ${viewInstruction}`;
           onClearComparison={() => setComparisonImageId(null)}
           view={historyView}
           onChangeView={setHistoryView}
+          tagFilter={historyTagFilter}
+          tagOptions={historyTagOptions}
+          onChangeTagFilter={setHistoryTagFilter}
+          onUpdateTags={handleUpdateRecordTags}
           onPreview={handlePreviewRecord}
           referenceSlots={referenceSlots}
           onReferenceSlotUpload={handleReferenceSlotUpload}

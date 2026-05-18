@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { GeneratedImageDocument } from "@/lib/types";
 import type { Character } from "@/lib/characters";
 import { getAspectRatioLabel } from "@/lib/aspect";
-import { isHistoryRecordFavorite } from "@/lib/history-records";
+import { getHistoryRecordTags, isHistoryRecordFavorite, parseHistoryTags } from "@/lib/history-records";
 import { ReferenceSlotGallery, type ReferenceSlotView } from "@/components/studio/blocks/reference-slot-gallery";
 
 const RECENT_RECORD_LIMIT = 3;
@@ -38,6 +38,10 @@ interface HistoryPanelProps {
   onClearComparison?: () => void;
   view?: "all" | "favorite";
   onChangeView?: (view: "all" | "favorite") => void;
+  tagFilter?: string;
+  tagOptions?: string[];
+  onChangeTagFilter?: (tag: string) => void;
+  onUpdateTags?: (id: string, tags: string[]) => void;
   onPreview?: (record: GeneratedImageDocument) => void;
   referenceSlots?: ReferenceSlotView[];
   onReferenceSlotUpload?: (slotId: string, file: File) => Promise<void> | void;
@@ -72,6 +76,10 @@ export function HistoryPanel({
   onClearComparison,
   view = "all",
   onChangeView,
+  tagFilter = "all",
+  tagOptions = [],
+  onChangeTagFilter,
+  onUpdateTags,
   onPreview,
   referenceSlots,
   onReferenceSlotUpload,
@@ -247,6 +255,14 @@ export function HistoryPanel({
         (record.imageUrl === referenceImageUrl || record.originalImageUrl === referenceImageUrl)
     );
     const isFavorite = isHistoryRecordFavorite(record);
+    const tags = getHistoryRecordTags(record);
+    const handleEditTags = () => {
+      const input = window.prompt("태그 (쉼표 또는 줄바꿈으로 구분)", tags.join(", "));
+      if (input === null) {
+        return;
+      }
+      onUpdateTags?.(record.id, parseHistoryTags(input));
+    };
 
     return (
       <div
@@ -323,6 +339,16 @@ export function HistoryPanel({
               </>
             ) : null}
           </div>
+          {tags.length ? (
+            <div className="flex flex-wrap gap-1">
+              {tags.slice(0, 5).map(tag => (
+                <Badge key={tag} variant="secondary" className="max-w-full truncate text-[10px]">
+                  #{tag}
+                </Badge>
+              ))}
+              {tags.length > 5 ? <Badge variant="outline">+{tags.length - 5}</Badge> : null}
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -333,6 +359,17 @@ export function HistoryPanel({
               }}
             >
               {isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={event => {
+                event.stopPropagation();
+                handleEditTags();
+              }}
+              disabled={!onUpdateTags}
+            >
+              태그
             </Button>
             {onSetReference && !isCurrentReference ? (
               <Button
@@ -570,6 +607,27 @@ export function HistoryPanel({
               )}
             </div>
           </div>
+          {(tagOptions.length > 0 || tagFilter !== "all") ? (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <label htmlFor="history-tag-filter" className="text-xs text-muted-foreground">
+                태그
+              </label>
+              <select
+                id="history-tag-filter"
+                value={tagFilter}
+                onChange={event => onChangeTagFilter?.(event.target.value)}
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!onChangeTagFilter}
+              >
+                <option value="all">전체 태그</option>
+                {tagOptions.map(tag => (
+                  <option key={tag} value={tag}>
+                    #{tag}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="flex h-full flex-col p-0">
           {records.length === 0 ? (
