@@ -23,6 +23,7 @@ import {
 import { PromptPanel } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
+import { CharacterPickerModal } from "@/components/studio/character-picker-modal";
 import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
 import { GenerationProgressIndicator } from "@/components/studio/generation-progress-indicator";
 import {
@@ -299,6 +300,7 @@ function StudioShellInner() {
     referenceSlots,
     setReferenceSlots
   });
+  const [isCharacterPickerOpen, setIsCharacterPickerOpen] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
@@ -2982,8 +2984,7 @@ ${viewInstruction}`;
           onRemoveReference={handleReferenceRemove}
           hasReference={hasReference}
           onSetReference={handleSetReferenceFromHistory}
-          characterReferences={characters}
-          onSetCharacterReference={handleSetReferenceFromCharacter}
+          onOpenCharacterPicker={() => setIsCharacterPickerOpen(true)}
           onToggleFavorite={handleToggleFavorite}
           onDownload={handleDownloadRecord}
           onDelete={handleDeleteRecord}
@@ -3018,6 +3019,12 @@ ${viewInstruction}`;
           />
         </StudioShellSidePanel>
       </div>
+
+      <CharacterPickerModal
+        isOpen={isCharacterPickerOpen}
+        onClose={() => setIsCharacterPickerOpen(false)}
+        onSelect={character => handleSetReferenceFromCharacter(character.id)}
+      />
 
       {previewRecord ? (
         <ImagePreviewModal
