@@ -24,6 +24,7 @@ import {
   formatAperture
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
+import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
 import { callGenerateApi } from "@/hooks/use-generate-image";
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
@@ -484,6 +485,19 @@ export function VariationsStudioShell() {
   const handleToggleFavorite = useCallback(async (recordId: string) => {
     const record = allRecentImageRecords.find(r => r.id === recordId);
     if (!record || !user) return;
+    const nextFavorite = !isHistoryRecordFavorite(record);
+    const updatedRecord = setHistoryRecordFavorite(record, nextFavorite);
+
+    setLocalHistory(prev => {
+      const exists = prev.some(item => item.id === recordId);
+      return exists
+        ? prev.map(item => (item.id === recordId ? updatedRecord : item))
+        : [updatedRecord, ...prev];
+    });
+
+    const merged = persistRecordsMerge([updatedRecord]);
+    broadcastHistoryUpdate(merged, "variations");
+    toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   }, [allRecentImageRecords, user]);
 
   const handleDeleteRecord = useCallback(async (recordId: string) => {
@@ -1292,14 +1306,14 @@ export function VariationsStudioShell() {
                                   </Button>
                                   <Button
                                     size="sm"
-                                    variant={record.metadata?.favorite ? "secondary" : "outline"}
+                                    variant={isHistoryRecordFavorite(record) ? "secondary" : "outline"}
                                     className="w-full text-xs h-7"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleToggleFavorite(record.id);
                                     }}
                                   >
-                                    {record.metadata?.favorite ? '★' : '☆'} 즐겨찾기
+                                    {isHistoryRecordFavorite(record) ? "★" : "☆"} 즐겨찾기
                                   </Button>
                                   <Button
                                     size="sm"

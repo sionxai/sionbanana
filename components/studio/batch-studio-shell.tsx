@@ -28,6 +28,7 @@ import {
   formatAperture
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
+import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
 import type {
   LightingSelections,
   PoseSelections,
@@ -195,7 +196,7 @@ function BatchStudioShellInner() {
   ), [mergedRecords]);
 
   const filteredHistoryRecords = useMemo(
-    () => historyRecords.filter(record => historyView === "all" || record.metadata?.favorite),
+    () => historyRecords.filter(record => historyView === "all" || isHistoryRecordFavorite(record)),
     [historyRecords, historyView]
   );
   const visibleHistoryRecords = useMemo(
@@ -212,12 +213,8 @@ function BatchStudioShellInner() {
       return;
     }
 
-    const nextFavorite = target.metadata?.favorite !== true;
-
-    const updatedRecord: GeneratedImageDocument = {
-      ...target,
-      metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-    };
+    const nextFavorite = !isHistoryRecordFavorite(target);
+    const updatedRecord = setHistoryRecordFavorite(target, nextFavorite);
 
     setLocalRecords(prev => {
       const exists = prev.some(record => record.id === recordId);
@@ -1772,7 +1769,7 @@ function BatchStudioShellInner() {
                           <div className="flex gap-1">
                             <Button
                               size="sm"
-                              variant={record.metadata?.favorite ? "default" : "secondary"}
+                              variant={isHistoryRecordFavorite(record) ? "default" : "secondary"}
                               className="h-6 w-6 p-0 text-xs"
                               onClick={(e) => {
                                 e.stopPropagation();

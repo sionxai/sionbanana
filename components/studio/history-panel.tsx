@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { GeneratedImageDocument } from "@/lib/types";
 import type { Character } from "@/lib/characters";
 import { getAspectRatioLabel } from "@/lib/aspect";
+import { isHistoryRecordFavorite } from "@/lib/history-records";
 import { ReferenceSlotGallery, type ReferenceSlotView } from "@/components/studio/blocks/reference-slot-gallery";
 
 const RECENT_RECORD_LIMIT = 3;
@@ -245,6 +246,7 @@ export function HistoryPanel({
       referenceImageUrl &&
         (record.imageUrl === referenceImageUrl || record.originalImageUrl === referenceImageUrl)
     );
+    const isFavorite = isHistoryRecordFavorite(record);
 
     return (
       <div
@@ -300,7 +302,7 @@ export function HistoryPanel({
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>{new Date(record.createdAt).toLocaleString()}</span>
           <div className="flex items-center gap-1">
-            {record.metadata?.favorite ? <Badge variant="secondary">★</Badge> : null}
+            {isFavorite ? <Badge variant="secondary">★</Badge> : null}
             {isComparison ? <Badge variant="outline">비교중</Badge> : null}
             <Badge variant="outline" className="uppercase tracking-wide">
               {record.mode}
@@ -324,13 +326,13 @@ export function HistoryPanel({
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              variant={record.metadata?.favorite ? "secondary" : "outline"}
+              variant={isFavorite ? "secondary" : "outline"}
               onClick={event => {
                 event.stopPropagation();
                 onToggleFavorite?.(record.id);
               }}
             >
-              {record.metadata?.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
+              {isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
             </Button>
             {onSetReference && !isCurrentReference ? (
               <Button

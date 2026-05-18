@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
+import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
-import { removeRecordFromLocalStorage } from "@/components/studio/history-sync";
+import { broadcastHistoryUpdate, persistRecordsMerge, removeRecordFromLocalStorage } from "@/components/studio/history-sync";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
 import { toast } from "sonner";
 
@@ -521,19 +522,17 @@ export function GenerationHistoryView() {
     startDownload(target);
   };
 
-  const updateRecordInState = (recordId: string, updater: (record: GeneratedImageDocument) => GeneratedImageDocument) => {
-    setLocalRecords(prev => prev.map(item => (item.id === recordId ? updater(item) : item)));
-    setSelectedRecord(prev => (prev && prev.id === recordId ? updater(prev) : prev));
+  const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
+    setLocalRecords(prev => prev.map(item => (item.id === updatedRecord.id ? updatedRecord : item)));
+    setSelectedRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
+    const merged = persistRecordsMerge([updatedRecord]);
+    broadcastHistoryUpdate(merged, "history");
   };
 
   const handleToggleFavorite = async (record: GeneratedImageDocument) => {
-    const nextFavorite = record.metadata?.favorite !== true;
-    const updatedRecord = {
-      ...record,
-      metadata: { ...(record.metadata ?? {}), favorite: nextFavorite }
-    } as GeneratedImageDocument;
-
-    updateRecordInState(record.id, () => updatedRecord);
+    const nextFavorite = !isHistoryRecordFavorite(record);
+    const updatedRecord = setHistoryRecordFavorite(record, nextFavorite);
+    replaceRecord(updatedRecord);
 
     toast.success(nextFavorite ? "즐겨찾기에 추가했습니다." : "즐겨찾기를 해제했습니다.");
   };
@@ -913,10 +912,10 @@ export function GenerationHistoryView() {
                   </Button>
                   <Button
                     size="sm"
-                    variant={selectedRecord.metadata?.favorite ? "secondary" : "outline"}
+                    variant={isHistoryRecordFavorite(selectedRecord) ? "secondary" : "outline"}
                     onClick={() => handleToggleFavorite(selectedRecord)}
                   >
-                    {selectedRecord.metadata?.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
+                    {isHistoryRecordFavorite(selectedRecord) ? "즐겨찾기 해제" : "즐겨찾기"}
                   </Button>
                 </div>
               </div>

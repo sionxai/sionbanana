@@ -52,6 +52,8 @@ export interface GeneratedImageDocument {
   thumbnailUrl?: string;
   originalImageUrl?: string;
   diff?: ImageDiffMeta;
+  favorite?: boolean;
+  tags?: string[];
   metadata?: Record<string, unknown>;
   model: string;
   costCredits?: number;

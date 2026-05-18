@@ -52,6 +52,7 @@ import {
   getDirectionalLabel
 } from "@/lib/camera";
 import { DEFAULT_ASPECT_RATIO, getAspectRatioDimensions, getAspectRatioLabel } from "@/lib/aspect";
+import { isHistoryRecordFavorite, setHistoryRecordFavorite } from "@/lib/history-records";
 import {
   INITIAL_REFERENCE_SLOT_COUNT,
   LOCAL_STORAGE_KEY,
@@ -578,7 +579,7 @@ function StudioShellInner() {
 
   const historyRecords = useMemo(() => {
     return historyView === "favorite"
-      ? historyRecordsAll.filter(record => record.metadata?.favorite === true)
+      ? historyRecordsAll.filter(isHistoryRecordFavorite)
       : historyRecordsAll;
   }, [historyRecordsAll, historyView]);
 
@@ -2202,12 +2203,8 @@ ${viewInstruction}`;
       return;
     }
 
-    const nextFavorite = target.metadata?.favorite !== true;
-
-    const updatedRecord: GeneratedImageDocument = {
-      ...target,
-      metadata: { ...(target.metadata ?? {}), favorite: nextFavorite }
-    };
+    const nextFavorite = !isHistoryRecordFavorite(target);
+    const updatedRecord = setHistoryRecordFavorite(target, nextFavorite);
 
     setLocalRecords(prev => {
       const exists = prev.some(record => record.id === recordId);
@@ -2222,7 +2219,7 @@ ${viewInstruction}`;
     if (historyView === "favorite") {
       const nextFavorites = historyRecordsAll
         .map(record => (record.id === recordId ? updatedRecord : record))
-        .filter(record => record.metadata?.favorite === true);
+        .filter(isHistoryRecordFavorite);
 
       if (!nextFavorite) {
         if (selectedImageId === recordId) {
