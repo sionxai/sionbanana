@@ -29,13 +29,14 @@ import {
   GenerationOptionsPanel,
   type GenerationOptionsValue
 } from "@/components/studio/generation-options-panel";
+import { CharacterPickerModal } from "@/components/studio/character-picker-modal";
 import { copyCharacterImageToStorage } from "@/components/studio/character-image-storage";
 import { persistRecordsMerge, broadcastHistoryUpdate } from "@/components/studio/history-sync";
 import { SceneCard, type Scene } from "@/components/studio/scene-card";
 import { MAX_IMAGE_ZOOM, MIN_IMAGE_ZOOM, useImagePanZoom } from "@/components/studio/use-image-pan-zoom";
 import { callGenerateApi, type GenerateResponse } from "@/hooks/use-generate-image";
 import { ASPECT_RATIO_PRESETS, DEFAULT_ASPECT_RATIO } from "@/lib/aspect";
-import { loadCharacters, subscribeCharacters, type Character } from "@/lib/characters";
+import { loadCharacters } from "@/lib/characters";
 import { runWithConcurrency } from "@/lib/concurrency";
 import { resizeImageToDataUrl } from "@/lib/image-resize";
 import {
@@ -368,7 +369,6 @@ function createSceneFromStoryboard(
 
 export function StoryStudioShell() {
   const [library, setLibrary] = useState<StoryReferenceLibrary>(() => loadStoryReferences());
-  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
   const [storyText, setStoryText] = useState("");
   const [sceneCount, setSceneCount] = useState(5);
   const [mode, setMode] = useState<StoryMode>("instant");
@@ -392,13 +392,6 @@ export function StoryStudioShell() {
     setLibrary(loadStoryReferences());
     return subscribeStoryReferences(nextLibrary => {
       setLibrary(nextLibrary);
-    });
-  }, []);
-
-  useEffect(() => {
-    setCharacters(loadCharacters());
-    return subscribeCharacters(nextCharacters => {
-      setCharacters(nextCharacters);
     });
   }, []);
 
@@ -1219,7 +1212,6 @@ export function StoryStudioShell() {
               library={library}
               uploadingSlots={uploadingSlots}
               importingSlots={importingCharacterSlots}
-              characters={characters}
               onHandleChange={(slotIndex, handle) => persistSlot("character", slotIndex, { handle })}
               onImageUpload={handleSlotUpload}
               onImageClear={slotIndex => persistSlot("character", slotIndex, { imageUrl: "" })}
@@ -1356,7 +1348,6 @@ function CharacterLibrary({
   library,
   uploadingSlots,
   importingSlots,
-  characters,
   onHandleChange,
   onImageUpload,
   onImageClear,
@@ -1365,7 +1356,6 @@ function CharacterLibrary({
   library: StoryReferenceLibrary;
   uploadingSlots: Record<string, boolean>;
   importingSlots: Record<string, boolean>;
-  characters: Character[];
   onHandleChange: (slotIndex: number, handle: string) => void;
   onImageUpload: SlotUploadHandler;
   onImageClear: (slotIndex: number) => void;
@@ -1380,7 +1370,6 @@ function CharacterLibrary({
       importingSlots={importingSlots}
       imagePlaceholder="인물 이미지"
       handlePlaceholder="예: 민수"
-      characterOptions={characters}
       onHandleChange={onHandleChange}
       onImageUpload={onImageUpload}
       onImageClear={onImageClear}
@@ -1425,7 +1414,6 @@ function ReferenceLibrary({
   importingSlots,
   imagePlaceholder,
   handlePlaceholder,
-  characterOptions,
   onHandleChange,
   onImageUpload,
   onImageClear,
@@ -1438,166 +1426,132 @@ function ReferenceLibrary({
   importingSlots?: Record<string, boolean>;
   imagePlaceholder: string;
   handlePlaceholder: string;
-  characterOptions?: Character[];
   onHandleChange: (slotIndex: number, handle: string) => void;
   onImageUpload: SlotUploadHandler;
   onImageClear: (slotIndex: number) => void;
   onImportCharacter?: (slotIndex: number, characterId: string) => Promise<void>;
 }) {
   const [characterPickerSlot, setCharacterPickerSlot] = useState<number | null>(null);
-  const characters = characterOptions ?? [];
 
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="p-4 pb-3">
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 p-4 pt-0">
-        {Array.from({ length: STORY_REFERENCE_SLOT_COUNT }, (_, slotIndex) => {
-          const slot = slots[slotIndex] ?? null;
-          const inputId = `${role}-story-reference-${slotIndex}`;
-          const isUploading = uploadingSlots[getSlotUploadKey(role, slotIndex)] ?? false;
-          const isImporting = importingSlots?.[getSlotUploadKey(role, slotIndex)] ?? false;
-          const isBusy = isUploading || isImporting;
-          const showCharacterImport = role === "character" && Boolean(onImportCharacter);
-          return (
-            <div key={slotIndex} className="rounded-lg border border-border/70 bg-background p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <Label htmlFor={`${inputId}-handle`} className="text-xs text-muted-foreground">
-                  슬롯 {slotIndex + 1}
-                </Label>
-                {slot?.handle ? (
-                  <Badge variant={role === "character" ? "default" : "secondary"}>@{slot.handle}</Badge>
-                ) : null}
-              </div>
-              <Input
-                id={`${inputId}-handle`}
-                value={slot?.handle ?? ""}
-                onChange={event => onHandleChange(slotIndex, event.target.value)}
-                placeholder={handlePlaceholder}
-                className="mb-3"
-              />
-              <div className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/30">
-                <div className="relative flex aspect-[4/3] items-center justify-center bg-background">
-                  {slot?.imageUrl ? (
-                    <img
-                      src={slot.imageUrl}
-                      alt={slot.handle || imagePlaceholder}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-                      <ImageIcon className="h-5 w-5" />
-                      <span>{imagePlaceholder}</span>
-                    </div>
-                  )}
-                  {isBusy ? (
-                    <div className="absolute flex flex-col items-center gap-2 rounded-md bg-background/80 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      <span>{isImporting ? "가져오는 중" : "저장 중"}</span>
-                    </div>
+    <>
+      <Card className="rounded-lg">
+        <CardHeader className="p-4 pb-3">
+          <CardTitle className="text-base">{title}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 p-4 pt-0">
+          {Array.from({ length: STORY_REFERENCE_SLOT_COUNT }, (_, slotIndex) => {
+            const slot = slots[slotIndex] ?? null;
+            const inputId = `${role}-story-reference-${slotIndex}`;
+            const isUploading = uploadingSlots[getSlotUploadKey(role, slotIndex)] ?? false;
+            const isImporting = importingSlots?.[getSlotUploadKey(role, slotIndex)] ?? false;
+            const isBusy = isUploading || isImporting;
+            const showCharacterImport = role === "character" && Boolean(onImportCharacter);
+            return (
+              <div key={slotIndex} className="rounded-lg border border-border/70 bg-background p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <Label htmlFor={`${inputId}-handle`} className="text-xs text-muted-foreground">
+                    슬롯 {slotIndex + 1}
+                  </Label>
+                  {slot?.handle ? (
+                    <Badge variant={role === "character" ? "default" : "secondary"}>@{slot.handle}</Badge>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2 border-t border-border/70 bg-card p-2">
-                  <input
-                    id={inputId}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={isBusy}
-                    onChange={event => onImageUpload(role, slotIndex, event)}
-                  />
-                  <Button
-                    asChild
-                    variant="outline"
-                    size="sm"
-                    className={cn("flex-1", isBusy && "pointer-events-none opacity-70")}
-                  >
-                    <label htmlFor={isBusy ? undefined : inputId} className="cursor-pointer" aria-disabled={isBusy}>
-                      {isUploading ? (
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Upload className="mr-1.5 h-3.5 w-3.5" />
-                      )}
-                      {isUploading ? "저장 중" : "업로드"}
-                    </label>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onImageClear(slotIndex)}
-                    disabled={!slot?.imageUrl || isBusy}
-                    aria-label={`${title} 슬롯 ${slotIndex + 1} 이미지 클리어`}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-                {showCharacterImport ? (
-                  <div className="space-y-2 border-t border-border/70 bg-card p-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      onClick={() =>
-                        setCharacterPickerSlot(current => (current === slotIndex ? null : slotIndex))
-                      }
-                      disabled={isBusy}
-                    >
-                      캐릭터 라이브러리에서
-                    </Button>
-                    {characterPickerSlot === slotIndex ? (
-                      <div className="rounded-md border border-border/70 bg-background p-2">
-                        {characters.length ? (
-                          <div className="grid max-h-60 grid-cols-2 gap-2 overflow-y-auto pr-1">
-                            {characters.map(character => {
-                              const imageUrl = character.thumbnailUrl || character.primaryImageUrl;
-                              return (
-                                <button
-                                  key={character.id}
-                                  type="button"
-                                  className="group min-w-0 rounded-md border border-border/70 bg-card text-left transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-60"
-                                  disabled={!character.primaryImageUrl || isBusy}
-                                  onClick={() => {
-                                    setCharacterPickerSlot(null);
-                                    void onImportCharacter?.(slotIndex, character.id);
-                                  }}
-                                >
-                                  <div className="relative aspect-square overflow-hidden rounded-t-md bg-muted">
-                                    {imageUrl ? (
-                                      <img
-                                        src={imageUrl}
-                                        alt={character.name}
-                                        className="h-full w-full object-cover transition group-hover:scale-105"
-                                      />
-                                    ) : (
-                                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                                        이미지 없음
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="space-y-0.5 p-2">
-                                    <p className="truncate text-xs font-medium text-foreground">{character.name}</p>
-                                    <p className="truncate text-[11px] text-muted-foreground">@{character.handle}</p>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="py-4 text-center text-xs text-muted-foreground">등록된 캐릭터가 없습니다.</p>
-                        )}
+                <Input
+                  id={`${inputId}-handle`}
+                  value={slot?.handle ?? ""}
+                  onChange={event => onHandleChange(slotIndex, event.target.value)}
+                  placeholder={handlePlaceholder}
+                  className="mb-3"
+                />
+                <div className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/30">
+                  <div className="relative flex aspect-[4/3] items-center justify-center bg-background">
+                    {slot?.imageUrl ? (
+                      <img
+                        src={slot.imageUrl}
+                        alt={slot.handle || imagePlaceholder}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
+                        <ImageIcon className="h-5 w-5" />
+                        <span>{imagePlaceholder}</span>
+                      </div>
+                    )}
+                    {isBusy ? (
+                      <div className="absolute flex flex-col items-center gap-2 rounded-md bg-background/80 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        <span>{isImporting ? "가져오는 중" : "저장 중"}</span>
                       </div>
                     ) : null}
                   </div>
-                ) : null}
+                  <div className="flex items-center gap-2 border-t border-border/70 bg-card p-2">
+                    <input
+                      id={inputId}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={isBusy}
+                      onChange={event => onImageUpload(role, slotIndex, event)}
+                    />
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className={cn("flex-1", isBusy && "pointer-events-none opacity-70")}
+                    >
+                      <label htmlFor={isBusy ? undefined : inputId} className="cursor-pointer" aria-disabled={isBusy}>
+                        {isUploading ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Upload className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        {isUploading ? "저장 중" : "업로드"}
+                      </label>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onImageClear(slotIndex)}
+                      disabled={!slot?.imageUrl || isBusy}
+                      aria-label={`${title} 슬롯 ${slotIndex + 1} 이미지 클리어`}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {showCharacterImport ? (
+                    <div className="border-t border-border/70 bg-card p-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => setCharacterPickerSlot(slotIndex)}
+                        disabled={isBusy}
+                      >
+                        캐릭터 라이브러리에서
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
+            );
+          })}
+        </CardContent>
+      </Card>
+      <CharacterPickerModal
+        isOpen={characterPickerSlot !== null}
+        onClose={() => setCharacterPickerSlot(null)}
+        onSelect={character => {
+          if (characterPickerSlot === null) {
+            return;
+          }
+          void onImportCharacter?.(characterPickerSlot, character.id);
+        }}
+        title="인물 선택"
+      />
+    </>
   );
 }
 
