@@ -65,7 +65,7 @@ export function ReferenceSlotGallery({
           참조 이미지가 5장 이상이면 생성 시간이 크게 늘 수 있습니다. 8장은 가능하지만 2분 이상 걸릴 수 있어요.
         </div>
       ) : null}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {slots.map(slot => (
           <ReferenceSlotCard
             key={slot.id}
