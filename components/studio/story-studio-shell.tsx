@@ -311,9 +311,9 @@ function buildFinalPrompt(
 
 function getSceneBoardGridClass(sceneTotal: number): string {
   if (sceneTotal === 1) {
-    return "mx-auto grid w-full max-w-3xl gap-4";
+    return "mx-auto grid w-full max-w-3xl grid-cols-1 gap-4";
   }
-  return "grid gap-4 md:grid-cols-2 2xl:grid-cols-3";
+  return "grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3";
 }
 
 function normalizeGeneratedImages(response: GenerateResponse, fallbackPrefix: string) {
@@ -1812,7 +1812,7 @@ function StoryPromptInput({
 
         <Button
           type="button"
-          className="w-full"
+          className="sticky bottom-20 z-20 w-full shadow-lg md:static md:shadow-none"
           onClick={onGenerate}
           disabled={Boolean(inputReason) || busy}
         >
