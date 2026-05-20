@@ -29,14 +29,20 @@ export function persistRecordsMerge(localRecords: GeneratedImageDocument[]): Gen
   if (typeof window === "undefined") return localRecords;
 
   let stored: GeneratedImageDocument[] = [];
+  let storedWasReadable = true;
   try {
     const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) stored = parsed as GeneratedImageDocument[];
+      if (Array.isArray(parsed)) {
+        stored = parsed as GeneratedImageDocument[];
+      } else {
+        storedWasReadable = false;
+      }
     }
   } catch {
     stored = [];
+    storedWasReadable = false;
   }
 
   const map = new Map<string, GeneratedImageDocument>();
@@ -49,6 +55,11 @@ export function persistRecordsMerge(localRecords: GeneratedImageDocument[]): Gen
     }
   }
   const merged = Array.from(map.values());
+  if (storedWasReadable && historyRecordsEqual(stored, merged)) {
+    return stored;
+  }
+
+  let persisted = merged;
   try {
     window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
     window.dispatchEvent(new Event(HISTORY_REFRESH_EVENT));
@@ -62,12 +73,15 @@ export function persistRecordsMerge(localRecords: GeneratedImageDocument[]): Gen
     });
     try {
       window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(compact));
-      window.dispatchEvent(new Event(HISTORY_REFRESH_EVENT));
+      persisted = compact;
+      if (!historyRecordsEqual(stored, compact)) {
+        window.dispatchEvent(new Event(HISTORY_REFRESH_EVENT));
+      }
     } catch (retryError) {
       console.warn("Failed to persist records even after trimming", retryError);
     }
   }
-  return merged;
+  return persisted;
 }
 
 // 특정 record를 삭제하고 모든 탭/컴포넌트에 반영.
@@ -130,6 +144,37 @@ function parseIsoDate(value?: string | number | null | any): number {
 
   console.warn('[parseIsoDate] Unable to parse timestamp:', typeof value, value);
   return 0;
+}
+
+function historyRecordsEqual(a: GeneratedImageDocument[], b: GeneratedImageDocument[]): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return stableStringify(a) === stableStringify(b);
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(normalizeForStableStringify(value));
+}
+
+function normalizeForStableStringify(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeForStableStringify);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  return Object.keys(record)
+    .sort()
+    .reduce<Record<string, unknown>>((normalized, key) => {
+      normalized[key] = normalizeForStableStringify(record[key]);
+      return normalized;
+    }, {});
 }
 
 export function mergeHistoryRecords(

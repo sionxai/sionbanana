@@ -71,6 +71,23 @@ function shallowEqual(a: GeneratedImageDocument[], b: GeneratedImageDocument[]) 
   return true;
 }
 
+function diskItemsEqual(a: DiskImageEntry[], b: DiskImageEntry[]) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].ext !== b[i].ext ||
+      a[i].bucket !== b[i].bucket ||
+      a[i].createdAtIso !== b[i].createdAtIso ||
+      a[i].size !== b[i].size
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function sortRecords(records: GeneratedImageDocument[]) {
   return [...records].sort((a, b) => {
     const aTime = Date.parse(a.createdAt || a.updatedAt || "");
@@ -149,7 +166,7 @@ export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
       setLoading(true);
       try {
         const next = await readDiskRecords(controller.signal);
-        setDiskItems(next);
+        setDiskItems(prev => (diskItemsEqual(prev, next) ? prev : next));
       } catch (error) {
         if (!controller.signal.aborted) {
           console.warn("[useGeneratedImages] Failed to read disk images", error);

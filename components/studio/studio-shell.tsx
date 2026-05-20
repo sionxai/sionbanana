@@ -607,7 +607,11 @@ function StudioShellInner() {
   }, [historyTagFilter, historyTagOptions]);
 
   useEffect(() => {
-    setLocalRecords(prev => prev.filter(item => !records.some(record => record.id === item.id)));
+    setLocalRecords(prev => {
+      const recordIds = new Set(records.map(record => record.id));
+      const next = prev.filter(item => !recordIds.has(item.id));
+      return next.length === prev.length ? prev : next;
+    });
   }, [records]);
 
   useEffect(() => {
