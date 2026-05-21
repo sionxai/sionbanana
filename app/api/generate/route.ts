@@ -12,7 +12,7 @@ import {
   type CodexImageOptions
 } from "@/lib/codex-fetch";
 import { CodexAuthError } from "@/lib/codex-oauth";
-import { saveImageBuffer, readImageById } from "@/lib/local/storage";
+import { saveImageBuffer, readImageById, saveImageMetadata, type ImageMetadata } from "@/lib/local/storage";
 
 const generationModes = [
   "create",
@@ -287,6 +287,15 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
       const id = generateId();
       const buffer = Buffer.from(img.b64, "base64");
       const saved = await saveImageBuffer(id, buffer, img.mimeType);
+      const bucket = saved.relativePath.split(/[\\/]/)[0];
+      const createdAtIso = new Date().toISOString();
+      await saveGeneratedImageMetadata({
+        id,
+        bucket,
+        payload,
+        image: img,
+        createdAtIso
+      });
       return {
         id,
         imageUrl: `/api/images/${id}`,
@@ -330,6 +339,50 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
       partial: errors.length > 0 ? errors : undefined
     }
   };
+}
+
+async function saveGeneratedImageMetadata({
+  id,
+  bucket,
+  payload,
+  image,
+  createdAtIso
+}: {
+  id: string;
+  bucket: string;
+  payload: GeneratePayload;
+  image: { revisedPrompt?: string };
+  createdAtIso: string;
+}): Promise<void> {
+  const metadata: ImageMetadata = {
+    rawPrompt: payload.prompt,
+    refinedPrompt: payload.refinedPrompt || image.revisedPrompt || undefined,
+    revisedPrompt: image.revisedPrompt,
+    model: "gpt-image-2",
+    mode: payload.mode,
+    createdAtIso,
+    negativePrompt: payload.negativePrompt || undefined,
+    camera: payload.camera,
+    aspectRatio: typeof payload.options?.aspectRatio === "string" ? payload.options.aspectRatio : undefined,
+    imageSize: typeof payload.options?.imageSize === "string" ? payload.options.imageSize : undefined,
+    quality: payload.options?.quality,
+    format: payload.options?.format,
+    moderation: payload.options?.moderation,
+    batchItemId: payload.options?.batchItemId,
+    batchItemName: payload.options?.batchItemName,
+    characterView: payload.options?.characterView,
+    characterViewLabel: payload.options?.characterViewLabel
+  };
+
+  try {
+    await saveImageMetadata(id, bucket, metadata);
+  } catch (error) {
+    console.warn(
+      "/api/generate image metadata sidecar save failed",
+      id,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
 }
 
 function generateErrorResult(error: unknown): GenerateResult {
