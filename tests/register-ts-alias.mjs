@@ -5,6 +5,13 @@ import { pathToFileURL } from "node:url";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "server-only") {
+      return {
+        url: "data:text/javascript,export {};",
+        shortCircuit: true
+      };
+    }
+
     if (!specifier.startsWith("@/")) {
       return nextResolve(specifier, context);
     }

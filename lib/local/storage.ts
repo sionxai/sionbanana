@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 const DEFAULT_DIR = "./data";
+const BUCKET_NAME_RE = /^[A-Za-z0-9_\-]+$/;
 
 export function getDataDir(): string {
   const fromEnv = process.env.SIONBANANA_DATA_DIR?.trim();
@@ -28,12 +29,68 @@ function monthBucket(date: Date = new Date()): string {
 
 const FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.(png|jpg|jpeg|webp)$/;
 
-function safeFileName(id: string, ext: string = "png"): string {
+function safeImageId(id: string): string {
   const cleaned = id.replace(/[^A-Za-z0-9_\-]/g, "");
   if (!cleaned) {
     throw new Error("Invalid image id");
   }
+  return cleaned;
+}
+
+function safeFileName(id: string, ext: string = "png"): string {
+  const cleaned = safeImageId(id);
   return `${cleaned}.${ext}`;
+}
+
+function safeBucketName(bucket: string): string {
+  if (!BUCKET_NAME_RE.test(bucket)) {
+    throw new Error("Invalid image bucket");
+  }
+  return bucket;
+}
+
+function compactMetadataValue(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map(item => compactMetadataValue(item))
+      .filter(item => item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    const compacted: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const nextValue = compactMetadataValue(nested);
+      if (nextValue !== undefined) {
+        compacted[key] = nextValue;
+      }
+    }
+    return compacted;
+  }
+  return value;
+}
+
+function compactImageMetadata(metadata: ImageMetadata): ImageMetadata {
+  const compacted = compactMetadataValue(metadata);
+  return compacted && typeof compacted === "object" && !Array.isArray(compacted)
+    ? (compacted as ImageMetadata)
+    : {};
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function readImageMetadataFromBucket(id: string, bucket: string): Promise<ImageMetadata | null> {
+  const cleaned = safeImageId(id);
+  const safeBucket = safeBucketName(bucket);
+  const candidate = path.join(imagesDir(), safeBucket, `${cleaned}.json`);
+  try {
+    const raw = await fs.readFile(candidate, "utf8");
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? (parsed as ImageMetadata) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveImageBuffer(
@@ -54,6 +111,57 @@ export async function saveImageBuffer(
     mimeType,
     bytes: buffer.byteLength
   };
+}
+
+export type ImageMetadata = {
+  rawPrompt?: string;
+  refinedPrompt?: string;
+  model?: string;
+  mode?: string;
+  createdAtIso?: string;
+  [key: string]: unknown;
+};
+
+export async function saveImageMetadata(
+  id: string,
+  bucket: string,
+  metadata: ImageMetadata
+): Promise<{ relativePath: string; absolutePath: string }> {
+  const cleaned = safeImageId(id);
+  const safeBucket = safeBucketName(bucket);
+  const dir = path.join(imagesDir(), safeBucket);
+  await fs.mkdir(dir, { recursive: true });
+  const absolutePath = path.join(dir, `${cleaned}.json`);
+  const payload = compactImageMetadata(metadata);
+  await fs.writeFile(absolutePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return {
+    relativePath: path.join(safeBucket, `${cleaned}.json`),
+    absolutePath
+  };
+}
+
+export async function readImageMetadata(id: string): Promise<ImageMetadata | null> {
+  let cleaned: string;
+  try {
+    cleaned = safeImageId(id);
+  } catch {
+    return null;
+  }
+
+  const root = imagesDir();
+  let buckets: string[];
+  try {
+    buckets = await fs.readdir(root);
+  } catch {
+    return null;
+  }
+
+  for (const bucket of buckets) {
+    if (!BUCKET_NAME_RE.test(bucket)) continue;
+    const metadata = await readImageMetadataFromBucket(cleaned, bucket);
+    if (metadata) return metadata;
+  }
+  return null;
 }
 
 export async function readImageById(
@@ -111,6 +219,12 @@ export async function deleteImageById(id: string): Promise<boolean> {
         // ignore missing
       }
     }
+    try {
+      await fs.unlink(path.join(root, bucket, `${cleaned}.json`));
+      removed = true;
+    } catch {
+      // ignore missing metadata
+    }
   }
   return removed;
 }
@@ -121,9 +235,14 @@ export type DiskImageEntry = {
   bucket: string;
   createdAtIso: string;
   size: number;
+  metadata?: ImageMetadata | null;
 };
 
-export async function listAllImages(): Promise<DiskImageEntry[]> {
+export type ListAllImagesOptions = {
+  includeMetadata?: boolean;
+};
+
+export async function listAllImages(options: ListAllImagesOptions = {}): Promise<DiskImageEntry[]> {
   const root = imagesDir();
   let buckets: string[];
   try {
@@ -148,13 +267,17 @@ export async function listAllImages(): Promise<DiskImageEntry[]> {
       try {
         const stat = await fs.stat(path.join(bucketDir, entry));
         if (!stat.isFile()) continue;
-        results.push({
+        const imageEntry: DiskImageEntry = {
           id,
           ext,
           bucket,
           createdAtIso: stat.mtime.toISOString(),
           size: stat.size
-        });
+        };
+        if (options.includeMetadata) {
+          imageEntry.metadata = await readImageMetadataFromBucket(id, bucket);
+        }
+        results.push(imageEntry);
       } catch {
         // ignore unreadable entries
       }
