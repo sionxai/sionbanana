@@ -544,20 +544,38 @@ function StudioShellInner() {
       try {
         const res = await fetch("/api/images");
         if (!res.ok) return;
-        const data = (await res.json()) as { ok?: boolean; items?: Array<{ id: string; ext: string; bucket: string; createdAtIso: string; size: number }> };
+        const data = (await res.json()) as {
+          ok?: boolean;
+          items?: Array<{
+            id: string;
+            ext: string;
+            bucket: string;
+            createdAtIso: string;
+            size: number;
+            promptMeta?: {
+              rawPrompt?: string;
+              refinedPrompt?: string;
+            };
+          }>;
+        };
         if (cancelled || !data.ok || !Array.isArray(data.items)) return;
         const uid = user?.uid ?? "local";
-        const fallbackRecords: GeneratedImageDocument[] = data.items.map(item => ({
-          id: item.id,
-          userId: uid,
-          mode: "create",
-          promptMeta: { rawPrompt: "", refinedPrompt: "" },
-          status: "completed",
-          imageUrl: `/api/images/${item.id}`,
-          model: "gpt-image-2",
-          createdAt: item.createdAtIso,
-          updatedAt: item.createdAtIso
-        }));
+        const fallbackRecords: GeneratedImageDocument[] = data.items.map(item => {
+          const rawPrompt = typeof item.promptMeta?.rawPrompt === "string" ? item.promptMeta.rawPrompt : "";
+          const refinedPrompt =
+            typeof item.promptMeta?.refinedPrompt === "string" ? item.promptMeta.refinedPrompt : "";
+          return {
+            id: item.id,
+            userId: uid,
+            mode: "create",
+            promptMeta: { rawPrompt, refinedPrompt },
+            status: "completed",
+            imageUrl: `/api/images/${item.id}`,
+            model: "gpt-image-2",
+            createdAt: item.createdAtIso,
+            updatedAt: item.createdAtIso
+          };
+        });
         setDiskRecords(fallbackRecords);
       } catch {
         // 디스크 스캔 실패는 silent — localStorage만으로도 동작

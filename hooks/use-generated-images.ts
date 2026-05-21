@@ -17,6 +17,10 @@ type DiskImageEntry = {
   bucket: string;
   createdAtIso: string;
   size: number;
+  promptMeta?: {
+    rawPrompt?: string;
+    refinedPrompt?: string;
+  };
 };
 
 function getLocalImageId(url?: string | null): string | null {
@@ -25,14 +29,21 @@ function getLocalImageId(url?: string | null): string | null {
 }
 
 function createDiskFallbackRecord(item: DiskImageEntry): GeneratedImageDocument {
+  const rawPrompt = item.promptMeta?.rawPrompt ?? "";
+  const refinedPrompt = item.promptMeta?.refinedPrompt ?? "";
+  const hasPrompt = rawPrompt.length > 0 || refinedPrompt.length > 0;
+  const fallbackPrompt = "디스크에서 복원된 이미지";
+
   return {
     id: item.id,
     userId: "local",
     mode: "create",
-    promptMeta: {
-      rawPrompt: "디스크에서 복원된 이미지",
-      refinedPrompt: "디스크에서 복원된 이미지"
-    },
+    promptMeta: hasPrompt
+      ? { rawPrompt, refinedPrompt }
+      : {
+          rawPrompt: fallbackPrompt,
+          refinedPrompt: fallbackPrompt
+        },
     status: "completed",
     imageUrl: `/api/images/${item.id}`,
     thumbnailUrl: `/api/images/${item.id}`,
@@ -80,7 +91,9 @@ function diskItemsEqual(a: DiskImageEntry[], b: DiskImageEntry[]) {
       a[i].ext !== b[i].ext ||
       a[i].bucket !== b[i].bucket ||
       a[i].createdAtIso !== b[i].createdAtIso ||
-      a[i].size !== b[i].size
+      a[i].size !== b[i].size ||
+      (a[i].promptMeta?.rawPrompt ?? "") !== (b[i].promptMeta?.rawPrompt ?? "") ||
+      (a[i].promptMeta?.refinedPrompt ?? "") !== (b[i].promptMeta?.refinedPrompt ?? "")
     ) {
       return false;
     }
