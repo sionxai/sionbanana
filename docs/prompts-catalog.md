@@ -10,6 +10,14 @@
 5. Cinematography (19)
 6. 외부 프리셋 (91)
 7. 합성 로직 (continuity / reference map / storyboard)
+8. 조명 (Lighting)
+9. 포즈 (Pose)
+10. 카메라 (Camera)
+11. 피사체/카메라 방향
+12. Aspect Ratio
+13. 날씨/대기/시간/톤앤매너
+14. 프리셋 배치 뷰 (presets-shell)
+부록. prompt 아님: 이미지 API 생성 옵션
 
 ## 1. 캐릭터
 
@@ -1240,4 +1248,2952 @@ LLM 응답 컷 수가 부족할 때 추가되는 retry user message.
 
 ```
 이전 응답의 컷 수가 요청한 ${body.sceneCount}개보다 적었습니다. 반드시 ${body.sceneCount}개 JSON 배열 항목만 반환하고 각 항목에 cinematography를 포함하세요.
+```
+
+## 8. 조명 (Lighting)
+
+출처: `components/studio/lighting-config.ts`, `components/prompt/storyboard-generator.tsx`
+
+### Lighting mode base prompt
+
+조명 모드에서 정체성/포즈/구도를 고정하고 조명·대기·시간대만 바꾸는 기본 지침.
+
+```
+High fidelity portrait of the supplied reference character. Maintain identical pose, styling, and composition while adjusting only the lighting mood, atmosphere, and time-of-day as instructed.
+```
+
+### 조명 · 광원 (12)
+
+#### soft-studio — 부드러운 스튜디오 조명
+
+설명: 조명 · 광원 프리셋.
+
+```
+Light the subject with soft, diffused studio key and fill for even highlights and gentle shadows.
+```
+
+#### rim-light — 림 라이트
+
+설명: 조명 · 광원 프리셋.
+
+```
+Add a focused rim light from behind to carve out the subject's silhouette with a crisp luminous edge.
+```
+
+#### volumetric-glow — 불륨메트릭 글로우
+
+설명: 조명 · 광원 프리셋.
+
+```
+Introduce atmospheric volumetric beams that glow through the air, emphasizing depth around the subject.
+```
+
+#### morning-sun — 자연광 아침햇살
+
+설명: 조명 · 광원 프리셋.
+
+```
+Simulate gentle morning sunlight entering at a low angle with warm highlights and soft bounce fill.
+```
+
+#### dramatic-spot — 드라마틱 스포트 라이트
+
+설명: 조명 · 광원 프리셋.
+
+```
+Spotlight the subject with a dramatic focused beam, letting surrounding areas fall into deeper shadow.
+```
+
+#### neon — 네온 조명
+
+설명: 조명 · 광원 프리셋.
+
+```
+Flood the scene with vibrant neon signage colors—electric magenta, cyan, and violet reflections.
+```
+
+#### candle — 촛불
+
+설명: 조명 · 광원 프리셋.
+
+```
+Illuminate with flickering candlelight for intimate, warm contrast and dancing highlights.
+```
+
+#### moonlight — 달빛
+
+설명: 조명 · 광원 프리셋.
+
+```
+Cast cool moonlight with silver-blue tones and long, soft-edged shadows.
+```
+
+#### golden-sunset — 황금 빛 석양
+
+설명: 조명 · 광원 프리셋.
+
+```
+Wrap the subject in golden hour sunset hues with radiant rim highlights and warm gradients.
+```
+
+#### harsh-noon — 강한 정오의 태양
+
+설명: 조명 · 광원 프리셋.
+
+```
+Blast strong overhead noon sunlight that creates crisp, high-contrast shadows.
+```
+
+#### backlit-silhouette — 역광 실루엣
+
+설명: 조명 · 광원 프리셋.
+
+```
+Position a bright backlight to create a dramatic silhouette with a halo glow around the subject.
+```
+
+#### gentle-natural — 은은한 자연광
+
+설명: 조명 · 광원 프리셋.
+
+```
+Use gentle natural window light with subtle bounce fill for a calm, airy ambience.
+```
+
+### 날씨 · 대기 (14)
+
+#### clear-sky — 맑은 하늘
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Place the subject under a crystal clear sky with bright, clean ambient illumination.
+```
+
+#### overcast — 흐린
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Diffuse the lighting with an overcast sky for soft, shadowless tonality.
+```
+
+#### rainy — 비오는
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Add rainy weather with damp reflections, raindrops, and subtle motion streaks.
+```
+
+#### foggy — 안개낀
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Fill the scene with low-lying fog that softens depth and desaturates distant elements.
+```
+
+#### bright-sunny — 화창한
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Create a radiant sunny atmosphere with cheerful, luminous ambient light.
+```
+
+#### snowy — 눈오는
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Introduce falling snowflakes, frosty air, and cool-white reflections.
+```
+
+#### sunshower — 연우
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Blend gentle rainfall with passing sunlight for sparkling droplets in the air.
+```
+
+#### storm — 폭풍우
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Surround the scene with heavy storm clouds, wind, and distant lightning flashes.
+```
+
+#### dusty — 먼지날리는
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Add drifting dust motes and warm haze that catch the light.
+```
+
+#### smog — 스모그
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Layer dense smog that mutes colors and blurs distant shapes.
+```
+
+#### aurora — 오로라
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Paint the sky with a vibrant aurora curtain casting ethereal colored light.
+```
+
+#### dense-fog — 안개자욱한
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Envelop the subject in thick fog that obscures the background and softens silhouettes.
+```
+
+#### sandstorm — 모래폭풍
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Whip up a desert sandstorm with swirling grit and golden, diffused light.
+```
+
+#### hazy — 흐릿한
+
+설명: 날씨 · 대기 프리셋.
+
+```
+Introduce a gentle atmospheric haze that slightly blurs and desaturates the scene.
+```
+
+### 시간대 (14)
+
+#### golden-hour — 골든아워
+
+설명: 시간대 프리셋.
+
+```
+Set the lighting to golden hour with low sun and rich amber highlights.
+```
+
+#### blue-hour — 블루아워
+
+설명: 시간대 프리셋.
+
+```
+Shift into blue hour twilight with cool, cinematic tones.
+```
+
+#### sunrise — 일출
+
+설명: 시간대 프리셋.
+
+```
+Capture the moment of sunrise with glowing horizon light and fresh warmth.
+```
+
+#### sunset — 일몰
+
+설명: 시간대 프리셋.
+
+```
+Paint the sky with saturated sunset gradients and lingering warmth.
+```
+
+#### noon — 정오
+
+설명: 시간대 프리셋.
+
+```
+Illuminate the scene with bright, neutral midday sunlight.
+```
+
+#### night — 야간
+
+설명: 시간대 프리셋.
+
+```
+Set a night-time mood with deep shadows and selective highlights.
+```
+
+#### dawn — 새벽
+
+설명: 시간대 프리셋.
+
+```
+Use pre-dawn light with cool, pastel tones and gentle contrast.
+```
+
+#### early-morning — 이른 아침
+
+설명: 시간대 프리셋.
+
+```
+Depict early morning freshness with crisp air and tender light.
+```
+
+#### late-afternoon — 늦은 오후
+
+설명: 시간대 프리셋.
+
+```
+Use late afternoon sun with elongated shadows and mellow warmth.
+```
+
+#### dusk — 황혼
+
+설명: 시간대 프리셋.
+
+```
+Transition into dusk with fading light and muted color saturation.
+```
+
+#### midnight — 자정
+
+설명: 시간대 프리셋.
+
+```
+Shift to midnight darkness with subtle ambient spill and star-lit accents.
+```
+
+#### magic-hour — 매직아워
+
+설명: 시간대 프리셋.
+
+```
+Blend warm and cool tones for a cinematic magic-hour glow.
+```
+
+#### witching-hour — 마녀의 시간
+
+설명: 시간대 프리셋.
+
+```
+Evoke the witching hour with mysterious moonlit contrast and long shadows.
+```
+
+#### sundown — 해질녘
+
+설명: 시간대 프리셋.
+
+```
+Capture the quiet of sundown with fading light and tranquil atmosphere.
+```
+
+### 영화적 색감 (5)
+
+설명: 블록버스터와 영화 스타일의 컬러그레이딩
+
+#### teal-orange — 틸 & 오렌지
+
+설명: 영화적 색감 프리셋.
+
+```
+[기준이미지], cinematic teal & orange grade, warm skin tones vs cool background, modern blockbuster LUT style
+```
+
+#### bleach-bypass — 블리치 바이패스
+
+설명: 영화적 색감 프리셋.
+
+```
+[기준이미지], bleach bypass look, desaturated colors, high contrast, metallic rough texture, war thriller documentary realism
+```
+
+#### golden-hour-grade — 골든아워 그레이딩
+
+설명: 영화적 색감 프리셋.
+
+```
+[기준이미지], golden-hour warm grade, romantic sunset mood, amber orange highlights, soft bloom
+```
+
+#### day-for-night — 낮을 밤처럼
+
+설명: 영화적 색감 프리셋.
+
+```
+[기준이미지], day-for-night blue cast, cool shift blue tint, desaturated moonlight simulation
+```
+
+#### technicolor — 테크니컬러
+
+설명: 영화적 색감 프리셋.
+
+```
+[기준이미지], technicolor 3-strip emulation, vivid primary colors, classic theater cinema feel
+```
+
+### 예술적 색감 (4)
+
+설명: 독창적이고 예술적인 컬러 스타일
+
+#### pastel-tone — 파스텔 톤
+
+설명: 예술적 색감 프리셋.
+
+```
+[기준이미지], soft pastel grade, gentle dreamy colors, low contrast, romantic drama tone
+```
+
+#### monochromatic-red — 모노크롬 (레드)
+
+설명: 예술적 색감 프리셋.
+
+```
+[기준이미지], monochromatic grade in red, single color scheme, artistic minimal look
+```
+
+#### sepia-vintage — 세피아 / 빈티지
+
+설명: 예술적 색감 프리셋.
+
+```
+[기준이미지], vintage sepia film look, nostalgic brown tint, film grain, classic period drama
+```
+
+#### cross-processing — 크로스 프로세싱
+
+설명: 예술적 색감 프리셋.
+
+```
+[기준이미지], cross-processed film look, unusual color shifts, green cyan cast, fashion art style
+```
+
+### 색조 조화 (6)
+
+설명: 색상 이론 기반의 조화로운 배색
+
+#### complementary — 보색 조화
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], complementary scheme, dramatic color contrast, strong visual impact, action thriller
+```
+
+#### analogous — 유사색 조화
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], analogous harmony using adjacent colors, natural soft mood, pastoral serene feeling
+```
+
+#### triadic — 삼색 조화
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], triadic harmony with 120° spaced colors, vibrant lively world, fantasy family film
+```
+
+#### split-complementary — 분할 보색
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], split-complementary scheme, balanced tension with soft contrast, mystery comedy balance
+```
+
+#### tetradic — 테트라딕 (사각)
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], tetradic scheme with double complementary pairs, rich complex color spectrum, musical blockbuster
+```
+
+#### duotone — 듀오톤
+
+설명: 색조 조화 프리셋.
+
+```
+[기준이미지], duotone style, graphic music video aesthetic, two-color mapping, art promotional look
+```
+
+### 무드 연출 (3)
+
+설명: 분위기와 감정을 강조하는 톤
+
+#### high-key — 하이키
+
+설명: 무드 연출 프리셋.
+
+```
+[기준이미지], high-key bright airy grade, cheerful uplifting mood, romantic advertising style
+```
+
+#### low-key — 로우키
+
+설명: 무드 연출 프리셋.
+
+```
+[기준이미지], low-key moody grade, dark dense atmosphere, thriller noir tension
+```
+
+#### cyberpunk-neon — 사이버펑크 네온
+
+설명: 무드 연출 프리셋.
+
+```
+[기준이미지], neon magenta–cyan cyberpunk grade, futuristic city mood, high saturation neon reflections
+```
+
+### Sora Lighting Options (7)
+
+출처: `components/prompt/storyboard-generator.tsx`의 `LIGHTING_OPTIONS`.
+
+#### auto — 자동
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+auto
+```
+
+#### none — 없음
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+none
+```
+
+#### single hard spotlight + soft fill — single hard spotlight + soft fill
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+single hard spotlight + soft fill
+```
+
+#### backlight + volumetric fog — backlight + volumetric fog
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+backlight + volumetric fog
+```
+
+#### soft key + practicals; low haze — soft key + practicals; low haze
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+soft key + practicals; low haze
+```
+
+#### overcast softbox look — overcast softbox look
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+overcast softbox look
+```
+
+#### hard noon sun; deep shadows — hard noon sun; deep shadows
+
+설명: Sora 상세 옵션의 Lighting & Atmosphere 값.
+
+```
+hard noon sun; deep shadows
+```
+
+## 9. 포즈 (Pose)
+
+출처: `components/studio/pose-config.ts`
+
+### Pose mode base prompt
+
+포즈 모드에서 정체성/의상/카메라/장면을 고정하고 포즈·표정만 바꾸는 기본 지침.
+
+```
+High fidelity portrait of the supplied reference subject. Maintain the same identity, outfit, camera framing, and scene while adjusting only the body pose and facial expression as instructed.
+```
+
+### 표정 · 감정 (19)
+
+#### default — 기본값
+
+설명: 표정 · 감정 프리셋.
+
+```
+(default: no additional pose prompt)
+```
+
+#### smile-bright — 웃음
+
+설명: 표정 · 감정 프리셋.
+
+```
+Lift the cheeks into a bright smile with sparkling eyes and joyful energy.
+```
+
+#### serious — 진지한 표정
+
+설명: 표정 · 감정 프리셋.
+
+```
+Relax the mouth and focus the gaze for a composed, serious expression.
+```
+
+#### laughing — 웃음 (활짝)
+
+설명: 표정 · 감정 프리셋.
+
+```
+Open the mouth slightly with visible teeth and laughing eyes for an exuberant laugh.
+```
+
+#### surprised — 놀란
+
+설명: 표정 · 감정 프리셋.
+
+```
+Widen the eyes and part the lips to convey a natural look of surprise.
+```
+
+#### confident — 자신감
+
+설명: 표정 · 감정 프리셋.
+
+```
+Add a subtle confident smirk with lifted chin and steady gaze.
+```
+
+#### shy — 수줍음
+
+설명: 표정 · 감정 프리셋.
+
+```
+Soften the eyes, tilt the head slightly, and show a gentle closed-lip smile for a shy mood.
+```
+
+#### thoughtful — 사색적인
+
+설명: 표정 · 감정 프리셋.
+
+```
+Relax facial muscles into a contemplative, introspective expression.
+```
+
+#### peaceful — 평화로운
+
+설명: 표정 · 감정 프리셋.
+
+```
+Present a serene, calm face with relaxed eyelids and a faint content smile.
+```
+
+#### sorrow — 서러움
+
+설명: 표정 · 감정 프리셋.
+
+```
+Lower the eyebrows slightly and soften the lips to suggest quiet sorrow.
+```
+
+#### crying — 엉엉 우는
+
+설명: 표정 · 감정 프리셋.
+
+```
+Add teary eyes, trembling lips, and expressive brows for open crying.
+```
+
+#### subtle-smile — 미묘한 미소
+
+설명: 표정 · 감정 프리셋.
+
+```
+Create a delicate, barely-there smile with gentle warmth in the eyes.
+```
+
+#### blank — 멍한 표정
+
+설명: 표정 · 감정 프리셋.
+
+```
+Loosen the facial muscles into an absent-minded, spaced-out stare.
+```
+
+#### playful — 장난스러운
+
+설명: 표정 · 감정 프리셋.
+
+```
+Raise one eyebrow and form a mischievous grin for a playful expression.
+```
+
+#### angry — 화난
+
+설명: 표정 · 감정 프리셋.
+
+```
+Knit the brows, narrow the eyes, and tighten the jaw for a controlled anger.
+```
+
+#### afraid — 두려워하는
+
+설명: 표정 · 감정 프리셋.
+
+```
+Widen the eyes and tense the lips to communicate fear or anxiety.
+```
+
+#### ecstatic — 황홀한
+
+설명: 표정 · 감정 프리셋.
+
+```
+Brighten the face with awe-struck eyes and radiant excitement.
+```
+
+#### meditative — 명상적인
+
+설명: 표정 · 감정 프리셋.
+
+```
+Show a meditative calm with closed or half-lidded eyes and peaceful breathing.
+```
+
+#### resolute — 결연한
+
+설명: 표정 · 감정 프리셋.
+
+```
+Set the jaw and fix the gaze forward with determined resolve.
+```
+
+### 포즈 · 자세 (22)
+
+#### default — 기본값
+
+설명: 포즈 · 자세 프리셋.
+
+```
+(default: no additional pose prompt)
+```
+
+#### standing — 서있는 자세
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Keep the character standing upright with balanced weight and relaxed shoulders.
+```
+
+#### sitting — 앉은 자세
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Seat the subject comfortably with natural posture and aligned spine.
+```
+
+#### walking — 걷는 중
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Pose the body mid-step with gentle arm swing to show natural walking motion.
+```
+
+#### running — 뛰는 중
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Capture an energetic running stride with dynamic arm and leg extension.
+```
+
+#### jumping — 점프하는 중
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Freeze the subject mid-jump with expressive limbs and sense of lift.
+```
+
+#### leaning — 기댄 자세
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Lean the character against a surface with relaxed weight support.
+```
+
+#### hands-hips — 허리에 손
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Place both hands on the hips to show confident emphasis in posture.
+```
+
+#### arms-crossed — 팔짱
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Cross the arms across the chest for a guarded, composed stance.
+```
+
+#### dynamic-action — 역동적 액션포즈
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Create a full-body action pose with dramatic motion and strong silhouette.
+```
+
+#### s-curve — S커브 포즈
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Shape the body with an elegant S-curve and graceful weight shift.
+```
+
+#### power — 파워포즈
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Adopt a heroic power pose with squared shoulders and stable stance.
+```
+
+#### resting — 휴식포즈
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Relax the limbs and posture to suggest a comfortable resting position.
+```
+
+#### lying — 누워있는
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Lay the subject down with natural limb placement and relaxed expression.
+```
+
+#### crouched — 웅크린
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Pose the character crouching low with tucked limbs and balanced center.
+```
+
+#### falling — 넘어짐
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Depict the body mid-fall with dynamic motion and surprised balance.
+```
+
+#### prone — 업드림
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Place the subject prone on the ground with forearms supporting.
+```
+
+#### waving — 손 흔들기
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Raise one arm in a friendly wave with open hand gesture.
+```
+
+#### jumping-joy — 기쁨에 뛰기
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Show joyful jumping with arms lifted and knees bent mid-air.
+```
+
+#### thinking — 생각하는 포즈
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Pose the subject in a reflective stance with hand near chin.
+```
+
+#### reach-out — 손 내밀기
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Extend one hand forward invitingly while keeping posture balanced.
+```
+
+#### dancing — 춤추는 동작
+
+설명: 포즈 · 자세 프리셋.
+
+```
+Capture a dance motion with fluid limbs and rhythmic movement.
+```
+
+## 10. 카메라 (Camera)
+
+출처: `components/studio/prompt-panel.tsx`, `components/studio/camera-config.ts`, `lib/camera.ts`
+
+### Camera directives / negative guard
+
+#### CAMERA_MODE_BASE_PROMPT — 카메라 모드 기본 prompt
+
+설명: camera-config에서 합성에 사용하는 고정 문장.
+
+```
+Cinematic capture of the supplied scene. Preserve the exact subject, outfit, pose, facial expression, lighting, and background environment. Only adjust camera movement, framing, and focal length to realize the requested shot.
+```
+
+#### CAMERA_MODE_PROMPT_GUIDELINE — 배경/포즈 유지 지침
+
+설명: camera-config에서 합성에 사용하는 고정 문장.
+
+```
+Keep the original background and subject pose unchanged. Move the camera instead of repositioning or reposing the subject, and avoid replacing the scene with abstract or blank backdrops.
+```
+
+#### CAMERA_MODE_NEGATIVE_GUARD — 카메라 모드 negative guard
+
+설명: camera-config에서 합성에 사용하는 고정 문장.
+
+```
+empty background, plain white background, blank backdrop, white void, isolated subject, cutout silhouette, studio cyclorama, different facial expression, changed expression, new pose, different pose, rotated subject, replaced subject, missing background
+```
+
+#### CAMERA_MODE_DEFAULT_DIRECTIVE — 기본 카메라 directive
+
+설명: camera-config에서 합성에 사용하는 고정 문장.
+
+```
+Use the default camera angle. Position the camera directly in front of the subject. Keep the subject facing forward. Maintain a neutral zoom level.
+```
+
+### Angle Options (9)
+
+#### default — 기본값
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: default
+prompt: Use the default camera angle. Position the camera directly in front of the subject. Keep the subject facing forward. Maintain a neutral zoom level.
+```
+
+#### 로우앵글 — 로우앵글
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 로우앵글
+prompt: Position camera low, shooting upward for a dramatic low-angle perspective.
+```
+
+#### 웜즈아이 — 웜즈아이
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 웜즈아이
+prompt: Use an extreme close-up worm's eye view from ground level looking up.
+```
+
+#### 하이앵글 — 하이앵글
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 하이앵글
+prompt: Elevate camera high above subject for a commanding high-angle view.
+```
+
+#### 버드아이 — 버드아이
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 버드아이
+prompt: Shoot from bird's eye view directly overhead for aerial perspective.
+```
+
+#### 더치앵글 — 더치앵글
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 더치앵글
+prompt: Tilt camera at an angle to create dynamic, off-kilter Dutch angle composition.
+```
+
+#### 아이레벨 — 아이레벨
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 아이레벨
+prompt: Position camera at eye level for natural, direct perspective.
+```
+
+#### 반대방향 — 반대방향
+
+설명: 카메라 앵글 옵션과 실제 합성 prompt.
+
+```
+value: 반대방향
+prompt: Position camera behind or to the opposite side of the subject.
+```
+
+#### 오버숄더 — 오버숄더
+
+설명: UI에는 존재하지만 camera-config의 anglePrompts에는 별도 영문 합성문이 없음.
+
+```
+value: 오버숄더
+prompt: (no camera-config mapping)
+```
+
+### Zoom Options (14)
+
+#### default — 기본값
+
+설명: 기본값 분기: 별도 zoom prompt를 추가하지 않음.
+
+```
+value: default
+prompt: (default: no additional zoom prompt)
+```
+
+#### 줌인 — 줌인
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 줌인
+prompt: Move closer for tighter framing and more intimate composition.
+```
+
+#### 줌아웃 — 줌아웃
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 줌아웃
+prompt: Pull back for wider framing showing more environment.
+```
+
+#### 확대 — 확대
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 확대
+prompt: Use telephoto lens for compressed perspective and background isolation.
+```
+
+#### 익스트림 롱샷 — 익스트림 롱샷 (ELS)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 익스트림 롱샷
+prompt: Use an extreme long shot / ELS where the subject appears very small against a vast, dominant environment, emphasizing location, era, scale, or isolation.
+```
+
+#### 롱샷 / 와이드샷 — 롱샷/와이드샷
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 롱샷 / 와이드샷
+prompt: Use a long shot / wide shot showing the full body and broad surrounding space to clarify the relationship between the subject and environment.
+```
+
+#### 풀샷 — 풀샷 (FS)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 풀샷
+prompt: Use a full shot / FS framing the subject from head to toe, clearly showing posture, wardrobe, and body movement.
+```
+
+#### 니샷 — 니샷 (KS)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 니샷
+prompt: Use a knee shot / KS framing the subject from the knees upward, balancing body movement with facial expression.
+```
+
+#### 미디엄 롱샷 — 미디엄 롱샷 (MLS)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 미디엄 롱샷
+prompt: Use a medium long shot / MLS framing from the thighs or knees upward, balancing dialogue and physical action.
+```
+
+#### 미디엄샷 — 미디엄샷 (MS)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 미디엄샷
+prompt: Use a medium shot / MS framing from the waist upward, suitable for dialogue, interview, or explanatory scenes.
+```
+
+#### 미디엄 클로즈업 — 미디엄 클로즈업 (MCU)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 미디엄 클로즈업
+prompt: Use a medium close-up / MCU framing from the chest or upper torso upward, emphasizing facial expression and spoken emotion.
+```
+
+#### 클로즈업 — 클로즈업 (CU)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 클로즈업
+prompt: Use a close-up / CU centered on the full face, emphasizing emotion, reaction, and immersion.
+```
+
+#### 빅 클로즈업 — 빅 클로즈업 (BCU)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 빅 클로즈업
+prompt: Use a big close-up / BCU filling the frame with part of the face, emphasizing tension, tears, or subtle micro-emotions.
+```
+
+#### 익스트림 클로즈업 — 익스트림 클로즈업 (ECU)
+
+설명: 샷 사이즈/줌 옵션과 실제 합성 prompt.
+
+```
+value: 익스트림 클로즈업
+prompt: Use an extreme close-up / ECU isolating only the eyes, mouth, hands, or a small object detail to emphasize clues, unease, symbolism, or fine texture.
+```
+
+### Aperture Marks (7)
+
+#### 0 — 기본값
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 0
+label: 기본값
+prompt: (default: no aperture prompt)
+```
+
+#### 12 — f1.2
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 12
+label: f1.2
+prompt: Use wide aperture for shallow depth of field and bokeh effect.
+```
+
+#### 28 — f2.8
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 28
+label: f2.8
+prompt: Use wide aperture for shallow depth of field and bokeh effect.
+```
+
+#### 56 — f5.6
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 56
+label: f5.6
+prompt: Use wide aperture for shallow depth of field and bokeh effect.
+```
+
+#### 110 — f11
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 110
+label: f11
+prompt: Use narrow aperture for deep focus and sharp background detail.
+```
+
+#### 160 — f16
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 160
+label: f16
+prompt: Use narrow aperture for deep focus and sharp background detail.
+```
+
+#### 220 — f22
+
+설명: 조리개 슬라이더 mark와 formatAperture 결과.
+
+```
+raw: 220
+label: f22
+prompt: Use narrow aperture for deep focus and sharp background detail.
+```
+
+## 11. 피사체/카메라 방향
+
+출처: `components/studio/prompt-panel.tsx`, `components/studio/camera-config.ts`
+
+### Subject Direction Options (7)
+
+#### default — 기본값
+
+설명: 기본값 분기: 별도 subject direction prompt를 추가하지 않음.
+
+```
+value: default
+prompt: (default: no additional subject direction prompt)
+```
+
+#### 정면 — 정면
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 정면
+prompt: Subject faces forward directly toward camera.
+```
+
+#### 좌측면 — 좌측면
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 좌측면
+prompt: Subject turns to show left profile to camera.
+```
+
+#### 우측면 — 우측면
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 우측면
+prompt: Subject turns to show right profile to camera.
+```
+
+#### 후면 — 후면
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 후면
+prompt: Subject turns away showing back to camera.
+```
+
+#### 위에서 — 위에서
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 위에서
+prompt: Subject looks upward toward sky or ceiling.
+```
+
+#### 아래에서 — 아래에서
+
+설명: 피사체가 어느 방향을 향하는지 지정하는 prompt.
+
+```
+value: 아래에서
+prompt: Subject looks downward toward ground or floor.
+```
+
+### Camera Direction Options (7)
+
+#### default — 기본값
+
+설명: 기본값 분기: 별도 camera direction prompt를 추가하지 않음.
+
+```
+value: default
+prompt: (default: no additional camera direction prompt)
+```
+
+#### 정면 — 정면
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 정면
+prompt: Position camera directly in front of subject.
+```
+
+#### 좌측면 — 좌측면
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 좌측면
+prompt: Position camera to left side of subject.
+```
+
+#### 우측면 — 우측면
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 우측면
+prompt: Position camera to right side of subject.
+```
+
+#### 후면 — 후면
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 후면
+prompt: Position camera behind subject for rear view.
+```
+
+#### 위에서 — 위에서
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 위에서
+prompt: Elevate camera above subject looking down.
+```
+
+#### 아래에서 — 아래에서
+
+설명: 카메라가 피사체를 어느 방향에서 보는지 지정하는 prompt.
+
+```
+value: 아래에서
+prompt: Lower camera below subject looking up.
+```
+
+## 12. Aspect Ratio
+
+출처: `lib/aspect.ts`, `components/studio/blocks/aspect-ratio-selector.tsx`
+
+prompt 합성은 `describeAspectRatioForPrompt`가 담당하고, API 요청 크기 보조값은 `getAspectRatioDimensions`가 `targetLongSide = 1536` 기준으로 계산합니다.
+
+#### original — 원본 그대로
+
+설명: 비율 프리셋, prompt 설명, 1536 long-side 기준 dimension 계산값.
+
+```
+value: original
+label: 원본 그대로
+promptDescription: null (original/default)
+dimensions: null (original/default)
+```
+
+#### 16:9 — 16:9
+
+설명: 비율 프리셋, prompt 설명, 1536 long-side 기준 dimension 계산값.
+
+```
+value: 16:9
+label: 16:9
+promptDescription: wide cinematic 16:9 composition
+dimensions: 1536x864
+```
+
+#### 9:16 — 9:16
+
+설명: 비율 프리셋, prompt 설명, 1536 long-side 기준 dimension 계산값.
+
+```
+value: 9:16
+label: 9:16
+promptDescription: vertical 9:16 poster composition
+dimensions: 864x1536
+```
+
+#### 1:1 — 1:1
+
+설명: 비율 프리셋, prompt 설명, 1536 long-side 기준 dimension 계산값.
+
+```
+value: 1:1
+label: 1:1
+promptDescription: balanced square 1:1 composition
+dimensions: 1536x1536
+```
+
+#### 4:3 — 4:3
+
+설명: 비율 프리셋, prompt 설명, 1536 long-side 기준 dimension 계산값.
+
+```
+value: 4:3
+label: 4:3
+promptDescription: classic 4:3 photographic composition
+dimensions: 1536x1152
+```
+
+## 13. 날씨/대기/시간/톤앤매너
+
+출처: `components/studio/lighting-config.ts`, `components/prompt/storyboard-generator.tsx`, `data/storyboard-styles.ts`
+
+아래 `LIGHTING_PRESET_GROUPS`의 날씨/시간/톤앤매너 항목은 8장 조명 섹션과 같은 원본 값을 재분류한 것입니다. 누락 방지를 위해 실제 prompt 값을 다시 기재합니다.
+
+### 날씨 · 대기 (14)
+
+#### clear-sky — 맑은 하늘
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Place the subject under a crystal clear sky with bright, clean ambient illumination.
+```
+
+#### overcast — 흐린
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Diffuse the lighting with an overcast sky for soft, shadowless tonality.
+```
+
+#### rainy — 비오는
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Add rainy weather with damp reflections, raindrops, and subtle motion streaks.
+```
+
+#### foggy — 안개낀
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Fill the scene with low-lying fog that softens depth and desaturates distant elements.
+```
+
+#### bright-sunny — 화창한
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Create a radiant sunny atmosphere with cheerful, luminous ambient light.
+```
+
+#### snowy — 눈오는
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Introduce falling snowflakes, frosty air, and cool-white reflections.
+```
+
+#### sunshower — 연우
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Blend gentle rainfall with passing sunlight for sparkling droplets in the air.
+```
+
+#### storm — 폭풍우
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Surround the scene with heavy storm clouds, wind, and distant lightning flashes.
+```
+
+#### dusty — 먼지날리는
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Add drifting dust motes and warm haze that catch the light.
+```
+
+#### smog — 스모그
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Layer dense smog that mutes colors and blurs distant shapes.
+```
+
+#### aurora — 오로라
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Paint the sky with a vibrant aurora curtain casting ethereal colored light.
+```
+
+#### dense-fog — 안개자욱한
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Envelop the subject in thick fog that obscures the background and softens silhouettes.
+```
+
+#### sandstorm — 모래폭풍
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Whip up a desert sandstorm with swirling grit and golden, diffused light.
+```
+
+#### hazy — 흐릿한
+
+설명: 날씨 · 대기 재분류 항목.
+
+```
+Introduce a gentle atmospheric haze that slightly blurs and desaturates the scene.
+```
+
+### 시간대 (14)
+
+#### golden-hour — 골든아워
+
+설명: 시간대 재분류 항목.
+
+```
+Set the lighting to golden hour with low sun and rich amber highlights.
+```
+
+#### blue-hour — 블루아워
+
+설명: 시간대 재분류 항목.
+
+```
+Shift into blue hour twilight with cool, cinematic tones.
+```
+
+#### sunrise — 일출
+
+설명: 시간대 재분류 항목.
+
+```
+Capture the moment of sunrise with glowing horizon light and fresh warmth.
+```
+
+#### sunset — 일몰
+
+설명: 시간대 재분류 항목.
+
+```
+Paint the sky with saturated sunset gradients and lingering warmth.
+```
+
+#### noon — 정오
+
+설명: 시간대 재분류 항목.
+
+```
+Illuminate the scene with bright, neutral midday sunlight.
+```
+
+#### night — 야간
+
+설명: 시간대 재분류 항목.
+
+```
+Set a night-time mood with deep shadows and selective highlights.
+```
+
+#### dawn — 새벽
+
+설명: 시간대 재분류 항목.
+
+```
+Use pre-dawn light with cool, pastel tones and gentle contrast.
+```
+
+#### early-morning — 이른 아침
+
+설명: 시간대 재분류 항목.
+
+```
+Depict early morning freshness with crisp air and tender light.
+```
+
+#### late-afternoon — 늦은 오후
+
+설명: 시간대 재분류 항목.
+
+```
+Use late afternoon sun with elongated shadows and mellow warmth.
+```
+
+#### dusk — 황혼
+
+설명: 시간대 재분류 항목.
+
+```
+Transition into dusk with fading light and muted color saturation.
+```
+
+#### midnight — 자정
+
+설명: 시간대 재분류 항목.
+
+```
+Shift to midnight darkness with subtle ambient spill and star-lit accents.
+```
+
+#### magic-hour — 매직아워
+
+설명: 시간대 재분류 항목.
+
+```
+Blend warm and cool tones for a cinematic magic-hour glow.
+```
+
+#### witching-hour — 마녀의 시간
+
+설명: 시간대 재분류 항목.
+
+```
+Evoke the witching hour with mysterious moonlit contrast and long shadows.
+```
+
+#### sundown — 해질녘
+
+설명: 시간대 재분류 항목.
+
+```
+Capture the quiet of sundown with fading light and tranquil atmosphere.
+```
+
+### 영화적 색감 (5)
+
+설명: 블록버스터와 영화 스타일의 컬러그레이딩
+
+#### teal-orange — 틸 & 오렌지
+
+설명: 영화적 색감 재분류 항목.
+
+```
+[기준이미지], cinematic teal & orange grade, warm skin tones vs cool background, modern blockbuster LUT style
+```
+
+#### bleach-bypass — 블리치 바이패스
+
+설명: 영화적 색감 재분류 항목.
+
+```
+[기준이미지], bleach bypass look, desaturated colors, high contrast, metallic rough texture, war thriller documentary realism
+```
+
+#### golden-hour-grade — 골든아워 그레이딩
+
+설명: 영화적 색감 재분류 항목.
+
+```
+[기준이미지], golden-hour warm grade, romantic sunset mood, amber orange highlights, soft bloom
+```
+
+#### day-for-night — 낮을 밤처럼
+
+설명: 영화적 색감 재분류 항목.
+
+```
+[기준이미지], day-for-night blue cast, cool shift blue tint, desaturated moonlight simulation
+```
+
+#### technicolor — 테크니컬러
+
+설명: 영화적 색감 재분류 항목.
+
+```
+[기준이미지], technicolor 3-strip emulation, vivid primary colors, classic theater cinema feel
+```
+
+### 예술적 색감 (4)
+
+설명: 독창적이고 예술적인 컬러 스타일
+
+#### pastel-tone — 파스텔 톤
+
+설명: 예술적 색감 재분류 항목.
+
+```
+[기준이미지], soft pastel grade, gentle dreamy colors, low contrast, romantic drama tone
+```
+
+#### monochromatic-red — 모노크롬 (레드)
+
+설명: 예술적 색감 재분류 항목.
+
+```
+[기준이미지], monochromatic grade in red, single color scheme, artistic minimal look
+```
+
+#### sepia-vintage — 세피아 / 빈티지
+
+설명: 예술적 색감 재분류 항목.
+
+```
+[기준이미지], vintage sepia film look, nostalgic brown tint, film grain, classic period drama
+```
+
+#### cross-processing — 크로스 프로세싱
+
+설명: 예술적 색감 재분류 항목.
+
+```
+[기준이미지], cross-processed film look, unusual color shifts, green cyan cast, fashion art style
+```
+
+### 색조 조화 (6)
+
+설명: 색상 이론 기반의 조화로운 배색
+
+#### complementary — 보색 조화
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], complementary scheme, dramatic color contrast, strong visual impact, action thriller
+```
+
+#### analogous — 유사색 조화
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], analogous harmony using adjacent colors, natural soft mood, pastoral serene feeling
+```
+
+#### triadic — 삼색 조화
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], triadic harmony with 120° spaced colors, vibrant lively world, fantasy family film
+```
+
+#### split-complementary — 분할 보색
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], split-complementary scheme, balanced tension with soft contrast, mystery comedy balance
+```
+
+#### tetradic — 테트라딕 (사각)
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], tetradic scheme with double complementary pairs, rich complex color spectrum, musical blockbuster
+```
+
+#### duotone — 듀오톤
+
+설명: 색조 조화 재분류 항목.
+
+```
+[기준이미지], duotone style, graphic music video aesthetic, two-color mapping, art promotional look
+```
+
+### 무드 연출 (3)
+
+설명: 분위기와 감정을 강조하는 톤
+
+#### high-key — 하이키
+
+설명: 무드 연출 재분류 항목.
+
+```
+[기준이미지], high-key bright airy grade, cheerful uplifting mood, romantic advertising style
+```
+
+#### low-key — 로우키
+
+설명: 무드 연출 재분류 항목.
+
+```
+[기준이미지], low-key moody grade, dark dense atmosphere, thriller noir tension
+```
+
+#### cyberpunk-neon — 사이버펑크 네온
+
+설명: 무드 연출 재분류 항목.
+
+```
+[기준이미지], neon magenta–cyan cyberpunk grade, futuristic city mood, high saturation neon reflections
+```
+
+### Sora Grade Options (7)
+
+출처: `components/prompt/storyboard-generator.tsx`의 `GRADE_OPTIONS`.
+
+#### auto — 자동
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+auto
+```
+
+#### none — 없음
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+none
+```
+
+#### warm highs, cool mids, rich blacks — warm highs, cool mids, rich blacks
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+warm highs, cool mids, rich blacks
+```
+
+#### cool mids, warm rim; clean whites — cool mids, warm rim; clean whites
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+cool mids, warm rim; clean whites
+```
+
+#### pastel palette, lifted blacks — pastel palette, lifted blacks
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+pastel palette, lifted blacks
+```
+
+#### deep teal–orange, cinematic contrast — deep teal–orange, cinematic contrast
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+deep teal–orange, cinematic contrast
+```
+
+#### neutral, film-like roll-off — neutral, film-like roll-off
+
+설명: Sora 상세 옵션의 Grade/Palette 값.
+
+```
+neutral, film-like roll-off
+```
+
+### Storyboard Style Fallback (4)
+
+출처: `data/storyboard-styles.ts`의 `FALLBACK_STORYBOARD_STYLES`.
+
+#### noir — Noir
+
+설명: 비 내리는 도시의 고대비 흑백 필름 스타일
+
+```
+grading: 차콜톤, 고대비, 필름그레인, 깊은 그림자 강조
+voTone: 저음이며 거칠고 숨 섞인 톤
+prompt: A rain-soaked noir alleyway with neon reflections and a lone figure in silhouette, cinematic lighting
+```
+
+#### sci-fi — Sci-Fi
+
+설명: 네온과 홀로그램이 가득한 미래 도시
+
+```
+grading: 차가운 블루/사이언 톤, 렌즈 플레어와 홀로그램
+voTone: 기계적이고 침착한 톤
+prompt: Futuristic neon-lit city skyline with hovering vehicles and holographic billboards, cinematic scale
+```
+
+#### fantasy — Fantasy
+
+설명: 빛나는 숲과 마법이 가득한 신비로운 분위기
+
+```
+grading: 따뜻한 골드톤과 신비로운 빛줄기
+voTone: 따뜻하고 서사적인 나레이션 톤
+prompt: Enchanted glowing forest with floating particles and ancient ruins, high fantasy illustration
+```
+
+#### comic — Comic
+
+설명: 팝아트 스타일의 경쾌하고 유머러스한 연출
+
+```
+grading: 채도 높은 컬러, 굵은 라인과 말풍선
+voTone: 밝고 과장된 만화 스타일 톤
+prompt: Vibrant comic-book panel with bold outlines, dynamic action pose, halftone textures
+```
+
+## 14. 프리셋 배치 뷰 (presets-shell)
+
+출처: `components/presets/presets-shell.tsx`
+
+아래 93개는 `runBatchSequence`에 전달되는 ViewSpec instruction 기준입니다. batch별 base prompt/guideline/negative는 동일 함수에서 별도로 합성됩니다.
+
+### 포토 덤프 스타일 (26)
+
+상수: `PHOTO_DUMP_VIEWS`
+
+#### style-film — 필름 감성
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Apply warm film photography look with subtle grain and soft highlights
+```
+
+#### style-vintage — 빈티지
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Vintage portrait with muted colors and gentle vignetting
+```
+
+#### style-anime — 애니메
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+High-quality anime illustration style, cel shading
+```
+
+#### style-comic — 코믹
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Bold comic-book ink lines with halftone shading
+```
+
+#### style-oil — 유화
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Oil painting on canvas, expressive brush strokes
+```
+
+#### style-watercolor — 수채화
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Delicate watercolor illustration with soft edges
+```
+
+#### style-pencil — 연필 스케치
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Detailed pencil sketch with cross-hatching
+```
+
+#### style-synthwave — 신스웨이브
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Synthwave neon lighting with magenta and cyan palette
+```
+
+#### style-cyberpunk — 사이버펑크
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Cyberpunk city lighting, neon reflections
+```
+
+#### style-fantasy — 판타지
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+High fantasy painting with dramatic lighting
+```
+
+#### style-sci-fi — SF
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Futuristic sci-fi render with holographic overlays
+```
+
+#### style-fashion — 패션 화보
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Editorial fashion photoshoot lighting
+```
+
+#### style-blackwhite — 흑백
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+High contrast black and white portrait
+```
+
+#### style-highkey — 하이키
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+High-key studio lighting with bright background
+```
+
+#### style-lowkey — 로우키
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Low-key moody lighting with strong shadows
+```
+
+#### style-pastel — 파스텔
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Pastel color palette with soft gradients
+```
+
+#### style-popart — 팝아트
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Pop art with bold flat colors and graphic outlines
+```
+
+#### style-80s — 80's
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+1980s retro portrait with film grain
+```
+
+#### style-90s — 90's
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+1990s magazine cover aesthetic
+```
+
+#### style-desert — 사막톤
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Golden desert color grading with warm highlights
+```
+
+#### style-winter — 윈터
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Cool winter palette with soft blues
+```
+
+#### style-forest — 포레스트
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Forest-inspired greens with dappled light
+```
+
+#### style-portrait-studio — 스튜디오
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Classic studio portrait with beauty dish lighting
+```
+
+#### style-hdr — HDR
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+High dynamic range portrait with crisp details
+```
+
+#### style-bokeh — 보케
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Shallow depth-of-field with large bokeh highlights
+```
+
+#### style-cinematic — 시네마틱
+
+설명: 포토 덤프 스타일 배치 뷰 instruction.
+
+```
+Cinematic lighting with anamorphic flares
+```
+
+### 포토 덤프 12 (12)
+
+상수: `PHOTO_DUMP_VARIATION_VIEWS`
+
+#### dynamic-look-01 — 룩 01
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Keep the character identity but switch to a casual street outfit, wind-swept hair, lively mid-step pose, cheerful smile, neon night backdrop
+```
+
+#### dynamic-look-02 — 룩 02
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Keep the identity while showcasing a formal suit, slicked-back hair, confident stance with hands in pockets, composed expression, modern office interior
+```
+
+#### dynamic-look-03 — 룩 03
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Maintain likeness wearing sporty activewear, high ponytail, dynamic running pose, focused expression, sunrise park background
+```
+
+#### dynamic-look-04 — 룩 04
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Preserve identity in a flowing evening dress, loose curls, gentle spin pose, joyful laugh, gala ballroom setting
+```
+
+#### dynamic-look-05 — 룩 05
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Retain facial features with edgy leather outfit, asymmetrical haircut, leaning forward pose, intense gaze, cyberpunk alley backdrop
+```
+
+#### dynamic-look-06 — 룩 06
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Keep the character recognizable in cozy knitwear, messy bun, seated relaxed pose, warm smile, rustic coffee shop interior
+```
+
+#### dynamic-look-07 — 룩 07
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Maintain identity wearing summer resort attire, wavy hair, playful jumping pose, laughing expression, tropical beach at golden hour
+```
+
+#### dynamic-look-08 — 룩 08
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Keep likeness with futuristic techwear, sleek bob haircut, action-ready stance, serious expression, holographic city plaza
+```
+
+#### dynamic-look-09 — 룩 09
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Preserve the face in bohemian outfit, braided hair, gentle hand-on-chest pose, serene smile, sunlit field of flowers
+```
+
+#### dynamic-look-10 — 룩 10
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Maintain character identity in winter coat and scarf, tousled hair with snowflakes, mid-stride pose, surprised expression, snow-covered city street
+```
+
+#### dynamic-look-11 — 룩 11
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Keep the same face with stage performance outfit, voluminous hairstyle, microphone-in-hand pose, energetic expression, concert lights background
+```
+
+#### dynamic-look-12 — 룩 12
+
+설명: 포토 덤프 12 배치 뷰 instruction.
+
+```
+Retain identity wearing minimalist monochrome fashion, sleek straight hair, seated profile pose, calm expression, modern art gallery backdrop
+```
+
+### 감정 프리셋 12컷 (12)
+
+상수: `EMOTION_STUDY_VIEWS`
+
+#### emotion-joyful — 기쁜 웃음
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Maintain the exact character likeness and pose while lifting the cheeks into a radiant joyful smile, eyes sparkling with happiness.
+```
+
+#### emotion-serious — 진지함
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Keep the same composition and outfit while transitioning facial muscles into a composed, serious expression with focused eyes and a firm mouth.
+```
+
+#### emotion-surprised — 놀란
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Preserve the pose but widen the eyes and slightly open the mouth to convey a natural look of surprise without exaggerating the features.
+```
+
+#### emotion-confident — 자신감
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Hold the current framing while adding a subtle confident smirk, lifted chin, and steady gaze that communicates assurance.
+```
+
+#### emotion-shy — 수줍은
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Maintain the pose while softening the eyes, adding a gentle closed-lip smile, and a slight head tilt that feels shy yet endearing.
+```
+
+#### emotion-thoughtful — 사색적인/명상적인
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Keep the same posture while relaxing the face into a contemplative, meditative expression with softened gaze and calm breathing.
+```
+
+#### emotion-peaceful — 평화로운
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Preserve the original stance while presenting a serene, peaceful expression with relaxed eyelids and a faint content smile.
+```
+
+#### emotion-blank — 멍한
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Keep all body details identical while loosening the facial muscles into a spaced-out, absent-minded stare with parted lips.
+```
+
+#### emotion-playful — 장난스러움
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Maintain the same pose and lighting while adding a mischievous grin, raised eyebrow, and lively eyes that suggest playfulness.
+```
+
+#### emotion-angry — 화난
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Preserve the framing while knitting the brows, tightening the jaw, and narrowing the eyes to portray a controlled, angry glare.
+```
+
+#### emotion-afraid — 두려워하는
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Keep the body unchanged while widening the eyes, tensing the lips, and adding subtle brow lift to communicate fear or anxiety.
+```
+
+#### emotion-ecstatic — 황홀한/결연한
+
+설명: 감정 프리셋 12컷 배치 뷰 instruction.
+
+```
+Retain the pose while brightening the face with an awe-struck, ecstatic glow and resolute gaze that feels inspired and determined.
+```
+
+### 9ZOOM 카메라 거리/심도 (12)
+
+상수: `NINE_ZOOM_VIEW_POOL`
+
+#### nine-zoom-els-deep — ELS 딥 포커스
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Extreme Long Shot / ELS, the subject appears very small inside a much larger environment, 24mm wide lens feeling, deep focus, high depth of field, f/8, background and subject both clear
+```
+
+#### nine-zoom-wide-deep — 와이드 딥 포커스
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Long Shot / Wide Shot, full body visible with generous surrounding space, 28mm wide lens, deep depth of field, f/5.6, clear environment context
+```
+
+#### nine-zoom-full-balanced — 풀샷 균형 심도
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Full Shot / FS, head-to-toe full body framing, 35mm lens, balanced depth of field, f/4, readable posture and outfit with soft background separation
+```
+
+#### nine-zoom-knee-medium — 니샷 중간 심도
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Knee Shot / KS, frame from knees upward, 45mm lens, medium depth of field, f/3.5, preserve movement and facial expression together
+```
+
+#### nine-zoom-mls-soft — MLS 소프트 배경
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Medium Long Shot / MLS, frame from upper thighs or knees upward, 50mm lens, moderate shallow depth of field, f/2.8, balanced action and dialogue framing
+```
+
+#### nine-zoom-ms-portrait — 미디엄 인물 심도
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Medium Shot / MS, waist-up framing, 65mm portrait lens feeling, shallow depth of field, f/2.4, subject clearly separated from the background
+```
+
+#### nine-zoom-mcu-bokeh — MCU 보케
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Medium Close-Up / MCU, chest-up framing, 85mm portrait lens, shallow depth of field, f/1.8, creamy bokeh while keeping facial features sharp
+```
+
+#### nine-zoom-cu-shallow — 클로즈업 얕은 심도
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Close-Up / CU, face-centered framing, 100mm portrait lens, very shallow depth of field, f/1.6, emotional face focus with smooth background blur
+```
+
+#### nine-zoom-bcu-ultra-shallow — 빅 클로즈업 초얕은 심도
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Big Close-Up / BCU, part of the face fills the frame, 120mm lens compression, extremely shallow depth of field, f/1.4, intense micro-expression emphasis
+```
+
+#### nine-zoom-ecu-detail — ECU 디테일
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Extreme Close-Up / ECU, isolate eyes, lips, hand, or a symbolic detail from the reference, macro lens feeling, f/2.8, crisp detail with falloff blur
+```
+
+#### nine-zoom-low-wide — 로우 와이드
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Low-angle Wide Shot, camera below eye level with full figure dominance, 24mm lens, deep-to-medium depth of field, f/4, dramatic scale and presence
+```
+
+#### nine-zoom-telephoto-compressed — 망원 압축
+
+설명: 9ZOOM 카메라 거리/심도 배치 뷰 instruction.
+
+```
+Telephoto portrait compression, medium close framing, 135mm lens feeling, shallow depth of field, f/2, compressed background and elegant subject separation
+```
+
+### 9앵글 카메라 시점 (12)
+
+상수: `NINE_ANGLE_VIEW_POOL`
+
+#### nine-angle-eye-level — 아이레벨
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Eye-level camera angle, neutral human perspective, stable front three-quarter view, keep shot size around medium or full shot
+```
+
+#### nine-angle-high — 하이앵글
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+High angle view looking down at the subject, camera above eye level, preserve identity and styling, keep framing readable
+```
+
+#### nine-angle-low — 로우앵글
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Low angle view looking up at the subject, camera below eye level, stronger presence and scale, avoid distortion of the face
+```
+
+#### nine-angle-bird — 버드아이
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Bird's-eye view from directly above or near-top-down, composition clearly shows the subject from above while preserving recognizable design
+```
+
+#### nine-angle-worm — 웜아이
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Worm's-eye view from very low near the ground, dramatic upward perspective, keep anatomy believable and subject recognizable
+```
+
+#### nine-angle-dutch — 더치앵글
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Dutch angle with a deliberate tilted horizon, dynamic diagonal composition, preserve the same subject and visual style
+```
+
+#### nine-angle-profile — 사이드 프로파일
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Side profile camera angle, subject seen from the left or right side, clear silhouette and facial profile, stable medium framing
+```
+
+#### nine-angle-back — 후면
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Back view camera angle, subject seen from behind with recognizable outfit, hair, silhouette, and environment continuity
+```
+
+#### nine-angle-over-shoulder — 오버숄더
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Over-the-shoulder angle, camera placed behind one shoulder looking toward the subject or scene, cinematic perspective
+```
+
+#### nine-angle-three-quarter — 3/4 앵글
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Three-quarter camera angle, subject turned slightly from front, balanced depth and readable facial features
+```
+
+#### nine-angle-front-symmetry — 정면 대칭
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Straight-on frontal camera angle, centered symmetrical composition, stable eye-level perspective, identity clearly visible
+```
+
+#### nine-angle-canted-close — 캔티드 근접
+
+설명: 9앵글 카메라 시점 배치 뷰 instruction.
+
+```
+Slight canted close camera angle, subtle tilted perspective with intimate framing, keep facial identity sharp and undistorted
+```
+
+### 9화각 샷 사이즈 (9)
+
+상수: `NINE_SHOT_SIZE_VIEWS`
+
+#### nine-shot-els — ELS
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Extreme Long Shot / ELS, the subject is very small and the environment dominates the frame, neutral eye-level or three-quarter camera angle
+```
+
+#### nine-shot-wide — 와이드샷
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Long Shot / Wide Shot, full body visible with generous surrounding space, neutral camera angle, clear subject-environment relationship
+```
+
+#### nine-shot-full — 풀샷
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Full Shot / FS, head-to-toe full body framing, neutral camera angle, outfit, posture, and silhouette clearly visible
+```
+
+#### nine-shot-knee — 니샷
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Knee Shot / KS, frame from knees upward, neutral camera angle, movement and facial expression both readable
+```
+
+#### nine-shot-mls — MLS
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Medium Long Shot / MLS, frame from upper thighs or knees upward, neutral camera angle, balanced action and expression
+```
+
+#### nine-shot-ms — 미디엄샷
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Medium Shot / MS, waist-up framing, neutral eye-level camera angle, dialogue/interview style composition
+```
+
+#### nine-shot-mcu — MCU
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Medium Close-Up / MCU, chest-up framing, neutral camera angle, facial expression and spoken emotion emphasized
+```
+
+#### nine-shot-cu — 클로즈업
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Close-Up / CU, face-centered framing, neutral camera angle, emotional reaction and facial details emphasized
+```
+
+#### nine-shot-ecu — ECU
+
+설명: 9화각 샷 사이즈 배치 뷰 instruction.
+
+```
+Extreme Close-Up / ECU, isolate eyes, lips, hands, or one symbolic detail from the reference subject, neutral camera angle
+```
+
+### 액션9 (9)
+
+상수: `ACTION9_VIEWS`
+
+#### action9-kick-hit — 액션9 1 · 발차기 명중
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Low-angle Wide Shot / Full Shot of a powerful kick landing on an opponent or threat, full body visible, camera below hip height, impact point and opponent reaction readable, motion blur and force lines visible, original equipment, condition, and background preserved
+```
+
+#### action9-thrust-attack — 액션9 2 · 찌르기/돌진
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Over-the-shoulder or compressed telephoto Medium Long Shot / MLS of a direct thrust or lunging attack toward an opponent or target, camera aligned behind the attacking shoulder, clear attack trajectory line, weapon/tool/hand/gear follows what exists in the reference
+```
+
+#### action9-dodge — 액션9 3 · 회피
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Dutch-angle Medium Wide Shot of the subject dodging an incoming strike, projectile, blade, fist, or environmental threat, body twisted diagonally away from danger, opponent or attack path visible, tilted horizon amplifies instability
+```
+
+#### action9-parry — 액션9 4 · 패링
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Tight Medium Shot / MCU of a precise parry or block at the exact moment of contact, frame centered on the collision point between existing gear, arm, tool, or weapon, face and hands both readable, sparks/debris/force lines allowed if consistent
+```
+
+#### action9-near-miss — 액션9 5 · 아슬아슬한 회피
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Dramatic Close-Up / CU with slight Dutch angle of a near-miss dodge, the attack passes extremely close to the face, body, clothing, or equipment at the edge of frame, shallow depth, visible tension and grazing motion
+```
+
+#### action9-impact-damage — 액션9 6 · 큰 충격 데미지
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Low-angle Wide Shot of a heavy impact damage moment, camera near ground level, subject or opponent struck with visible shockwave, debris, fabric tension, gear strain, or environmental damage, background scale reinforces impact
+```
+
+#### action9-clean-hit — 액션9 7 · 명중 순간
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Cinematic Medium Shot / Medium Close-Up of the exact split-second a clean hit connects, contact point placed near the rule-of-thirds focus, opponent/threat reaction and the subject's follow-through visible in the same frame
+```
+
+#### action9-counter — 액션9 8 · 카운터 공격
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Diagonal Full Shot / Medium Long Shot of a counterattack immediately after blocking or dodging, camera set at a three-quarter low angle, defensive motion and offensive strike readable in one frame, strong diagonal composition
+```
+
+#### action9-ecu-detail — 액션9 9 · 필수 ECU 디테일
+
+설명: 액션9 배치 뷰 instruction.
+
+```
+Mandatory dramatic Extreme Close-Up / ECU, macro-style framing of combat contact: eyes locking, clenched hand, weapon edge, gear scraping, fabric tearing, bloodless damage mark, spark, or impact detail, intense tension and very shallow focus
+```
+
+### 틸 & 오렌지 단일 프리셋 (1)
+
+상수: `TEAL_ORANGE_SINGLE_VIEW`
+
+#### teal-orange — 틸 & 오렌지
+
+설명: 틸 & 오렌지 단일 프리셋 배치 뷰 instruction.
+
+```
+Apply professional teal and orange feature film color grading while maintaining the original pose and composition
+```
+
+## 부록. prompt 아님: 이미지 API 생성 옵션
+
+출처: `components/studio/generation-options-panel.tsx`
+
+아래 값은 이미지 API 요청 옵션이며 prompt 문자열에는 합성되지 않습니다. `generationOptions` 메타데이터와 API payload 옵션으로 전달됩니다.
+
+### Quality Options (3)
+
+#### low — Low
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: low
+label: Low
+note: fast
+```
+
+#### medium — Medium
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: medium
+label: Medium
+note: balanced
+```
+
+#### high — High
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: high
+label: High
+note: best
+```
+
+### Size Options (13)
+
+#### 1024x1024 — 1024²
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1024x1024
+label: 1024²
+note: 1:1
+```
+
+#### 1536x1024 — 1536×1024
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1536x1024
+label: 1536×1024
+note: 3:2
+```
+
+#### 1024x1536 — 1024×1536
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1024x1536
+label: 1024×1536
+note: 2:3
+```
+
+#### 1360x1024 — 1360×1024
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1360x1024
+label: 1360×1024
+note: 4:3
+```
+
+#### 1024x1360 — 1024×1360
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1024x1360
+label: 1024×1360
+note: 3:4
+```
+
+#### 1824x1024 — 1824×1024
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1824x1024
+label: 1824×1024
+note: 16:9
+```
+
+#### 1024x1824 — 1024×1824
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1024x1824
+label: 1024×1824
+note: 9:16
+```
+
+#### 2048x2048 — 2048²
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 2048x2048
+label: 2048²
+note: 2K 1:1
+```
+
+#### 2048x1152 — 2048×1152
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 2048x1152
+label: 2048×1152
+note: 2K 16:9
+```
+
+#### 1152x2048 — 1152×2048
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1152x2048
+label: 1152×2048
+note: 2K 9:16
+```
+
+#### 3824x2160 — 3824×2160
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 3824x2160
+label: 3824×2160
+note: 4K 16:9
+```
+
+#### 2160x3824 — 2160×3824
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 2160x3824
+label: 2160×3824
+note: 4K 9:16
+```
+
+#### auto — auto
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: auto
+label: auto
+note:
+```
+
+### Format Options (3)
+
+#### png — PNG
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: png
+label: PNG
+```
+
+#### jpeg — JPEG
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: jpeg
+label: JPEG
+```
+
+#### webp — WebP
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: webp
+label: WebP
+```
+
+### Moderation Options (2)
+
+#### low — Low
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: low
+label: Low
+note: less restrictive
+```
+
+#### auto — Auto
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: auto
+label: Auto
+note: standard
+```
+
+### Count Options (3)
+
+#### 1 — 1
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 1
+label: 1
+```
+
+#### 2 — 2
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 2
+label: 2
+```
+
+#### 4 — 4
+
+설명: 이미지 API 옵션. prompt 합성 대상 아님.
+
+```
+value: 4
+label: 4
 ```
