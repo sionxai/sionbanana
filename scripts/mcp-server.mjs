@@ -19,6 +19,8 @@ const MOCK_MODE = process.env.SIONBANANA_MCP_MOCK === "1";
 const optionalText = () => z.string().trim().min(1).optional();
 const qualitySchema = z.enum(["low", "medium", "high", "auto"]).optional();
 const countSchema = z.union([z.literal(1), z.literal(2), z.literal(4)]).optional();
+const batchSchema = z.number().int().min(1).optional();
+const concurrencySchema = z.number().int().min(1).optional();
 const timeoutSchema = z.number().int().min(100).max(30000).optional();
 
 const TOOL_NAMES = [
@@ -84,7 +86,9 @@ export function createSionBananaMcpServer(options = {}) {
         slug: optionalText().describe("Optional --slug for the run directory."),
         count: countSchema.describe("Optional --count. Must be 1, 2, or 4."),
         quality: qualitySchema.describe("Optional --quality. low, medium, high, or auto."),
-        size: optionalText().describe("Optional --size image size.")
+        size: optionalText().describe("Optional --size image size."),
+        batch: batchSchema.describe("Optional --batch. Number of same-prompt runs. Default: 1."),
+        concurrency: concurrencySchema.describe("Optional --concurrency. Concurrent batch workers. Default: 4.")
       },
       annotations: {
         readOnlyHint: false,
@@ -261,7 +265,7 @@ async function healthCheck(input, context) {
   }
 }
 
-function buildGenerateArgs(input) {
+export function buildGenerateArgs(input) {
   const args = ["--prompt", input.prompt];
   pushOptionalArg(args, "--reference", input.reference);
   pushOptionalArg(args, "--category", input.category);
@@ -269,6 +273,8 @@ function buildGenerateArgs(input) {
   pushOptionalArg(args, "--count", input.count);
   pushOptionalArg(args, "--quality", input.quality);
   pushOptionalArg(args, "--size", input.size);
+  pushOptionalArg(args, "--batch", input.batch);
+  pushOptionalArg(args, "--concurrency", input.concurrency);
   return args;
 }
 
