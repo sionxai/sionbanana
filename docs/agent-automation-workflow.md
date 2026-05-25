@@ -222,6 +222,25 @@ node scripts/agent-generate.mjs \
   --port 3002
 ```
 
+병렬 batch 생성:
+
+```bash
+node scripts/agent-generate.mjs \
+  --prompt "A cinematic banana character arriving at a quiet cafe, warm morning light." \
+  --category character-locations \
+  --slug cafe-arrival \
+  --count 1 \
+  --quality medium \
+  --size 1024x1024 \
+  --batch 10 \
+  --concurrency 4
+```
+
+- `--batch N`: 같은 prompt로 N개의 독립 run을 만듭니다. 기본값은 `1`이며, 미지정 시 기존 단건 출력 형식을 유지합니다.
+- `--concurrency C`: batch 실행 시 동시에 처리할 run 수입니다. 기본값은 `4`입니다.
+- batch run의 slug는 `cafe-arrival-01`, `cafe-arrival-02`처럼 자동 인덱싱됩니다.
+- `category`가 있으면 batch 완료 후 같은 `--build-index` 로직으로 `data/agent-runs/_{category}-index.html`을 갱신하고 `indexPath`를 반환합니다.
+
 stdin JSON:
 
 ```bash
@@ -247,5 +266,28 @@ printf '%s\n' '{
   ],
   "reviewHtmlPath": "/absolute/path/data/agent-runs/2026-05-16T01-00-00-000Z-cafe-arrival/review.html",
   "manifestPath": "/absolute/path/data/agent-runs/2026-05-16T01-00-00-000Z-cafe-arrival/manifest.json"
+}
+```
+
+batch 성공 출력:
+
+```json
+{
+  "ok": true,
+  "total": 10,
+  "succeeded": 10,
+  "failed": 0,
+  "runs": [
+    {
+      "ok": true,
+      "batchIndex": 1,
+      "slug": "cafe-arrival-01",
+      "outputDir": "/absolute/path/data/agent-runs/2026-05-16T01-00-00-000Z-cafe-arrival-01",
+      "imagePaths": ["/absolute/path/data/agent-runs/.../images/abc123.png"],
+      "reviewHtmlPath": "/absolute/path/data/agent-runs/.../review.html",
+      "manifestPath": "/absolute/path/data/agent-runs/.../manifest.json"
+    }
+  ],
+  "indexPath": "/absolute/path/data/agent-runs/_character-locations-index.html"
 }
 ```

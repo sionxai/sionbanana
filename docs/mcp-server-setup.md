@@ -40,13 +40,16 @@ Claude Desktop 설정 파일의 `mcpServers`에 아래 항목을 추가합니다
 
 ### `generate`
 
-`scripts/agent-generate.mjs`를 `--prompt`, `--reference`, `--category`, `--slug`, `--count`, `--quality`, `--size` 인자로 감싸 실행합니다.
+`scripts/agent-generate.mjs`를 `--prompt`, `--reference`, `--category`, `--slug`, `--count`, `--quality`, `--size`, `--batch`, `--concurrency` 인자로 감싸 실행합니다.
+
+`batch`는 같은 prompt로 만들 독립 run 수이며 기본값은 `1`입니다. `concurrency`는 batch 실행 시 동시에 처리할 run 수이며 기본값은 `4`입니다. `batch`가 `1`이거나 미지정이면 기존 단건 helper 출력 형식을 유지하고, `batch`가 `2` 이상이면 `{ ok, total, succeeded, failed, runs, indexPath? }` 형식의 통합 결과를 반환합니다.
 
 자연어 예시:
 
 - "sionbanana generate로 prompt 'banana milk package hero shot' 생성해줘. category는 packaging, slug는 banana-milk-hero."
 - "reference 이미지를 넣어서 generate 실행해줘. count 2, quality high, size 1024x1024."
 - "category character로 prompt를 생성하고 결과 manifest 경로를 알려줘."
+- "sionbanana generate로 같은 prompt를 batch 10, concurrency 4로 병렬 생성해줘. category는 character-locations, slug는 cafe-arrival."
 
 ### `upscale_from`
 
