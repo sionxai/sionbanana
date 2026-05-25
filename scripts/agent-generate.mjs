@@ -2,11 +2,13 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_PORT = 3002;
 const PORT_SCAN_ORDER = [3002, 3000, 3001, 3003, 3004, 3005];
 const VALID_COUNTS = new Set([1, 2, 4]);
 const VALID_QUALITIES = new Set(["low", "medium", "high", "auto"]);
+const SCRIPT_FILE = fileURLToPath(import.meta.url);
 
 async function main() {
   try {
@@ -18,95 +20,7 @@ async function main() {
 
     const stdinConfig = await readStdinJsonIfAvailable();
     const rawConfig = { ...stdinConfig, ...cli };
-    if (rawConfig.buildIndex) {
-      await buildCategoryIndex(rawConfig.buildIndex);
-      return;
-    }
-
-    const generationConfig = rawConfig.upscaleFrom
-      ? await buildUpscaleConfig(rawConfig)
-      : rawConfig;
-    const config = normalizeConfig(generationConfig);
-    const server = await findHealthyServer(config.port, config.portExplicit);
-    const idempotencyKey = createIdempotencyKey(config.slug);
-    const payload = buildGeneratePayload(config, idempotencyKey);
-
-    const generated = await postJson(`${server.baseUrl}/api/generate`, payload, 180000);
-    if (!generated.ok) {
-      throw new Error(typeof generated.reason === "string" ? generated.reason : "Generate API returned ok:false");
-    }
-
-    const images = extractImages(generated);
-    if (images.length === 0) {
-      throw new Error("Generate API response did not include image storage paths");
-    }
-
-    const createdAt = new Date().toISOString();
-    const outputDir = path.join(getDataRoot(), "agent-runs", `${safeTimestamp(createdAt)}-${config.slug}`);
-    const outputImagesDir = path.join(outputDir, "images");
-    await fs.mkdir(outputImagesDir, { recursive: true });
-
-    const copiedImages = [];
-    for (const [index, image] of images.entries()) {
-      const sourcePath = resolveStoragePath(image.storagePath);
-      const fileName = await uniqueFileName(outputImagesDir, path.basename(sourcePath), index);
-      const destinationPath = path.join(outputImagesDir, fileName);
-      await fs.copyFile(sourcePath, destinationPath);
-      copiedImages.push({
-        id: image.id ?? null,
-        imageUrl: image.imageUrl ?? null,
-        storagePath: image.storagePath,
-        sourcePath,
-        fileName,
-        outputPath: destinationPath,
-        relativePath: path.posix.join("images", fileName),
-        mimeType: image.mimeType ?? null,
-        revisedPrompt: image.revisedPrompt ?? null
-      });
-    }
-
-    const manifest = {
-      schemaVersion: 1,
-      createdAt,
-      category: config.category,
-      slug: config.slug,
-      prompt: config.prompt,
-      reference: {
-        primary: config.reference,
-        gallery: config.referenceGallery
-      },
-      params: {
-        count: config.count,
-        quality: config.quality,
-        imageSize: config.size,
-        aspectRatio: config.aspect,
-        port: server.port,
-        baseUrl: server.baseUrl,
-        idempotencyKey
-      },
-      response: {
-        id: generated.id ?? null,
-        imageUrl: generated.imageUrl ?? null,
-        storagePath: generated.storagePath ?? null,
-        model: generated.model ?? null,
-        revisedPrompt: generated.revisedPrompt ?? null,
-        partial: generated.partial ?? null
-      },
-      images: copiedImages
-    };
-
-    const manifestPath = path.join(outputDir, "manifest.json");
-    const reviewHtmlPath = path.join(outputDir, "review.html");
-    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    await fs.writeFile(reviewHtmlPath, renderReviewHtml(manifest), "utf8");
-
-    printJson({
-      ok: true,
-      outputDir,
-      imagePaths: copiedImages.map(image => image.outputPath),
-      reviewHtmlPath,
-      manifestPath
-    });
+    printJson(await runRawConfig(rawConfig));
   } catch (error) {
     printJson({
       ok: false,
@@ -114,6 +28,162 @@ async function main() {
     });
     process.exitCode = 1;
   }
+}
+
+export async function runRawConfig(rawConfig) {
+  if (rawConfig.buildIndex) {
+    return buildCategoryIndex(rawConfig.buildIndex);
+  }
+
+  const generationConfig = rawConfig.upscaleFrom
+    ? await buildUpscaleConfig(rawConfig)
+    : rawConfig;
+  const config = normalizeConfig(generationConfig);
+  if (config.batch > 1) {
+    return runBatchGeneration(config);
+  }
+  return runSingleGeneration(config);
+}
+
+async function runBatchGeneration(config) {
+  const server = await findHealthyServer(config.port, config.portExplicit);
+  const runConfigs = createBatchRunConfigs(config);
+  const runWithConcurrency = await loadRunWithConcurrency();
+  const settled = await runWithConcurrency(runConfigs, config.concurrency, runConfig => (
+    runSingleGeneration(runConfig, server)
+  ));
+
+  const runs = settled.map((result, index) => {
+    const runConfig = runConfigs[index];
+    if (result.status === "fulfilled") {
+      return {
+        ok: true,
+        batchIndex: index + 1,
+        slug: runConfig.slug,
+        outputDir: result.value.outputDir,
+        imagePaths: result.value.imagePaths,
+        reviewHtmlPath: result.value.reviewHtmlPath,
+        manifestPath: result.value.manifestPath
+      };
+    }
+
+    return {
+      ok: false,
+      batchIndex: index + 1,
+      slug: runConfig.slug,
+      reason: result.reason instanceof Error ? result.reason.message : String(result.reason)
+    };
+  });
+
+  const succeeded = runs.filter(run => run.ok).length;
+  const failed = runs.length - succeeded;
+  const response = {
+    ok: failed === 0,
+    total: runs.length,
+    succeeded,
+    failed,
+    runs
+  };
+
+  if (config.category && succeeded > 0) {
+    try {
+      const index = await buildCategoryIndex(config.category);
+      response.indexPath = index.indexHtmlPath;
+    } catch (error) {
+      response.ok = false;
+      response.indexError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return response;
+}
+
+async function loadRunWithConcurrency() {
+  const concurrency = await import("../lib/concurrency.ts");
+  return concurrency.runWithConcurrency;
+}
+
+async function runSingleGeneration(config, serverOverride = null) {
+  const server = serverOverride ?? await findHealthyServer(config.port, config.portExplicit);
+  const idempotencyKey = createIdempotencyKey(config.slug);
+  const payload = buildGeneratePayload(config, idempotencyKey);
+
+  const generated = await postJson(`${server.baseUrl}/api/generate`, payload, 180000);
+  if (!generated.ok) {
+    throw new Error(typeof generated.reason === "string" ? generated.reason : "Generate API returned ok:false");
+  }
+
+  const images = extractImages(generated);
+  if (images.length === 0) {
+    throw new Error("Generate API response did not include image storage paths");
+  }
+
+  const createdAt = new Date().toISOString();
+  const outputDir = path.join(getDataRoot(), "agent-runs", `${safeTimestamp(createdAt)}-${config.slug}`);
+  const outputImagesDir = path.join(outputDir, "images");
+  await fs.mkdir(outputImagesDir, { recursive: true });
+
+  const copiedImages = [];
+  for (const [index, image] of images.entries()) {
+    const sourcePath = resolveStoragePath(image.storagePath);
+    const fileName = await uniqueFileName(outputImagesDir, path.basename(sourcePath), index);
+    const destinationPath = path.join(outputImagesDir, fileName);
+    await fs.copyFile(sourcePath, destinationPath);
+    copiedImages.push({
+      id: image.id ?? null,
+      imageUrl: image.imageUrl ?? null,
+      storagePath: image.storagePath,
+      sourcePath,
+      fileName,
+      outputPath: destinationPath,
+      relativePath: path.posix.join("images", fileName),
+      mimeType: image.mimeType ?? null,
+      revisedPrompt: image.revisedPrompt ?? null
+    });
+  }
+
+  const manifest = {
+    schemaVersion: 1,
+    createdAt,
+    category: config.category,
+    slug: config.slug,
+    prompt: config.prompt,
+    reference: {
+      primary: config.reference,
+      gallery: config.referenceGallery
+    },
+    params: {
+      count: config.count,
+      quality: config.quality,
+      imageSize: config.size,
+      aspectRatio: config.aspect,
+      port: server.port,
+      baseUrl: server.baseUrl,
+      idempotencyKey
+    },
+    response: {
+      id: generated.id ?? null,
+      imageUrl: generated.imageUrl ?? null,
+      storagePath: generated.storagePath ?? null,
+      model: generated.model ?? null,
+      revisedPrompt: generated.revisedPrompt ?? null,
+      partial: generated.partial ?? null
+    },
+    images: copiedImages
+  };
+
+  const manifestPath = path.join(outputDir, "manifest.json");
+  const reviewHtmlPath = path.join(outputDir, "review.html");
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await fs.writeFile(reviewHtmlPath, renderReviewHtml(manifest), "utf8");
+
+  return {
+    ok: true,
+    outputDir,
+    imagePaths: copiedImages.map(image => image.outputPath),
+    reviewHtmlPath,
+    manifestPath
+  };
 }
 
 function parseArgs(argv) {
@@ -174,7 +244,7 @@ async function readStdinJsonIfAvailable() {
   return parsed;
 }
 
-function normalizeConfig(raw) {
+export function normalizeConfig(raw) {
   const prompt = asTrimmedString(raw.prompt);
   if (!prompt) {
     throw new Error("--prompt is required");
@@ -197,6 +267,8 @@ function normalizeConfig(raw) {
 
   const referenceGallery = normalizeReferenceGallery(raw.referenceGallery);
   const slug = sanitizeSlug(asTrimmedString(raw.slug) || prompt);
+  const batch = parsePositiveInteger(raw.batch, "--batch", 1);
+  const concurrency = parsePositiveInteger(raw.concurrency, "--concurrency", 4);
 
   return {
     prompt,
@@ -209,8 +281,26 @@ function normalizeConfig(raw) {
     size: asTrimmedString(raw.size) || null,
     aspect: asTrimmedString(raw.aspect) || null,
     port,
-    portExplicit: raw.portExplicit === true
+    portExplicit: raw.portExplicit === true,
+    batch,
+    concurrency
   };
+}
+
+export function createBatchRunConfigs(config) {
+  if (config.batch <= 1) {
+    return [config];
+  }
+
+  return Array.from({ length: config.batch }, (_, index) => ({
+    ...config,
+    slug: createBatchSlug(config.slug, index, config.batch)
+  }));
+}
+
+export function createBatchSlug(slug, index, total) {
+  const width = Math.max(2, String(total).length);
+  return `${slug}-${String(index + 1).padStart(width, "0")}`;
 }
 
 function normalizeReferenceGallery(value) {
@@ -227,6 +317,18 @@ function normalizeReferenceGallery(value) {
       .filter(Boolean);
   }
   throw new Error("--reference-gallery must be a comma-separated string or JSON array");
+}
+
+function parsePositiveInteger(value, flag, defaultValue) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return number;
 }
 
 async function buildCategoryIndex(rawCategory) {
@@ -284,13 +386,13 @@ async function buildCategoryIndex(rawCategory) {
   const outputPath = path.join(runsRoot, `_${safeCategory}-index.html`);
   await fs.writeFile(outputPath, renderIndexHtml(category, runs), "utf8");
 
-  printJson({
+  return {
     ok: true,
     category,
     count: runs.length,
     indexHtmlPath: outputPath,
     manifestPaths: runs.map(run => run.manifestPath)
-  });
+  };
 }
 
 async function readJsonFile(filePath) {
@@ -903,8 +1005,12 @@ Options:
   --quality             low, medium, high, or auto. Default: medium
   --size                Optional imageSize passed to /api/generate
   --aspect              Optional aspectRatio passed to /api/generate
+  --batch               Number of same-prompt runs to create. Default: 1
+  --concurrency         Concurrent batch workers. Default: 4
   --port                Preferred localhost port. Default: 3002
 `);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_FILE) {
+  main();
+}
