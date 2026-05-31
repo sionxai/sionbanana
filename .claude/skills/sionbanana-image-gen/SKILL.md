@@ -98,6 +98,61 @@ node scripts/storyboard.mjs organize path/to/storyboard.spec.json storyboard.sum
 - 전경에 큰 신체부위(다리/발/손)가 들어가는 prompt는 원근 왜곡 위험이 높다. 주인공 중심 구도를 명확히 쓰고 negative prompt에 `giant oversized leg, distorted limbs, foot in foreground, extra limbs, deformed hands`를 넣는 편이 안전하다.
 - 시나리오 헤더의 컷 수와 실제 컷 번호가 불일치할 수 있으니, 자동화는 문서 헤더보다 실제 cut 번호와 slug 기준으로 진행한다.
 
+### Phase 1d: 레퍼런스 시트 자동 생성
+
+시나리오/스토리보드 작업 시, 사용자가 캐릭터·장소·오브젝트 레퍼런스 시트를 첨부하지 않은 경우 키프레임 생성 전에 먼저 생성한다. 첨부된 경우 이 단계를 건너뛴다.
+
+**판단 기준**: 시나리오 텍스트에 연속성 바이블(인물/공간/오브젝트 비주얼 상세)이 있으나 참조 이미지 첨부가 없으면 자동 생성 대상.
+
+#### 캐릭터 시트
+
+인물마다 1장. 프롬프트 구조:
+
+```
+Character reference sheet for {인물명}. 
+Left half: full-body front view and full-body back view standing on a neutral gray background.
+Right half: 4-panel face grid (front, 3/4 left, 3/4 right, profile).
+{나이, 성별, 체형, 신장 등 신체 특징}
+{헤어스타일, 색상}
+{의상 상세: 색상, 소재, 질감, 특이사항(찢어짐, 얼룩 등)}
+{소품: 모자, 신발, 액세서리}
+Hyperrealistic photography, studio lighting, consistent identity across all views.
+```
+
+- `--slug "ref-char-{인물명}"`, `--quality high`, `--aspect "16:9"`
+
+#### 장소 시트
+
+주요 공간마다 1장. 프롬프트 구조:
+
+```
+Location reference sheet for {장소명}, 4-panel grid labeled 정면/후면/좌측/우측.
+{시대, 지역, 건축 양식}
+{주요 구조물: 지붕, 벽, 바닥 재질}
+{주변 환경: 식생, 지형, 돌담 등}
+{조명 조건: 시간대, 계절, 날씨}
+Hyperrealistic photography, architectural reference style.
+```
+
+- `--slug "ref-loc-{장소명}"`, `--quality high`, `--aspect "16:9"`
+
+#### 오브젝트 시트
+
+서사적으로 반복 등장하거나 상징적 소품마다 1장. 프롬프트 구조:
+
+```
+Prop reference sheet for {오브젝트명}.
+Left half: front view and side view on white background.
+Right half: close-up detail panels with annotation callouts showing {질감, 마모, 색상 변화 등}.
+{소재, 크기, 시대, 용도}
+{특이사항: 벗겨진 칠, 금, 얼룩 등}
+Product photography style, hyperrealistic, studio lighting.
+```
+
+- `--slug "ref-obj-{오브젝트명}"`, `--quality high`, `--aspect "16:9"`
+
+생성된 시트는 이후 키프레임 생성 시 `--reference-slug` 또는 `--reference-gallery-slugs`로 연결하거나, 프롬프트 앞에 `[연속성 바이블]` 텍스트 블록으로 주입한다.
+
 ### Phase 2: 정리 (index)
 
 batch가 자동 생성하지만, 수동 재생성도 가능:
@@ -125,6 +180,49 @@ node scripts/agent-generate.mjs \
 ```
 
 여러 개면 `--batch`로 묶거나 각각 호출. 커스텀 출력명은 `--slug`.
+
+### Phase 4: 검수 및 맥락 보충
+
+시나리오/스토리보드의 다수 컷 생성 후, 씬 순서대로 리뷰하며 서사 연결을 점검한다. 단일 이미지 탐색에서는 생략.
+
+1. **검수 Rubric** 기준으로 각 컷 평가 (아래 참조)
+2. **서사 연결 점검** — 다음 유형의 누락을 찾는다:
+   - 씬 오프닝에 에스터블리싱/와이드 샷이 없는 경우
+   - 컷 간 감정·시각 전환이 급격해 브릿지 컷이 필요한 구간
+   - 주요 인물이 여러 컷 동안 사라지는 구간 (리액션 컷 누락)
+   - 씬 전환 시 시간 경과·공간 이동을 시각적으로 보여주는 전환 컷 부재
+3. **보충 컷 제안**: 누락을 사용자에게 보고하고 확인 후 추가 생성한다.
+
+보충 컷의 slug는 `cut-{씬}-{번호}b`로 구분한다.
+
+### Phase 5: 딜리버리 정리
+
+다수 컷(2씬 이상)을 생성한 경우, 최종 결과물을 씬별 폴더로 정리한다.
+
+```text
+data/agent-runs/_{category}-delivery/
+├── 레퍼런스/                        ← Phase 1d에서 생성한 경우
+│   ├── ref-char-{인물명}.png
+│   ├── ref-loc-{장소명}.png
+│   └── ref-obj-{오브젝트명}.png
+├── 씬1-{씬이름}/
+│   ├── cut-1-0_{컷설명}.png
+│   ├── cut-1-1_{컷설명}.png
+│   └── ...
+├── 씬2-{씬이름}/
+│   └── ...
+└── ...
+```
+
+규칙:
+- 딜리버리 폴더는 `_{category}-delivery`로 생성한다.
+- 씬 폴더명은 `씬{N}-{한글씬이름}` 형식이다.
+- 파일명은 `cut-{씬}-{번호}_{한글컷설명}.png` 형식이다. 보충 컷은 `cut-{씬}-{번호}b`로 구분한다.
+- 원본 `agent-runs/` 타임스탬프 디렉토리에서 `cp`(복사)한다. 원본은 삭제하지 않는다.
+- 정리 후 `open -R`로 파인더에서 딜리버리 폴더를 연다.
+- Phase 1c(`storyboard.mjs organize`)를 사용한 경우 `outDir`이 이미 정리되므로 이 단계는 생략한다.
+
+단일 이미지 탐색이나 씬이 1개뿐인 경우 생략.
 
 ## 캐릭터 라이브러리 (재사용 캐릭터)
 
