@@ -243,6 +243,25 @@ async function readManifestInfo(manifestPath) {
   }
 }
 
+async function resolveConfigReferences(config) {
+  const reference = config.reference || (
+    config.referenceSlug
+      ? await resolveReferenceSlug(config.referenceSlug, { dataRoot: config.dataRoot, category: config.category })
+      : null
+  );
+  const referenceGallery = [...config.referenceGallery];
+
+  for (const slug of config.referenceGallerySlugs) {
+    referenceGallery.push(await resolveReferenceSlug(slug, { dataRoot: config.dataRoot, category: config.category }));
+  }
+
+  return {
+    ...config,
+    reference,
+    referenceGallery
+  };
+}
+
 function summarizeJobResults(jobs) {
   const succeeded = jobs.filter(job => job.ok).length;
   return {
@@ -256,10 +275,11 @@ function summarizeJobResults(jobs) {
 
 async function runSingleGeneration(config, serverOverride = null) {
   const server = serverOverride ?? await findHealthyServer(config.port, config.portExplicit);
-  const idempotencyKey = createIdempotencyKey(config.slug);
-  const payload = buildGeneratePayload(config, idempotencyKey);
+  const resolvedConfig = await resolveConfigReferences(config);
+  const idempotencyKey = createIdempotencyKey(resolvedConfig.slug);
+  const payload = buildGeneratePayload(resolvedConfig, idempotencyKey);
 
-  const generated = await postJsonWithRetry(`${server.baseUrl}/api/generate`, payload, 180000, config);
+  const generated = await postJsonWithRetry(`${server.baseUrl}/api/generate`, payload, 180000, resolvedConfig);
   if (!generated.ok) {
     throw new Error(typeof generated.reason === "string" ? generated.reason : "Generate API returned ok:false");
   }
@@ -270,8 +290,8 @@ async function runSingleGeneration(config, serverOverride = null) {
   }
 
   const createdAt = new Date().toISOString();
-  const dataRoot = getDataRoot(config.dataRoot);
-  const outputDir = path.join(dataRoot, "agent-runs", `${safeTimestamp(createdAt)}-${config.slug}`);
+  const dataRoot = getDataRoot(resolvedConfig.dataRoot);
+  const outputDir = path.join(dataRoot, "agent-runs", `${safeTimestamp(createdAt)}-${resolvedConfig.slug}`);
   const outputImagesDir = path.join(outputDir, "images");
   await fs.mkdir(outputImagesDir, { recursive: true });
 
@@ -297,18 +317,18 @@ async function runSingleGeneration(config, serverOverride = null) {
   const manifest = {
     schemaVersion: 1,
     createdAt,
-    category: config.category,
-    slug: config.slug,
-    prompt: config.prompt,
+    category: resolvedConfig.category,
+    slug: resolvedConfig.slug,
+    prompt: resolvedConfig.prompt,
     reference: {
-      primary: config.reference,
-      gallery: config.referenceGallery
+      primary: resolvedConfig.reference,
+      gallery: resolvedConfig.referenceGallery
     },
     params: {
-      count: config.count,
-      quality: config.quality,
-      imageSize: config.size,
-      aspectRatio: config.aspect,
+      count: resolvedConfig.count,
+      quality: resolvedConfig.quality,
+      imageSize: resolvedConfig.size,
+      aspectRatio: resolvedConfig.aspect,
       port: server.port,
       baseUrl: server.baseUrl,
       idempotencyKey
@@ -421,6 +441,8 @@ export function normalizeConfig(raw) {
   }
 
   const referenceGallery = normalizeReferenceGallery(raw.referenceGallery);
+  const referenceSlug = normalizeReferenceSlug(raw.referenceSlug);
+  const referenceGallerySlugs = normalizeReferenceGallerySlugs(raw.referenceGallerySlugs);
   const slug = sanitizeSlug(asTrimmedString(raw.slug) || prompt);
   const batch = parsePositiveInteger(raw.batch, "--batch", 1);
   const concurrency = parsePositiveInteger(raw.concurrency, "--concurrency", 4);
@@ -435,6 +457,8 @@ export function normalizeConfig(raw) {
     prompt,
     reference: asTrimmedString(raw.reference) || null,
     referenceGallery,
+    referenceSlug,
+    referenceGallerySlugs,
     category: asTrimmedString(raw.category) || null,
     slug,
     count: rawCount,
@@ -483,6 +507,27 @@ function normalizeReferenceGallery(value) {
   throw new Error("--reference-gallery must be a comma-separated string or JSON array");
 }
 
+function normalizeReferenceSlug(value) {
+  const slug = asTrimmedString(value);
+  return slug ? sanitizeSlug(slug) : null;
+}
+
+function normalizeReferenceGallerySlugs(value) {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeReferenceSlug(item)).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map(item => normalizeReferenceSlug(item))
+      .filter(Boolean);
+  }
+  throw new Error("--reference-gallery-slugs must be a comma-separated string or JSON array");
+}
+
 function parsePositiveInteger(value, flag, defaultValue) {
   if (value === undefined || value === null || value === "") {
     return defaultValue;
@@ -507,6 +552,64 @@ function parseNonNegativeInteger(value, flag, defaultValue) {
   return number;
 }
 
+export async function resolveReferenceSlug(slug, options = {}) {
+  const normalizedSlug = normalizeReferenceSlug(slug);
+  if (!normalizedSlug) {
+    throw new Error("reference slug must be a non-empty string");
+  }
+  const category = asTrimmedString(options.category) || null;
+
+  const runsRoot = path.join(getDataRoot(options.dataRoot), "agent-runs");
+  let entries;
+  try {
+    entries = await fs.readdir(runsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`No agent run found for reference slug: ${normalizedSlug}`);
+    }
+    throw error;
+  }
+
+  const matches = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const runDir = path.join(runsRoot, entry.name);
+    const manifestPath = path.join(runDir, "manifest.json");
+    if (!(await exists(manifestPath))) {
+      continue;
+    }
+
+    const manifest = await readJsonFile(manifestPath);
+    if (!matchesAgentRun(manifest, entry.name, { category, slug: normalizedSlug })) {
+      continue;
+    }
+
+    const firstImage = Array.isArray(manifest.images) ? manifest.images[0] : null;
+    const imageUrl = asTrimmedString(firstImage?.imageUrl);
+    matches.push({
+      dirName: entry.name,
+      manifestPath,
+      createdAt: asTrimmedString(manifest.createdAt),
+      imageUrl
+    });
+  }
+
+  if (matches.length === 0) {
+    throw new Error(`No agent run found for reference slug: ${normalizedSlug}`);
+  }
+
+  matches.sort(compareRunCreatedAtDesc);
+  const latest = matches[0];
+  if (!isApiImageUrl(latest.imageUrl)) {
+    throw new Error(`Latest run for reference slug "${normalizedSlug}" does not include a /api/images/<id> imageUrl: ${latest.manifestPath}`);
+  }
+
+  return latest.imageUrl;
+}
+
 async function buildCategoryIndex(rawCategory, options = {}) {
   const category = asTrimmedString(rawCategory);
   if (!category) {
@@ -529,12 +632,11 @@ async function buildCategoryIndex(rawCategory, options = {}) {
     }
 
     const manifest = await readJsonFile(manifestPath);
-    const manifestCategory = asTrimmedString(manifest.category);
-    const manifestSlug = asTrimmedString(manifest.slug);
-    if (manifestCategory !== category || !entry.name.endsWith(`-${manifestSlug}`)) {
+    if (!matchesAgentRun(manifest, entry.name, { category })) {
       continue;
     }
 
+    const manifestSlug = asTrimmedString(manifest.slug);
     const firstImage = Array.isArray(manifest.images) ? manifest.images[0] : null;
     const imageRelativePath = firstImage && asTrimmedString(firstImage.relativePath);
     runs.push({
@@ -569,6 +671,41 @@ async function buildCategoryIndex(rawCategory, options = {}) {
     indexHtmlPath: outputPath,
     manifestPaths: runs.map(run => run.manifestPath)
   };
+}
+
+function matchesAgentRun(manifest, dirName, filters = {}) {
+  const manifestCategory = asTrimmedString(manifest.category);
+  const manifestSlug = asTrimmedString(manifest.slug);
+
+  if (!manifestSlug || !dirName.endsWith(`-${manifestSlug}`)) {
+    return false;
+  }
+  if (filters.category !== undefined && filters.category !== null && manifestCategory !== filters.category) {
+    return false;
+  }
+  if (filters.slug !== undefined && filters.slug !== null && manifestSlug !== filters.slug) {
+    return false;
+  }
+  return true;
+}
+
+function compareRunCreatedAtDesc(left, right) {
+  const leftTime = Date.parse(left.createdAt);
+  const rightTime = Date.parse(right.createdAt);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  if (Number.isFinite(leftTime) && !Number.isFinite(rightTime)) {
+    return -1;
+  }
+  if (!Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+    return 1;
+  }
+  return right.dirName.localeCompare(left.dirName);
+}
+
+function isApiImageUrl(value) {
+  return asTrimmedString(value).startsWith("/api/images/");
 }
 
 async function readJsonFile(filePath) {
@@ -1243,10 +1380,14 @@ function printHelp() {
 
 Options:
   --prompt              Required generation prompt
+  stdin jobs            Pass {"jobs":[...]} or a JSON array for different-prompt runs
   --build-index         Build data/agent-runs/_{category}-index.html
   --upscale-from        Run directory to use as prompt/reference source
   --reference           Optional /api/images/<id> reference URL
   --reference-gallery   Optional comma-separated /api/images/<id> URLs
+  --reference-slug      Resolve latest run by slug as the primary reference
+  --reference-gallery-slugs
+                        Comma-separated slugs resolved into reference gallery URLs
   --category            Optional classification label
   --slug                Optional output folder slug
   --count               1, 2, or 4. Default: 1

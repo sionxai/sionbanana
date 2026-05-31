@@ -99,13 +99,18 @@ export function createSionBananaMcpServer(options = {}) {
       inputSchema: {
         prompt: z.string().trim().min(1).describe("Prompt passed as --prompt."),
         reference: optionalText().describe("Optional --reference image URL or path."),
+        referenceGallery: stringListSchema.describe("Optional --reference-gallery image URLs."),
+        referenceSlug: optionalText().describe("Optional --reference-slug for latest run lookup."),
+        referenceGallerySlugs: stringListSchema.describe("Optional --reference-gallery-slugs latest run lookups."),
         category: optionalText().describe("Optional --category label for the run manifest."),
         slug: optionalText().describe("Optional --slug for the run directory."),
         count: countSchema.describe("Optional --count. Must be 1, 2, or 4."),
         quality: qualitySchema.describe("Optional --quality. low, medium, high, or auto."),
         size: optionalText().describe("Optional --size image size."),
         batch: batchSchema.describe("Optional --batch. Number of same-prompt runs. Default: 1."),
-        concurrency: concurrencySchema.describe("Optional --concurrency. Concurrent batch workers. Default: 4.")
+        concurrency: concurrencySchema.describe("Optional --concurrency. Concurrent batch workers. Default: 4."),
+        retry: retrySchema.describe("Optional --retry transient failures. Default: 0."),
+        retryBaseDelayMs: z.number().int().min(1).optional().describe("Optional --retry-base-delay in ms.")
       },
       annotations: {
         readOnlyHint: false,
@@ -307,6 +312,9 @@ async function healthCheck(input, context) {
 export function buildGenerateArgs(input) {
   const args = ["--prompt", input.prompt];
   pushOptionalArg(args, "--reference", input.reference);
+  pushOptionalArg(args, "--reference-gallery", input.referenceGallery);
+  pushOptionalArg(args, "--reference-slug", input.referenceSlug);
+  pushOptionalArg(args, "--reference-gallery-slugs", input.referenceGallerySlugs);
   pushOptionalArg(args, "--category", input.category);
   pushOptionalArg(args, "--slug", input.slug);
   pushOptionalArg(args, "--count", input.count);
@@ -314,6 +322,8 @@ export function buildGenerateArgs(input) {
   pushOptionalArg(args, "--size", input.size);
   pushOptionalArg(args, "--batch", input.batch);
   pushOptionalArg(args, "--concurrency", input.concurrency);
+  pushOptionalArg(args, "--retry", input.retry);
+  pushOptionalArg(args, "--retry-base-delay", input.retryBaseDelayMs);
   return args;
 }
 
@@ -329,7 +339,7 @@ function pushOptionalArg(args, flag, value) {
   if (value === undefined || value === null || value === "") {
     return;
   }
-  args.push(flag, String(value));
+  args.push(flag, Array.isArray(value) ? value.join(",") : String(value));
 }
 
 async function runAgentGenerate(args, tool, context) {
