@@ -1,0 +1,51 @@
+{
+  "title": "스토리보드 예시 — 카페 멤버십 앱",
+  "outDir": "data/storyboard/example-cafe",
+  "defaults": {
+    "size": "1824x1024",
+    "quality": "high",
+    "count": 2,
+    "category": "example-cafe-keyframes"
+  },
+  "concurrency": 3,
+  "retry": 2,
+  "retryBaseDelayMs": 2000,
+  "scenes": [
+    {
+      "n": 1,
+      "title": "씬 1. 카페 카운터 — 낮",
+      "cuts": [
+        {
+          "slug": "cut-1-1",
+          "sec": "4s",
+          "story": "주인공이 카운터 앞에서 앱을 찾느라 당황한다",
+          "referenceSlug": "hero-character-sheet",
+          "referenceGallerySlugs": ["cafe-counter-bg"],
+          "prompt": "16:9 storyboard keyframe, bright modern cafe counter at daytime, main character holding a phone with a worried expression, clear readable pose, webtoon illustration style, cinematic composition"
+        },
+        {
+          "slug": "cut-1-2",
+          "sec": "5s",
+          "story": "친구가 여유롭게 멤버십 바코드를 보여준다",
+          "reference": "/api/images/friend-character-sheet",
+          "referenceGallery": ["/api/images/cafe-counter-bg"],
+          "prompt": "16:9 storyboard keyframe, friend confidently showing a membership barcode on phone at cafe counter, cashier scanner glow, main character surprised in background, webtoon illustration style"
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "title": "씬 2. 카페 테이블 — 낮",
+      "cuts": [
+        {
+          "slug": "cut-2-1",
+          "sec": "6s",
+          "story": "주인공이 앱을 설치하고 안도하며 웃는다",
+          "referenceSlug": "hero-character-sheet",
+          "referenceGallerySlugs": ["cafe-table-bg", "app-logo-card"],
+          "prompt": "16:9 storyboard keyframe, main character seated at cafe table smiling with relief while installing a clean membership app, warm daylight, phone screen visible but no readable text, webtoon illustration style"
+        }
+      ]
+    }
+  ]
+}
