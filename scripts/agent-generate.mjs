@@ -636,7 +636,6 @@ async function buildCategoryIndex(rawCategory, options = {}) {
       continue;
     }
 
-    const manifestSlug = asTrimmedString(manifest.slug);
     const firstImage = Array.isArray(manifest.images) ? manifest.images[0] : null;
     const imageRelativePath = firstImage && asTrimmedString(firstImage.relativePath);
     runs.push({

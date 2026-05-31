@@ -1,3 +1,40 @@
 {
-  "extends": ["next/core-web-vitals"]
+  "extends": ["next/core-web-vitals"],
+  "overrides": [
+    {
+      "files": ["scripts/**/*.mjs"],
+      "extends": ["eslint:recommended"],
+      "env": {
+        "node": true,
+        "browser": true,
+        "es2022": true
+      },
+      "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "module"
+      },
+      "rules": {
+        "no-redeclare": "error",
+        "no-dupe-keys": "error",
+        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+      }
+    },
+    {
+      "files": ["scripts/**/*.js"],
+      "extends": ["eslint:recommended"],
+      "env": {
+        "node": true,
+        "es2022": true
+      },
+      "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "script"
+      },
+      "rules": {
+        "no-redeclare": "error",
+        "no-dupe-keys": "error",
+        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+      }
+    }
+  ]
 }
