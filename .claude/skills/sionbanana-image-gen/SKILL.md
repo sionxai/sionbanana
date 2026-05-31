@@ -33,20 +33,52 @@ node scripts/agent-generate.mjs \
   --category "moon-running" \
   --slug "attempt" \
   --batch 10 \
-  --concurrency 4
+  --concurrency 4 \
+  --retry 2
 ```
 
 - 10개를 4개씩 동시 처리 → sequential 대비 약 2~4배 빠름 (10장 ~280초 vs ~500초)
 - batch 완료 시 통합 index가 **자동 생성**됨 (`--category` 필요)
 - slug는 자동 인덱싱: `attempt-01`, `attempt-02` ...
+- `--retry N`은 429/502/503/504/timeout 같은 일시 오류만 재시도. 로그는 stderr로만 출력됨.
 
-> ⚠️ **실측: 10개 batch에서 1~2개 rate limit/timeout 실패 가능** (예: 8/10). 100% 필요하면 실패분 재실행 또는 `--concurrency 3`으로 낮춤. (helper에 `--retry`가 추가되면 그것 사용.)
+> ⚠️ **실측: 10개 batch에서 1~2개 rate limit/timeout 실패 가능** (예: 8/10). 100% 필요하면 `--retry 2` 또는 `--concurrency 3`으로 낮춤.
 
 단건만 필요하면 `--batch` 생략:
 
 ```bash
 node scripts/agent-generate.mjs --prompt "..." --category xxx --slug yyy
 ```
+
+### Phase 1b: 스토리보드 (서로 다른 prompt 다건)
+
+컷마다 prompt가 다른 경우 `--batch`가 아니라 jobs 배열을 사용. stdin은 JSON 객체(`{"jobs":[...]}`) 또는 배열을 받을 수 있음:
+
+```bash
+node scripts/agent-generate.mjs --concurrency 3 --retry 2 --port 3002 < storyboard-jobs.json
+```
+
+`storyboard-jobs.json` 예:
+
+```json
+[
+  {
+    "slug": "cut-01",
+    "category": "storyboard-demo",
+    "prompt": "첫 컷 prompt",
+    "quality": "medium",
+    "count": 1
+  },
+  {
+    "slug": "cut-02",
+    "category": "storyboard-demo",
+    "prompt": "두 번째 컷 prompt",
+    "referenceSlug": "cut-01"
+  }
+]
+```
+
+출력은 JSON 하나이며 `jobs[].ids`, `jobs[].imageUrls`, `jobs[].outputPaths`, `jobs[].manifestPath`를 포함. 같은 `category`의 성공 run이 있으면 마지막에 index가 생성됨.
 
 ### Phase 2: 정리 (index)
 
@@ -85,6 +117,18 @@ node scripts/agent-generate.mjs \
 - **picker**: "캐릭터 라이브러리에서" 버튼 → 검색/태그 필터 모달
 
 helper(CLI)에서 캐릭터를 쓰려면 해당 이미지 URL(`/api/images/<id>`)을 `--reference`로 전달.
+이전 helper run을 참조할 때는 URL을 직접 복사하지 않고 slug로도 지정 가능:
+
+```bash
+node scripts/agent-generate.mjs \
+  --prompt "cut-03 prompt" \
+  --category "storyboard-demo" \
+  --slug "cut-03" \
+  --reference-slug "cut-02" \
+  --reference-gallery-slugs "character-base,prop-base"
+```
+
+`--reference-slug`는 같은 category 안에서 `manifest.slug`와 run 디렉토리 suffix가 일치하는 최신 run의 첫 `/api/images/<id>`를 사용. `--reference`를 직접 주면 직접 URL이 우선.
 
 ## Prompt 카탈로그
 
@@ -121,7 +165,10 @@ data/agent-runs/{ISO-timestamp}-{slug}/
 
 ## MCP (다른 세션에서 사용)
 
-`scripts/mcp-server.mjs`를 Claude Desktop/Claude.ai에 등록하면 다른 세션에서도 도구로 사용 가능 (`docs/mcp-server-setup.md`). `generate` tool은 `batch`/`concurrency`를 지원 → 다른 세션에서도 병렬 생성 가능.
+`scripts/mcp-server.mjs`를 Claude Desktop/Claude.ai에 등록하면 다른 세션에서도 도구로 사용 가능 (`docs/mcp-server-setup.md`).
+
+- `generate`: 단건 또는 같은 prompt batch. `batch`/`concurrency`/`retry`/`referenceSlug` 지원.
+- `generate_many`: 서로 다른 prompt jobs 배열. `concurrency` 기본 3, `retry` 지원.
 
 ## Limits
 
