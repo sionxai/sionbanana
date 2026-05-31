@@ -12,6 +12,7 @@ const SERVER_SCRIPT = path.join(REPO_ROOT, "scripts", "mcp-server.mjs");
 const EXPECTED_TOOLS = [
   "health_check",
   "generate",
+  "generate_many",
   "upscale_from",
   "build_index",
   "list_runs",
@@ -41,6 +42,7 @@ test("MCP tools expose valid object input schemas", async () => {
     }
 
     assert.deepEqual(toolsByName.get("generate").inputSchema.required, ["prompt"]);
+    assert.deepEqual(toolsByName.get("generate_many").inputSchema.required, ["jobs"]);
     assert.deepEqual(toolsByName.get("upscale_from").inputSchema.required, ["upscaleFrom"]);
     assert.deepEqual(toolsByName.get("build_index").inputSchema.required, ["category"]);
     assert.deepEqual(toolsByName.get("read_manifest").inputSchema.required, ["run"]);
