@@ -8,6 +8,8 @@ const DEFAULT_PORT = 3002;
 const PORT_SCAN_ORDER = [3002, 3000, 3001, 3003, 3004, 3005];
 const VALID_COUNTS = new Set([1, 2, 4]);
 const VALID_QUALITIES = new Set(["low", "medium", "high", "auto"]);
+const TRANSIENT_HTTP_STATUSES = new Set([429, 502, 503, 504]);
+const MAX_RETRY_DELAY_MS = 30000;
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
 
 async function main() {
@@ -108,7 +110,7 @@ async function runSingleGeneration(config, serverOverride = null) {
   const idempotencyKey = createIdempotencyKey(config.slug);
   const payload = buildGeneratePayload(config, idempotencyKey);
 
-  const generated = await postJson(`${server.baseUrl}/api/generate`, payload, 180000);
+  const generated = await postJsonWithRetry(`${server.baseUrl}/api/generate`, payload, 180000, config);
   if (!generated.ok) {
     throw new Error(typeof generated.reason === "string" ? generated.reason : "Generate API returned ok:false");
   }
@@ -269,6 +271,12 @@ export function normalizeConfig(raw) {
   const slug = sanitizeSlug(asTrimmedString(raw.slug) || prompt);
   const batch = parsePositiveInteger(raw.batch, "--batch", 1);
   const concurrency = parsePositiveInteger(raw.concurrency, "--concurrency", 4);
+  const retry = parseNonNegativeInteger(raw.retry, "--retry", 0);
+  const retryBaseDelayMs = parsePositiveInteger(
+    raw.retryBaseDelay ?? raw.retryBaseDelayMs,
+    "--retry-base-delay",
+    2000
+  );
 
   return {
     prompt,
@@ -283,7 +291,9 @@ export function normalizeConfig(raw) {
     port,
     portExplicit: raw.portExplicit === true,
     batch,
-    concurrency
+    concurrency,
+    retry,
+    retryBaseDelayMs
   };
 }
 
@@ -327,6 +337,18 @@ function parsePositiveInteger(value, flag, defaultValue) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < 1) {
     throw new Error(`${flag} must be a positive integer`);
+  }
+  return number;
+}
+
+function parseNonNegativeInteger(value, flag, defaultValue) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${flag} must be a non-negative integer`);
   }
   return number;
 }
@@ -570,6 +592,28 @@ async function postJson(url, body, timeoutMs) {
   );
 }
 
+async function postJsonWithRetry(url, body, timeoutMs, config) {
+  const retry = config.retry ?? 0;
+  const retryBaseDelayMs = config.retryBaseDelayMs ?? 2000;
+
+  for (let attempt = 0; attempt <= retry; attempt += 1) {
+    try {
+      return await postJson(url, body, timeoutMs);
+    } catch (error) {
+      if (!isTransientRequestError(error) || attempt >= retry) {
+        throw error;
+      }
+
+      const retryAttempt = attempt + 1;
+      const delayMs = calculateRetryDelay(retryAttempt, retryBaseDelayMs);
+      logRetry({ url, retryAttempt, retry, delayMs, error });
+      await sleep(delayMs);
+    }
+  }
+
+  throw new Error("Retry loop exited unexpectedly");
+}
+
 async function requestJson(url, init, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -588,18 +632,60 @@ async function requestJson(url, init, timeoutMs) {
 
     if (!response.ok) {
       const reason = data && typeof data.reason === "string" ? data.reason : response.statusText;
-      throw new Error(`${response.status} ${reason}`);
+      throw createHttpError(response.status, reason);
     }
 
     return data;
   } catch (error) {
     if (error && error.name === "AbortError") {
-      throw new Error(`Request timed out after ${timeoutMs}ms`);
+      throw createTimeoutError(timeoutMs);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function createHttpError(status, reason) {
+  const error = new Error(`${status} ${reason}`);
+  error.status = status;
+  error.transient = isTransientStatus(status);
+  return error;
+}
+
+export function createTimeoutError(timeoutMs) {
+  const error = new Error(`Request timed out after ${timeoutMs}ms`);
+  error.transient = true;
+  return error;
+}
+
+export function isTransientRequestError(error) {
+  return Boolean(error && error.transient === true);
+}
+
+function isTransientStatus(status) {
+  return TRANSIENT_HTTP_STATUSES.has(status);
+}
+
+function calculateRetryDelay(attempt, retryBaseDelayMs) {
+  const jitterMs = Math.floor(Math.random() * 501);
+  return Math.min(MAX_RETRY_DELAY_MS, retryBaseDelayMs * (2 ** (attempt - 1)) + jitterMs);
+}
+
+function logRetry({ url, retryAttempt, retry, delayMs, error }) {
+  process.stderr.write(`${JSON.stringify({
+    event: "agent-generate-retry",
+    url,
+    attempt: retryAttempt,
+    retry,
+    delayMs,
+    status: typeof error?.status === "number" ? error.status : null,
+    reason: error instanceof Error ? error.message : String(error)
+  })}\n`);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function renderReviewHtml(manifest) {
@@ -1007,6 +1093,8 @@ Options:
   --aspect              Optional aspectRatio passed to /api/generate
   --batch               Number of same-prompt runs to create. Default: 1
   --concurrency         Concurrent batch workers. Default: 4
+  --retry               Retry transient generate failures. Default: 0
+  --retry-base-delay    Base retry backoff delay in ms. Default: 2000
   --port                Preferred localhost port. Default: 3002
 `);
 }
