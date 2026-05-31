@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildGenerateArgs } from "../scripts/mcp-server.mjs";
+import { buildGenerateArgs, TOOL_NAMES } from "../scripts/mcp-server.mjs";
 
 test("buildGenerateArgs includes batch and concurrency when provided", () => {
   assert.deepEqual(
@@ -49,4 +49,9 @@ test("buildGenerateArgs preserves single-generate defaults by omitting batch fla
       "banana-milk-hero"
     ]
   );
+});
+
+test("TOOL_NAMES exposes generate_many alongside existing generate", () => {
+  assert.equal(TOOL_NAMES.includes("generate"), true);
+  assert.equal(TOOL_NAMES.includes("generate_many"), true);
 });

@@ -9,6 +9,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { runJobs } from "./agent-generate.mjs";
+
 const SERVER_FILE = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SERVER_FILE), "..");
 const AGENT_GENERATE_SCRIPT = path.join(REPO_ROOT, "scripts", "agent-generate.mjs");
@@ -21,11 +23,26 @@ const qualitySchema = z.enum(["low", "medium", "high", "auto"]).optional();
 const countSchema = z.union([z.literal(1), z.literal(2), z.literal(4)]).optional();
 const batchSchema = z.number().int().min(1).optional();
 const concurrencySchema = z.number().int().min(1).optional();
+const retrySchema = z.number().int().min(0).optional();
 const timeoutSchema = z.number().int().min(100).max(30000).optional();
+const stringListSchema = z.union([z.string().trim().min(1), z.array(z.string().trim().min(1))]).optional();
+const generateManyJobSchema = z.object({
+  slug: optionalText(),
+  category: optionalText(),
+  prompt: z.string().trim().min(1),
+  size: optionalText(),
+  quality: qualitySchema,
+  count: countSchema,
+  reference: optionalText(),
+  referenceGallery: stringListSchema,
+  referenceSlug: optionalText(),
+  referenceGallerySlugs: stringListSchema
+});
 
 const TOOL_NAMES = [
   "health_check",
   "generate",
+  "generate_many",
   "upscale_from",
   "build_index",
   "list_runs",
@@ -97,6 +114,28 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => runAgentGenerate(buildGenerateArgs(input), "generate", context)
+  );
+
+  registerJsonTool(
+    server,
+    "generate_many",
+    {
+      title: "Generate Many",
+      description:
+        "Experimental beta tool. Runs different-prompt image generation jobs in-process with a concurrency gate.",
+      inputSchema: {
+        jobs: z.array(generateManyJobSchema).min(1).describe("Different-prompt generation jobs."),
+        concurrency: concurrencySchema.describe("Optional concurrent workers. Default: 3."),
+        port: z.number().int().min(1).max(65535).optional().describe("Preferred local app port."),
+        retry: retrySchema.describe("Optional transient failure retries per job. Default: 0.")
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => generateMany(input, context)
   );
 
   registerJsonTool(
@@ -313,6 +352,37 @@ async function runAgentGenerate(args, tool, context) {
     ...parsed,
     exitCode: execution.exitCode,
     stderr: execution.stderr.trim() || undefined
+  };
+}
+
+async function generateMany(input, context) {
+  if (context.mock) {
+    return {
+      ok: true,
+      mocked: true,
+      tool: "generate_many",
+      total: input.jobs.length,
+      jobs: input.jobs.map(job => ({
+        slug: asString(job.slug) || null,
+        prompt: job.prompt
+      }))
+    };
+  }
+
+  const jobs = await runJobs(input.jobs, {
+    concurrency: input.concurrency,
+    port: input.port,
+    retry: input.retry,
+    dataRoot: context.dataRoot
+  });
+  const succeeded = jobs.filter(job => job.ok).length;
+
+  return {
+    ok: succeeded === jobs.length,
+    total: jobs.length,
+    succeeded,
+    failed: jobs.length - succeeded,
+    jobs
   };
 }
 

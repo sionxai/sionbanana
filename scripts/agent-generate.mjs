@@ -33,8 +33,19 @@ async function main() {
 }
 
 export async function runRawConfig(rawConfig) {
+  if (Array.isArray(rawConfig.jobs)) {
+    const jobs = await runJobs(rawConfig.jobs, {
+      concurrency: rawConfig.concurrency,
+      port: rawConfig.port,
+      retry: rawConfig.retry,
+      retryBaseDelayMs: rawConfig.retryBaseDelayMs ?? rawConfig.retryBaseDelay,
+      dataRoot: rawConfig.dataRoot
+    });
+    return summarizeJobResults(jobs);
+  }
+
   if (rawConfig.buildIndex) {
-    return buildCategoryIndex(rawConfig.buildIndex);
+    return buildCategoryIndex(rawConfig.buildIndex, { dataRoot: rawConfig.dataRoot });
   }
 
   const generationConfig = rawConfig.upscaleFrom
@@ -45,6 +56,69 @@ export async function runRawConfig(rawConfig) {
     return runBatchGeneration(config);
   }
   return runSingleGeneration(config);
+}
+
+export async function runJobs(jobs, options = {}) {
+  if (!Array.isArray(jobs) || jobs.length === 0) {
+    throw new Error("jobs must be a non-empty array");
+  }
+
+  const concurrency = parsePositiveInteger(options.concurrency, "concurrency", 3);
+  const normalizeConfigImpl = options.normalizeConfigImpl ?? normalizeConfig;
+  const runSingleGenerationImpl = options.runSingleGenerationImpl ?? runSingleGeneration;
+  const readManifestInfoImpl = options.readManifestInfoImpl ?? readManifestInfo;
+  const buildCategoryIndexImpl = options.buildCategoryIndexImpl ?? buildCategoryIndex;
+  const runWithConcurrency = options.runWithConcurrencyImpl ?? await loadRunWithConcurrency();
+  const server = options.serverOverride ?? (
+    options.runSingleGenerationImpl ? null : await findHealthyServerForJobs(options)
+  );
+
+  const settled = await runWithConcurrency(jobs, concurrency, async job => {
+    const rawConfig = buildJobRawConfig(job, options);
+    const config = normalizeConfigImpl(rawConfig);
+    const result = await runSingleGenerationImpl(config, server);
+    const manifestInfo = result.manifestPath
+      ? await readManifestInfoImpl(result.manifestPath)
+      : { ids: [], imageUrls: [], outputPaths: [] };
+
+    return {
+      slug: config.slug,
+      category: config.category,
+      ok: true,
+      ids: manifestInfo.ids,
+      imageUrls: manifestInfo.imageUrls,
+      outputPaths: manifestInfo.outputPaths.length ? manifestInfo.outputPaths : result.imagePaths ?? [],
+      manifestPath: result.manifestPath ?? null,
+      reason: null
+    };
+  });
+
+  const results = settled.map((result, index) => {
+    if (result.status === "fulfilled") {
+      return stripJobResultCategory(result.value);
+    }
+
+    return {
+      slug: getJobFailureSlug(jobs[index]),
+      ok: false,
+      ids: [],
+      imageUrls: [],
+      outputPaths: [],
+      manifestPath: null,
+      reason: result.reason instanceof Error ? result.reason.message : String(result.reason)
+    };
+  });
+
+  const categories = Array.from(new Set(
+    settled
+      .filter(result => result.status === "fulfilled" && result.value.category)
+      .map(result => result.value.category)
+  ));
+  for (const category of categories) {
+    await buildCategoryIndexImpl(category, { dataRoot: options.dataRoot });
+  }
+
+  return results;
 }
 
 async function runBatchGeneration(config) {
@@ -89,7 +163,7 @@ async function runBatchGeneration(config) {
 
   if (config.category && succeeded > 0) {
     try {
-      const index = await buildCategoryIndex(config.category);
+      const index = await buildCategoryIndex(config.category, { dataRoot: config.dataRoot });
       response.indexPath = index.indexHtmlPath;
     } catch (error) {
       response.ok = false;
@@ -103,6 +177,81 @@ async function runBatchGeneration(config) {
 async function loadRunWithConcurrency() {
   const concurrency = await import("../lib/concurrency.ts");
   return concurrency.runWithConcurrency;
+}
+
+function buildJobRawConfig(job, options) {
+  if (!job || typeof job !== "object" || Array.isArray(job)) {
+    throw new Error("Each job must be an object");
+  }
+
+  return {
+    ...job,
+    port: job.port ?? options.port,
+    portExplicit: job.portExplicit === true || options.port !== undefined || job.port !== undefined,
+    retry: job.retry ?? options.retry,
+    retryBaseDelayMs: job.retryBaseDelayMs ?? job.retryBaseDelay ?? options.retryBaseDelayMs,
+    dataRoot: job.dataRoot ?? options.dataRoot,
+    batch: 1
+  };
+}
+
+async function findHealthyServerForJobs(options) {
+  const port = options.port === undefined ? DEFAULT_PORT : Number(options.port);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error("port must be a valid TCP port");
+  }
+  return findHealthyServer(port, options.port !== undefined);
+}
+
+function stripJobResultCategory(result) {
+  return {
+    slug: result.slug,
+    ok: result.ok,
+    ids: result.ids,
+    imageUrls: result.imageUrls,
+    outputPaths: result.outputPaths,
+    manifestPath: result.manifestPath,
+    reason: result.reason
+  };
+}
+
+function getJobFailureSlug(job) {
+  if (job && typeof job === "object" && !Array.isArray(job)) {
+    const slug = asTrimmedString(job.slug);
+    if (slug) {
+      return sanitizeSlug(slug);
+    }
+    const prompt = asTrimmedString(job.prompt);
+    if (prompt) {
+      return sanitizeSlug(prompt);
+    }
+  }
+  return null;
+}
+
+async function readManifestInfo(manifestPath) {
+  try {
+    const manifest = await readJsonFile(manifestPath);
+    const images = Array.isArray(manifest.images) ? manifest.images : [];
+    return {
+      ids: images.map(image => asTrimmedString(image.id)).filter(Boolean),
+      imageUrls: images.map(image => asTrimmedString(image.imageUrl)).filter(Boolean),
+      outputPaths: images.map(image => asTrimmedString(image.outputPath)).filter(Boolean)
+    };
+  } catch {
+    return { ids: [], imageUrls: [], outputPaths: [] };
+  }
+}
+
+function summarizeJobResults(jobs) {
+  const succeeded = jobs.filter(job => job.ok).length;
+  return {
+    ok: succeeded === jobs.length,
+    total: jobs.length,
+    succeeded,
+    failed: jobs.length - succeeded,
+    jobs
+  };
 }
 
 async function runSingleGeneration(config, serverOverride = null) {
@@ -121,13 +270,14 @@ async function runSingleGeneration(config, serverOverride = null) {
   }
 
   const createdAt = new Date().toISOString();
-  const outputDir = path.join(getDataRoot(), "agent-runs", `${safeTimestamp(createdAt)}-${config.slug}`);
+  const dataRoot = getDataRoot(config.dataRoot);
+  const outputDir = path.join(dataRoot, "agent-runs", `${safeTimestamp(createdAt)}-${config.slug}`);
   const outputImagesDir = path.join(outputDir, "images");
   await fs.mkdir(outputImagesDir, { recursive: true });
 
   const copiedImages = [];
   for (const [index, image] of images.entries()) {
-    const sourcePath = resolveStoragePath(image.storagePath);
+    const sourcePath = resolveStoragePath(image.storagePath, dataRoot);
     const fileName = await uniqueFileName(outputImagesDir, path.basename(sourcePath), index);
     const destinationPath = path.join(outputImagesDir, fileName);
     await fs.copyFile(sourcePath, destinationPath);
@@ -240,6 +390,9 @@ async function readStdinJsonIfAvailable() {
   }
 
   const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed)) {
+    return { jobs: parsed };
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("stdin JSON must be an object");
   }
@@ -293,7 +446,8 @@ export function normalizeConfig(raw) {
     batch,
     concurrency,
     retry,
-    retryBaseDelayMs
+    retryBaseDelayMs,
+    dataRoot: asTrimmedString(raw.dataRoot) || null
   };
 }
 
@@ -353,13 +507,13 @@ function parseNonNegativeInteger(value, flag, defaultValue) {
   return number;
 }
 
-async function buildCategoryIndex(rawCategory) {
+async function buildCategoryIndex(rawCategory, options = {}) {
   const category = asTrimmedString(rawCategory);
   if (!category) {
     throw new Error("--build-index requires a category");
   }
 
-  const runsRoot = path.join(getDataRoot(), "agent-runs");
+  const runsRoot = path.join(getDataRoot(options.dataRoot), "agent-runs");
   const entries = await fs.readdir(runsRoot, { withFileTypes: true });
   const runs = [];
 
@@ -529,7 +683,16 @@ function extractImages(response) {
     .filter(Boolean);
 }
 
-function getDataRoot() {
+function getDataRoot(override = null) {
+  const explicitDir = asTrimmedString(override);
+  if (explicitDir) {
+    if (explicitDir.startsWith("~/")) {
+      const home = process.env.HOME || process.cwd();
+      return path.resolve(home, explicitDir.slice(2));
+    }
+    return path.resolve(explicitDir);
+  }
+
   const envDir = asTrimmedString(process.env.SIONBANANA_DATA_DIR);
   if (envDir) {
     if (envDir.startsWith("~/")) {
@@ -541,13 +704,12 @@ function getDataRoot() {
   return path.resolve(process.cwd(), "data");
 }
 
-function resolveStoragePath(storagePath) {
+function resolveStoragePath(storagePath, dataRoot = getDataRoot()) {
   if (path.isAbsolute(storagePath)) {
     return storagePath;
   }
 
   const normalized = storagePath.replace(/^[/\\]+/, "");
-  const dataRoot = getDataRoot();
   if (normalized === "images" || normalized.startsWith(`images${path.sep}`) || normalized.startsWith("images/")) {
     return path.join(dataRoot, normalized);
   }
