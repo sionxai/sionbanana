@@ -110,6 +110,8 @@ export function normalizeStoryboardSpec(rawSpec) {
   const concurrency = optionalPositiveInteger(rawSpec.concurrency, "spec.concurrency");
   const retry = optionalNonNegativeInteger(rawSpec.retry, "spec.retry");
   const retryBaseDelayMs = optionalPositiveInteger(rawSpec.retryBaseDelayMs, "spec.retryBaseDelayMs");
+  const logline = asTrimmedString(rawSpec.logline) || undefined;
+  const synopsis = normalizeSynopsis(rawSpec.synopsis);
 
   return removeUndefinedValues({
     title,
@@ -118,6 +120,8 @@ export function normalizeStoryboardSpec(rawSpec) {
     concurrency,
     retry,
     retryBaseDelayMs,
+    logline,
+    synopsis,
     scenes
   });
 }
@@ -236,6 +240,8 @@ export function buildStoryboardOrganizePlan(rawSpec, rawSummary) {
         slug: cut.slug,
         sec: cut.sec ?? null,
         story: cut.story ?? null,
+        dialogue: cut.dialogue ?? null,
+        camera: cut.camera ?? null,
         ok: variants.length > 0,
         reason: variants.length > 0 ? null : result?.reason ?? null,
         variants
@@ -320,6 +326,8 @@ export async function organizeStoryboard(rawSpec, rawSummary, options = {}) {
     indexPath,
     renderStoryboardIndex({
       title: spec.title,
+      logline: spec.logline,
+      synopsis: spec.synopsis,
       scenes: organizedScenes,
       totalCuts,
       successfulCuts
@@ -441,6 +449,8 @@ function normalizeCut(rawCut, { sceneIndex, cutIndex }) {
     slug,
     sec: optionalString(rawCut.sec),
     story: optionalString(rawCut.story),
+    dialogue: optionalString(rawCut.dialogue),
+    camera: optionalString(rawCut.camera),
     size: optionalString(rawCut.size),
     quality: optionalString(rawCut.quality),
     count: optionalPositiveInteger(rawCut.count, `cut ${slug}.count`),
@@ -466,9 +476,10 @@ function normalizeSummaryJobs(rawSummary) {
   throw new Error("summary must be an object with jobs array or a jobs array");
 }
 
-function renderStoryboardIndex({ title, scenes, totalCuts, successfulCuts }) {
+function renderStoryboardIndex({ title, logline, synopsis, scenes, totalCuts, successfulCuts }) {
   const body = scenes.map(scene => renderScene(scene)).join("\n");
   const sceneCount = scenes.length;
+  const synopsisBlock = renderSynopsis(logline, synopsis);
 
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
@@ -487,11 +498,21 @@ function renderStoryboardIndex({ title, scenes, totalCuts, successfulCuts }) {
   .card { background:#15181d; border:1px solid #23262d; border-radius:8px; padding:12px; }
   .card.missing { opacity:.55; }
   .cap { font-size:13px; color:#dfe3e8; margin-bottom:8px; font-weight:600; overflow-wrap:anywhere; }
+  .story { font-size:12.5px; color:#aeb4bd; margin:0 0 8px; line-height:1.5; overflow-wrap:anywhere; }
+  .dlg { font-size:12.5px; color:#e7d6a8; margin:0 0 6px; line-height:1.5; overflow-wrap:anywhere; }
+  .dlg b { color:#f0c14b; font-weight:600; }
+  .cam { font-size:12px; color:#8fc6e0; margin:0 0 10px; line-height:1.45; overflow-wrap:anywhere; }
+  .cam::before { content:"🎬 "; }
   .variants { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
   figure { margin:0; min-width:0; }
   figure img { width:100%; height:auto; border-radius:6px; display:block; background:#000; }
   figcaption { font-size:11px; color:#7d838b; margin-top:4px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
   .ph { color:#91b36d; padding:24px; text-align:center; border:1px dashed #3a3f47; border-radius:6px; }
+  .synopsis { background:#14181e; border:1px solid #23262d; border-left:3px solid #3ec47a; border-radius:8px; padding:16px 20px; margin:16px 0 8px; }
+  .synopsis h3 { margin:0 0 10px; font-size:14px; color:#cfeede; }
+  .synopsis .logline { margin:0 0 12px; font-size:14px; line-height:1.6; color:#e8e8ea; font-weight:600; }
+  .synopsis ol { margin:0; padding-left:22px; }
+  .synopsis li { font-size:13.5px; line-height:1.7; color:#c4cad2; margin-bottom:3px; }
   @media (min-width:1100px){ .grid{ grid-template-columns:1fr 1fr; } }
 </style></head>
 <body>
@@ -500,10 +521,21 @@ function renderStoryboardIndex({ title, scenes, totalCuts, successfulCuts }) {
   <div class="meta">${sceneCount}씬 ${totalCuts}컷 · 생성 성공 ${successfulCuts}/${totalCuts}</div>
 </header>
 <main>
+${synopsisBlock}
 ${body}
 </main>
 </body></html>
 `;
+}
+
+function renderSynopsis(logline, synopsis) {
+  const lines = Array.isArray(synopsis) ? synopsis.filter(Boolean) : [];
+  if (!logline && lines.length === 0) return "";
+  const loglineHtml = logline ? `<p class="logline">${escapeHtml(logline)}</p>` : "";
+  const listHtml = lines.length
+    ? `<ol>${lines.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ol>`
+    : "";
+  return `<div class="synopsis"><h3>📖 스토리라인</h3>${loglineHtml}${listHtml}</div>`;
 }
 
 function renderScene(scene) {
@@ -513,8 +545,9 @@ function renderScene(scene) {
 
 function renderCut(cut) {
   const label = formatCutLabel(cut);
+  const meta = renderCutMeta(cut);
   if (!cut.variants.length) {
-    return `<div class="card missing"><div class="cap">${escapeHtml(label)}</div><div class="ph">미생성/실패</div></div>`;
+    return `<div class="card missing"><div class="cap">${escapeHtml(label)}</div>${meta}<div class="ph">미생성/실패</div></div>`;
   }
 
   const images = cut.variants
@@ -523,13 +556,38 @@ function renderCut(cut) {
     ))
     .join("\n");
 
-  return `<div class="card"><div class="cap">${escapeHtml(label)}</div><div class="variants">${images}</div></div>`;
+  return `<div class="card"><div class="cap">${escapeHtml(label)}</div>${meta}<div class="variants">${images}</div></div>`;
+}
+
+function renderCutMeta(cut) {
+  const parts = [];
+  if (cut.story) parts.push(`<p class="story">${escapeHtml(cut.story)}</p>`);
+  if (cut.dialogue) parts.push(`<p class="dlg">${renderDialogue(cut.dialogue)}</p>`);
+  if (cut.camera) parts.push(`<p class="cam">${escapeHtml(cut.camera)}</p>`);
+  return parts.join("");
+}
+
+// "화자: 대사" 패턴이면 화자를 굵게. 여러 줄은 <br>로.
+function renderDialogue(text) {
+  return text
+    .split("\n")
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+      const m = trimmed.match(/^([^:：]{1,16})([:：])\s*(.*)$/);
+      if (m) {
+        return `<b>${escapeHtml(m[1])}</b>${escapeHtml(m[2])} ${escapeHtml(m[3])}`;
+      }
+      return escapeHtml(trimmed);
+    })
+    .filter(Boolean)
+    .join("<br>");
 }
 
 function formatCutLabel(cut) {
   const sec = cut.sec ? ` (${cut.sec})` : "";
-  const story = cut.story ? ` · ${cut.story}` : "";
-  return `${cut.slug}${sec}${story}`;
+  // story는 카드 본문으로 내렸으므로 라벨은 slug + 초만
+  return `${cut.slug}${sec}`;
 }
 
 function summarizeJobResults(jobs) {
@@ -658,6 +716,18 @@ function optionalPositiveInteger(value, label) {
     throw new Error(`${label} must be a positive integer`);
   }
   return number;
+}
+
+// synopsis: string[] | undefined. 한 줄 요약들의 배열.
+function normalizeSynopsis(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("spec.synopsis must be an array of strings");
+  }
+  const items = value.map(item => asTrimmedString(item)).filter(Boolean);
+  return items.length ? items : undefined;
 }
 
 function optionalNonNegativeInteger(value, label) {

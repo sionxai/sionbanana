@@ -175,7 +175,7 @@ test("buildStoryboardOrganizePlan maps summary ids to scene variant filenames", 
           n: 1,
           title: "씬 1",
           cuts: [
-            { slug: "cut-1-1", sec: "4s", story: "두 장", prompt: "first" },
+            { slug: "cut-1-1", sec: "4s", story: "두 장", dialogue: "해린: \"테스트\"", camera: "와이드 24mm 고정", prompt: "first" },
             { slug: "cut-1-2", sec: "5s", story: "한 장", prompt: "second" }
           ]
         },
@@ -212,10 +212,16 @@ test("buildStoryboardOrganizePlan maps summary ids to scene variant filenames", 
   assert.equal(plan.totalCuts, 3);
   assert.equal(plan.successfulCuts, 2);
   assert.equal(plan.missingCuts, 1);
+  // dialogue/camera fields flow through to the organize plan
+  assert.equal(plan.scenes[0].cuts[0].dialogue, "해린: \"테스트\"");
+  assert.equal(plan.scenes[0].cuts[0].camera, "와이드 24mm 고정");
+  assert.equal(plan.scenes[0].cuts[1].dialogue, null);
   assert.deepEqual(plan.scenes[1].cuts[0], {
     slug: "cut-2-1",
     sec: "6s",
     story: "실패",
+    dialogue: null,
+    camera: null,
     ok: false,
     reason: "generate failed",
     variants: []
