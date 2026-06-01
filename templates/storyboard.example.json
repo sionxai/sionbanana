@@ -2,7 +2,7 @@
   "title": "스토리보드 예시 — 카페 멤버십 앱",
   "outDir": "data/storyboard/example-cafe",
   "defaults": {
-    "size": "1824x1024",
+    "size": "2k-16:9",
     "quality": "high",
     "count": 2,
     "category": "example-cafe-keyframes"

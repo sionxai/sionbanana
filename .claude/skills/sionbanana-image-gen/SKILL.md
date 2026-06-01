@@ -91,6 +91,7 @@ node scripts/storyboard.mjs organize path/to/storyboard.spec.json storyboard.sum
 ```
 
 - spec은 `title`, `outDir`, `defaults`, `scenes[].cuts[]` 구조를 사용한다. 각 cut은 `slug`, `prompt`가 필수이고 `size`, `quality`, `count`, `category`는 cut 값이 없으면 `defaults`에서 채운다.
+- **해상도 기본값은 2K(`"size": "2k-16:9"` = `2048x1152`)로 한다.** 세로물은 `2k-9:16`, 정사각은 `2k-1:1`. 예전 `1824x1024`(1.9K)는 빠른 탐색용이며, 최종 딜리버리 스토리보드는 처음부터 2K로 생성한다. (별도 업스케일 단계 없이 바로 2K 결과를 얻기 위함.)
 - 레퍼런스 이미지를 `data/images/<bucket>/<id>.png`에 두면 `/api/images/<id>`로 접근할 수 있으므로 `reference` 또는 `referenceGallery`에 직접 넣는다.
 - 이전 `agent-generate` 결과처럼 `data/agent-runs/.../manifest.json`에 slug가 남아 있는 이미지는 `referenceSlug`, `referenceGallerySlugs`로 참조한다. 같은 `category` 안에서 최신 run의 첫 `/api/images/<id>`가 사용된다.
 - `run`은 spec을 jobs로 평탄화하고, slug reference를 URL로 해석한 뒤 `runJobs`로 생성하고, `outDir/scene-<n>/<slug>_v1.png` 형태로 복사한 다음 `outDir/index.html`을 만든다.
@@ -136,9 +137,17 @@ Hyperrealistic photography, architectural reference style.
 
 - `--slug "ref-loc-{장소명}"`, `--quality high`, `--aspect "16:9"`
 
-#### 오브젝트 시트
+#### 오브젝트 시트 ★중요
 
-서사적으로 반복 등장하거나 상징적 소품마다 1장. 프롬프트 구조:
+서사적으로 반복 등장하는 소품(카메라, 무기, 탈것, 휴대폰, 상징 물건 등)은 **반드시 오브젝트 시트로 외형을 고정**한다. 시트 없이 `"futuristic vlog camera"`, `"미래형 카메라"` 같은 **추상 표현만 쓰면 컷마다 완전히 다른 물건**이 나온다 (실측: 같은 카메라가 짐벌캠·태블릿·고프로로 제각각 생성됨). 캐릭터를 시트로 고정하듯 핵심 소품도 똑같이 고정해야 한다.
+
+권장 절차:
+1. **구체적 실물 모델로 지정** — `"미래형 카메라"`(X) → `"compact mirrorless camera modeled on a Sony a7c, silver-and-black body, short retractable lens, flip-out LCD"`(O).
+2. 그 묘사로 오브젝트 시트 1장 생성 → `data/images/<bucket>/<id>.png`로 등록.
+3. 소품이 **프레임에 보이는 컷**에만 그 시트를 `referenceGallery`(또는 `--reference-gallery-slugs`)에 추가하고, 프롬프트에 `"keep this exact same {소품} design as the reference sheet"`를 명시한다.
+4. 소품이 안 보이는 컷(POV·화면 overlay·떡밥 컷 등)은 시트를 넣지 않는다.
+
+프롬프트 구조:
 
 ```
 Prop reference sheet for {오브젝트명}.
@@ -290,5 +299,7 @@ data/agent-runs/{ISO-timestamp}-{slug}/
 
 - 단건 생성 60~120초. **`--batch --concurrency`로 병렬 가능** (concurrency 4 권장 안전선).
 - Codex rate limit (사용자 ChatGPT Pro 쿼터) — 동시 과다 시 일부 429 실패 가능.
+- **딜리버리 스토리보드는 2K(`2048x1152`) 기본.** 빠른 탐색은 `1824x1024`로 싸게 뽑고 베스트만 `--upscale-from`으로 2K 확정하는 흐름도 가능. 단, 사용자가 최종본을 기대하면 처음부터 2K로 생성한다.
 - 2K 업스케일은 1K와 픽셀 동일하지 않음. 구도·색감 90%+ 유지 수준.
+- 반복 등장 소품은 오브젝트 시트로 외형 고정 (Phase 1d 참조). 추상 표현만 쓰면 컷마다 다른 물건이 나옴.
 - 이미지는 로컬 디스크 저장. 생성 시 prompt 사이드카(`{id}.json`)도 저장돼 디스크에서 복원해도 prompt 유지.
