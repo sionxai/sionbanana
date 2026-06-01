@@ -25,7 +25,9 @@ curl -s http://localhost:3002/api/health
 
 ### Phase 1: 탐색 (병렬 batch — 권장)
 
-Generate N attempts **in parallel** with `--batch N --concurrency C`. Default concurrency 4 is the safe line for Codex rate limits (verified: 4 parallel = no 429).
+Generate N attempts **in parallel** with `--batch N --concurrency C`. **기본 동시성은 4** (helper·runJobs·storyboard 모두 기본 4로 통일됨). 4가 Codex rate limit 안전선이다 (실측: 4 parallel = no 429).
+
+> ⚠️ **서버/머신 부하가 높으면 2~3으로 낮춰라.** dev 서버는 이미지 생성 시 메모리를 크게 쓰므로, 다른 무거운 앱(다른 dev 서버 등)이 같이 떠 있거나 Load Average가 높으면 동시성 4에서 서버가 죽을 수 있다 (실측). 그럴 땐 spec의 `concurrency: 2` 또는 `--concurrency 2`로 낮춘다. 10 이상은 비권장 — 더 빠르지도 않고 ~20% rate-limit 실패가 난다.
 
 ```bash
 node scripts/agent-generate.mjs \
@@ -55,7 +57,7 @@ node scripts/agent-generate.mjs --prompt "..." --category xxx --slug yyy
 컷마다 prompt가 다른 경우 `--batch`가 아니라 jobs 배열을 사용. stdin은 JSON 객체(`{"jobs":[...]}`) 또는 배열을 받을 수 있음:
 
 ```bash
-node scripts/agent-generate.mjs --concurrency 3 --retry 2 --port 3002 < storyboard-jobs.json
+node scripts/agent-generate.mjs --concurrency 4 --retry 2 --port 3002 < storyboard-jobs.json
 ```
 
 `storyboard-jobs.json` 예:

@@ -168,7 +168,7 @@ test("runJobs returns per-job failures without aborting the whole set", async ()
         return { ok: true };
       },
       async runWithConcurrencyImpl(items, limit, fn) {
-        assert.equal(limit, 3);
+        assert.equal(limit, 4);
         return Promise.all(items.map(async item => {
           try {
             return { status: "fulfilled", value: await fn(item) };

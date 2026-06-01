@@ -7,7 +7,7 @@
     "count": 2,
     "category": "example-cafe-keyframes"
   },
-  "concurrency": 3,
+  "concurrency": 4,
   "retry": 2,
   "retryBaseDelayMs": 2000,
   "scenes": [

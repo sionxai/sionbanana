@@ -63,7 +63,7 @@ export async function runJobs(jobs, options = {}) {
     throw new Error("jobs must be a non-empty array");
   }
 
-  const concurrency = parsePositiveInteger(options.concurrency, "concurrency", 3);
+  const concurrency = parsePositiveInteger(options.concurrency, "concurrency", 4);
   const normalizeConfigImpl = options.normalizeConfigImpl ?? normalizeConfig;
   const runSingleGenerationImpl = options.runSingleGenerationImpl ?? runSingleGeneration;
   const readManifestInfoImpl = options.readManifestInfoImpl ?? readManifestInfo;
