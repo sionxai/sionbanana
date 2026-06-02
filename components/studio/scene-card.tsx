@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Film,
   Image as ImageIcon,
   Loader2,
   RefreshCw
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationOptionsValue } from "@/components/studio/generation-options-panel";
+import { VideoModal } from "@/components/studio/video-modal";
 import {
   ANGLE_OPTIONS,
   FRAMING_OPTIONS,
@@ -143,6 +145,7 @@ export function SceneCard({
   const canRegenerate = !allGenerationActive && !isGenerating;
   const downloadExtension = getImageFormatExtension(scene.resultFormat);
   const [isGeneratedPromptOpen, setIsGeneratedPromptOpen] = useState(false);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const generatedPrompt = scene.status === "completed" && scene.resultRecord
     ? scene.resultRecord.promptMeta?.refinedPrompt ?? scene.prompt
     : formatScenePromptPreview(scene, toneLabel);
@@ -151,6 +154,9 @@ export function SceneCard({
   const framingSelectId = `${scene.id}-framing`;
   const angleSelectId = `${scene.id}-angle`;
   const specialSelectId = `${scene.id}-special`;
+  const videoSourceImageUrl = scene.resultRecord?.imageUrl ?? scene.resultUrl ?? "";
+  const videoDefaultPrompt = "카메라가 부드럽게 움직이고 장면에 자연스러운 생동감이 더해집니다.";
+  const canCreateVideo = isCompleted && Boolean(scene.resultRecord?.id && videoSourceImageUrl);
 
   const handleFramingChange = (event: ChangeEvent<HTMLSelectElement>) => {
     onCinematographyChange(scene.id, {
@@ -351,13 +357,34 @@ export function SceneCard({
           )}
         </div>
 
-        <Button asChild variant="outline" className="w-full" disabled={!isCompleted}>
-          <a href={isCompleted ? scene.resultUrl : "#"} download={`sionbanana-story-scene-${index + 1}.${downloadExtension}`}>
-            <Download className="mr-2 h-4 w-4" />
-            다운로드
-          </a>
-        </Button>
+        <div className="grid grid-cols-2 gap-2">
+          <Button asChild variant="outline" className="w-full" disabled={!isCompleted}>
+            <a href={isCompleted ? scene.resultUrl : "#"} download={`sionbanana-story-scene-${index + 1}.${downloadExtension}`}>
+              <Download className="mr-2 h-4 w-4" />
+              다운로드
+            </a>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => setIsVideoModalOpen(true)}
+            disabled={!canCreateVideo}
+          >
+            <Film className="mr-2 h-4 w-4" />
+            영상화
+          </Button>
+        </div>
       </div>
+      {scene.resultRecord ? (
+        <VideoModal
+          open={isVideoModalOpen}
+          onOpenChange={setIsVideoModalOpen}
+          sourceImageId={scene.resultRecord.id}
+          sourceImageUrl={videoSourceImageUrl}
+          defaultPrompt={videoDefaultPrompt}
+        />
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { Film } from "lucide-react";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
@@ -21,6 +22,7 @@ const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
 import { broadcastHistoryUpdate, persistRecordsMerge, removeRecordFromLocalStorage } from "@/components/studio/history-sync";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
+import { VideoModal } from "@/components/studio/video-modal";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 36;
@@ -313,6 +315,7 @@ export function GenerationHistoryView() {
   const [tagFilter, setTagFilter] = useState("all");
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [videoTargetRecord, setVideoTargetRecord] = useState<GeneratedImageDocument | null>(null);
   const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -564,6 +567,19 @@ export function GenerationHistoryView() {
     }
 
     startDownload(target);
+  };
+
+  const getVideoSourceImageUrl = (record: GeneratedImageDocument): string => {
+    return record.imageUrl ?? record.thumbnailUrl ?? record.originalImageUrl ?? "";
+  };
+
+  const handleOpenVideoModal = (record: GeneratedImageDocument) => {
+    if (!getVideoSourceImageUrl(record)) {
+      toast.error("영상화할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+
+    setVideoTargetRecord(record);
   };
 
   const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
@@ -992,6 +1008,14 @@ export function GenerationHistoryView() {
                   </Button>
                   <Button
                     size="sm"
+                    variant="outline"
+                    onClick={() => handleOpenVideoModal(selectedRecord)}
+                  >
+                    <Film className="mr-2 h-4 w-4" />
+                    영상화
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="destructive"
                     onClick={() => handleDeleteRecord(selectedRecord)}
                   >
@@ -1021,6 +1045,20 @@ export function GenerationHistoryView() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {videoTargetRecord ? (
+        <VideoModal
+          open={Boolean(videoTargetRecord)}
+          onOpenChange={open => {
+            if (!open) {
+              setVideoTargetRecord(null);
+            }
+          }}
+          sourceImageId={videoTargetRecord.id}
+          sourceImageUrl={getVideoSourceImageUrl(videoTargetRecord)}
+          defaultPrompt="카메라가 부드럽게 움직이고 장면에 자연스러운 생동감이 더해집니다."
+        />
       ) : null}
     </div>
   );
