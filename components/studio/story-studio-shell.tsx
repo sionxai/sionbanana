@@ -1098,6 +1098,23 @@ export function StoryStudioShell() {
     });
   }, []);
 
+  const handleSceneRecordUpdate = useCallback((updatedRecord: GeneratedImageDocument) => {
+    setScenes(current =>
+      current.map(scene => {
+        if (scene.resultRecord?.id !== updatedRecord.id) {
+          return scene;
+        }
+
+        return {
+          ...scene,
+          resultRecord: updatedRecord,
+          resultUrl: updatedRecord.imageUrl ?? scene.resultUrl
+        };
+      })
+    );
+    setPreviewRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
+  }, []);
+
   const handleScenePromptChange = useCallback(
     (sceneId: string, prompt: string) => {
       setScenes(current =>
@@ -1260,6 +1277,7 @@ export function StoryStudioShell() {
               onRegenerateScene={handleRegenerateScene}
               onMoveScene={handleMoveScene}
               onPreviewRecord={setPreviewRecord}
+              onSceneRecordUpdate={handleSceneRecordUpdate}
               onResplit={handleResplit}
             />
           </div>
@@ -1792,6 +1810,7 @@ function SceneBoard({
   onRegenerateScene,
   onMoveScene,
   onPreviewRecord,
+  onSceneRecordUpdate,
   onResplit
 }: {
   scenes: Scene[];
@@ -1807,6 +1826,7 @@ function SceneBoard({
   onRegenerateScene: (sceneId: string) => void;
   onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
+  onSceneRecordUpdate: (record: GeneratedImageDocument) => void;
   onResplit: () => void;
 }) {
   const hasScenes = scenes.length > 0;
@@ -1871,6 +1891,7 @@ function SceneBoard({
                 onRegenerateScene={onRegenerateScene}
                 onMoveScene={onMoveScene}
                 onPreviewRecord={onPreviewRecord}
+                onRecordUpdate={onSceneRecordUpdate}
                 toneLabel={toneLabel}
                 moveDisabled={busy}
                 isFirst={index === 0}

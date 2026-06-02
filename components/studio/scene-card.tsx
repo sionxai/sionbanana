@@ -17,7 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationOptionsValue } from "@/components/studio/generation-options-panel";
-import { VideoModal } from "@/components/studio/video-modal";
+import { broadcastHistoryUpdate, persistRecordsMerge } from "@/components/studio/history-sync";
+import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-modal";
 import {
   ANGLE_OPTIONS,
   FRAMING_OPTIONS,
@@ -57,6 +58,7 @@ type SceneCardProps = {
   onRegenerateScene: (sceneId: string) => void;
   onMoveScene: (sceneId: string, direction: "up" | "down") => void;
   onPreviewRecord: (record: GeneratedImageDocument) => void;
+  onRecordUpdate?: (record: GeneratedImageDocument) => void;
   toneLabel: string | null;
   moveDisabled: boolean;
   isFirst: boolean;
@@ -135,6 +137,7 @@ export function SceneCard({
   onRegenerateScene,
   onMoveScene,
   onPreviewRecord,
+  onRecordUpdate,
   toneLabel,
   moveDisabled,
   isFirst,
@@ -157,6 +160,7 @@ export function SceneCard({
   const videoSourceImageUrl = scene.resultRecord?.imageUrl ?? scene.resultUrl ?? "";
   const videoDefaultPrompt = "카메라가 부드럽게 움직이고 장면에 자연스러운 생동감이 더해집니다.";
   const canCreateVideo = isCompleted && Boolean(scene.resultRecord?.id && videoSourceImageUrl);
+  const hasVideo = Boolean(scene.resultRecord?.videoUrl);
 
   const handleFramingChange = (event: ChangeEvent<HTMLSelectElement>) => {
     onCinematographyChange(scene.id, {
@@ -180,12 +184,35 @@ export function SceneCard({
     });
   };
 
+  const handleVideoCreated = (result: VideoCreatedResult) => {
+    if (!scene.resultRecord || scene.resultRecord.id !== result.sourceImageId) {
+      return;
+    }
+
+    const updatedRecord: GeneratedImageDocument = {
+      ...scene.resultRecord,
+      videoUrl: result.videoUrl,
+      videoMeta: result.meta,
+      updatedAt: result.meta.createdAtIso ?? new Date().toISOString()
+    };
+
+    const merged = persistRecordsMerge([updatedRecord]);
+    broadcastHistoryUpdate(merged, "story");
+    onRecordUpdate?.(updatedRecord);
+  };
+
   return (
     <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-start justify-between gap-3 border-b border-border/70 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">씬 {index + 1}</span>
           <Badge variant={getSceneStatusVariant(scene.status)}>{getSceneStatusLabel(scene.status)}</Badge>
+          {hasVideo ? (
+            <Badge variant="secondary">
+              <Film className="mr-1 h-3 w-3" />
+              영상
+            </Badge>
+          ) : null}
           <span className="whitespace-nowrap rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] leading-4 tracking-normal text-muted-foreground">
             {chipLabel}
           </span>
@@ -357,6 +384,16 @@ export function SceneCard({
           )}
         </div>
 
+        {scene.resultRecord?.videoUrl ? (
+          <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <Film className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>연결된 영상</span>
+            </div>
+            <video controls src={scene.resultRecord.videoUrl} className="aspect-video w-full rounded-md bg-black" />
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-2 gap-2">
           <Button asChild variant="outline" className="w-full" disabled={!isCompleted}>
             <a href={isCompleted ? scene.resultUrl : "#"} download={`sionbanana-story-scene-${index + 1}.${downloadExtension}`}>
@@ -383,6 +420,7 @@ export function SceneCard({
           sourceImageId={scene.resultRecord.id}
           sourceImageUrl={videoSourceImageUrl}
           defaultPrompt={videoDefaultPrompt}
+          onVideoCreated={handleVideoCreated}
         />
       ) : null}
     </div>

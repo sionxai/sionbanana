@@ -14,8 +14,26 @@ type VideoGenerationResponse = {
   ok: boolean;
   id?: string;
   videoUrl?: string;
+  requestId?: string;
+  model?: string;
+  duration?: number;
+  resolution?: string;
+  aspectRatio?: string | null;
   reason?: string;
   code?: string;
+};
+
+export type VideoCreatedResult = {
+  sourceImageId: string;
+  videoUrl: string;
+  meta: {
+    requestId?: string;
+    model?: string;
+    duration?: number;
+    resolution?: string;
+    aspectRatio?: string;
+    createdAtIso?: string;
+  };
 };
 
 export type VideoModalProps = {
@@ -24,6 +42,7 @@ export type VideoModalProps = {
   sourceImageId: string;
   sourceImageUrl: string;
   defaultPrompt?: string;
+  onVideoCreated?: (result: VideoCreatedResult) => void;
 };
 
 const DURATION_OPTIONS: VideoDuration[] = [3, 5, 10];
@@ -45,7 +64,8 @@ export function VideoModal({
   onOpenChange,
   sourceImageId,
   sourceImageUrl,
-  defaultPrompt
+  defaultPrompt,
+  onVideoCreated
 }: VideoModalProps) {
   const titleId = useId();
   const promptId = useId();
@@ -156,6 +176,18 @@ export function VideoModal({
       }
 
       setVideoUrl(result.videoUrl);
+      onVideoCreated?.({
+        sourceImageId,
+        videoUrl: result.videoUrl,
+        meta: {
+          requestId: result.requestId,
+          model: result.model,
+          duration: typeof result.duration === "number" ? result.duration : duration,
+          resolution: result.resolution ?? resolution,
+          aspectRatio: result.aspectRatio ?? aspectRatio,
+          createdAtIso: new Date().toISOString()
+        }
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;

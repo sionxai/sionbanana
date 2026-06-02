@@ -22,7 +22,7 @@ const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
 import { broadcastHistoryUpdate, persistRecordsMerge, removeRecordFromLocalStorage } from "@/components/studio/history-sync";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
-import { VideoModal } from "@/components/studio/video-modal";
+import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-modal";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 36;
@@ -261,8 +261,19 @@ function GalleryCard({
           />
         </div>
         {isFavorite ? (
+          <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-1">
+            <Badge className="bg-background/90 text-foreground shadow">★</Badge>
+            {record.videoUrl ? (
+              <Badge className="bg-background/90 text-foreground shadow">
+                <Film className="mr-1 h-3 w-3" />
+                영상
+              </Badge>
+            ) : null}
+          </div>
+        ) : record.videoUrl ? (
           <Badge className="pointer-events-none absolute right-3 top-3 z-20 bg-background/90 text-foreground shadow">
-            ★
+            <Film className="mr-1 h-3 w-3" />
+            영상
           </Badge>
         ) : null}
         {previewUrl ? (
@@ -583,10 +594,34 @@ export function GenerationHistoryView() {
   };
 
   const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
-    setLocalRecords(prev => prev.map(item => (item.id === updatedRecord.id ? updatedRecord : item)));
+    setLocalRecords(prev => {
+      const exists = prev.some(item => item.id === updatedRecord.id);
+      return exists
+        ? prev.map(item => (item.id === updatedRecord.id ? updatedRecord : item))
+        : [updatedRecord, ...prev];
+    });
     setSelectedRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
     const merged = persistRecordsMerge([updatedRecord]);
     broadcastHistoryUpdate(merged, "history");
+  };
+
+  const handleVideoCreated = (result: VideoCreatedResult) => {
+    const sourceRecord = localRecords.find(record => record.id === result.sourceImageId) ?? videoTargetRecord;
+    if (!sourceRecord) {
+      toast.error("영상 원본 기록을 찾을 수 없습니다.");
+      return;
+    }
+
+    const updatedRecord: GeneratedImageDocument = {
+      ...sourceRecord,
+      videoUrl: result.videoUrl,
+      videoMeta: result.meta,
+      updatedAt: result.meta.createdAtIso ?? new Date().toISOString()
+    };
+
+    replaceRecord(updatedRecord);
+    setVideoTargetRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
+    toast.success("영상을 생성 기록에 저장했습니다.");
   };
 
   const handleToggleFavorite = async (record: GeneratedImageDocument) => {
@@ -988,6 +1023,21 @@ export function GenerationHistoryView() {
                   </div>
                 ) : null}
 
+                {selectedRecord.videoUrl ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Film className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-medium text-foreground">연결된 영상</h3>
+                    </div>
+                    <video controls src={selectedRecord.videoUrl} className="aspect-video w-full rounded-lg bg-black" />
+                    {selectedRecord.videoMeta?.createdAtIso ? (
+                      <p className="text-xs text-muted-foreground">
+                        생성일 {formatDate(selectedRecord.videoMeta.createdAtIso)}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap gap-2 pt-2">
                   {originalImageUrl ? (
                     <Button size="sm" variant="outline" asChild>
@@ -1058,6 +1108,7 @@ export function GenerationHistoryView() {
           sourceImageId={videoTargetRecord.id}
           sourceImageUrl={getVideoSourceImageUrl(videoTargetRecord)}
           defaultPrompt="카메라가 부드럽게 움직이고 장면에 자연스러운 생동감이 더해집니다."
+          onVideoCreated={handleVideoCreated}
         />
       ) : null}
     </div>

@@ -51,6 +51,15 @@ export interface GeneratedImageDocument {
   imageUrl?: string;
   thumbnailUrl?: string;
   originalImageUrl?: string;
+  videoUrl?: string;
+  videoMeta?: {
+    requestId?: string;
+    model?: string;
+    duration?: number;
+    resolution?: string;
+    aspectRatio?: string;
+    createdAtIso?: string;
+  };
   diff?: ImageDiffMeta;
   favorite?: boolean;
   tags?: string[];
