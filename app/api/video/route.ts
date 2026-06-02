@@ -9,7 +9,7 @@ import {
   generateGrokVideo,
   GrokVideoError
 } from "@/lib/grok-video";
-import { readImageById, saveVideoBuffer } from "@/lib/local/storage";
+import { readImageById, saveVideoBuffer, saveVideoMetadata } from "@/lib/local/storage";
 import { generateId } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -66,18 +66,41 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
 
   const id = generateId();
   const saved = await saveVideoBuffer(id, generated.videoBuffer);
+  const createdAtIso = new Date().toISOString();
+  const requestId = generated.requestId;
+  const model = generated.model || payload.model || DEFAULT_GROK_VIDEO_MODEL;
+  const duration = generated.duration || payload.duration || DEFAULT_GROK_VIDEO_DURATION;
+  const resolution = generated.resolution || payload.resolution || DEFAULT_GROK_VIDEO_RESOLUTION;
+  const aspectRatio = generated.aspectRatio || payload.aspectRatio || null;
+
+  await saveVideoMetadata(
+    id,
+    {
+      sourceImageId: payload.sourceImageId,
+      prompt: payload.prompt,
+      model,
+      duration,
+      resolution,
+      aspectRatio: aspectRatio ?? undefined,
+      requestId,
+      createdAtIso,
+      bytes: saved.bytes
+    },
+    getBucketFromRelativePath(saved.relativePath)
+  );
 
   return {
     ok: true,
     id,
     videoUrl: `/api/videos/${id}`,
     storagePath: saved.relativePath,
-    requestId: generated.requestId,
+    requestId,
     sourceImageId: payload.sourceImageId,
-    model: generated.model || payload.model || DEFAULT_GROK_VIDEO_MODEL,
-    duration: generated.duration || payload.duration || DEFAULT_GROK_VIDEO_DURATION,
-    resolution: generated.resolution || payload.resolution || DEFAULT_GROK_VIDEO_RESOLUTION,
-    aspectRatio: generated.aspectRatio || payload.aspectRatio || null,
+    model,
+    duration,
+    resolution,
+    aspectRatio,
+    createdAtIso,
     contentType: generated.contentType,
     bytes: saved.bytes,
     sourceImage: {
@@ -86,6 +109,14 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
     },
     usage: generated.usage ?? null
   };
+}
+
+function getBucketFromRelativePath(relativePath: string): string {
+  const [bucket] = relativePath.split(/[\\/]/);
+  if (!bucket) {
+    throw new Error("Invalid video storage path");
+  }
+  return bucket;
 }
 
 async function readLocalImageAsDataUri(id: string): Promise<{ dataUri: string; mimeType: string; bytes: number }> {

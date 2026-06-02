@@ -81,8 +81,30 @@ function compactImageMetadata(metadata: ImageMetadata): ImageMetadata {
     : {};
 }
 
+function compactVideoMetadata(metadata: VideoMetadata): VideoMetadata {
+  const compacted = compactMetadataValue(metadata);
+  return compacted && typeof compacted === "object" && !Array.isArray(compacted)
+    ? (compacted as VideoMetadata)
+    : {};
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function metadataString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function metadataNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function metadataIsoString(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
 }
 
 async function readImageMetadataFromBucket(id: string, bucket: string): Promise<ImageMetadata | null> {
@@ -93,6 +115,19 @@ async function readImageMetadataFromBucket(id: string, bucket: string): Promise<
     const raw = await fs.readFile(candidate, "utf8");
     const parsed = JSON.parse(raw);
     return isPlainObject(parsed) ? (parsed as ImageMetadata) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readVideoMetadataFromBucket(id: string, bucket: string): Promise<VideoMetadata | null> {
+  const cleaned = safeImageId(id);
+  const safeBucket = safeBucketName(bucket);
+  const candidate = path.join(videosDir(), safeBucket, `${cleaned}.json`);
+  try {
+    const raw = await fs.readFile(candidate, "utf8");
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? (parsed as VideoMetadata) : null;
   } catch {
     return null;
   }
@@ -219,6 +254,37 @@ export async function saveVideoBuffer(
   };
 }
 
+export type VideoMetadata = {
+  sourceImageId?: string;
+  prompt?: string;
+  model?: string;
+  duration?: number;
+  resolution?: string;
+  aspectRatio?: string | null;
+  requestId?: string;
+  createdAtIso?: string;
+  bytes?: number;
+  [key: string]: unknown;
+};
+
+export async function saveVideoMetadata(
+  id: string,
+  metadata: VideoMetadata,
+  bucket: string = monthBucket()
+): Promise<{ relativePath: string; absolutePath: string }> {
+  const cleaned = safeImageId(id);
+  const safeBucket = safeBucketName(bucket);
+  const dir = path.join(videosDir(), safeBucket);
+  await fs.mkdir(dir, { recursive: true });
+  const absolutePath = path.join(dir, `${cleaned}.json`);
+  const payload = compactVideoMetadata(metadata);
+  await fs.writeFile(absolutePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return {
+    relativePath: path.join(safeBucket, `${cleaned}.json`),
+    absolutePath
+  };
+}
+
 export async function readVideoById(
   id: string
 ): Promise<{ stream: ReturnType<typeof createReadStream>; mimeType: string; bytes: number } | null> {
@@ -249,6 +315,81 @@ export async function readVideoById(
     }
   }
   return null;
+}
+
+export type DiskVideoEntry = {
+  id: string;
+  bucket: string;
+  videoUrl: string;
+  createdAtIso: string;
+  sourceImageId?: string;
+  prompt?: string;
+  model?: string;
+  duration?: number;
+  resolution?: string;
+  aspectRatio?: string;
+  requestId?: string;
+  bytes: number;
+};
+
+export async function listVideos(): Promise<DiskVideoEntry[]> {
+  const root = videosDir();
+  let buckets: string[];
+  try {
+    buckets = await fs.readdir(root);
+  } catch {
+    return [];
+  }
+
+  const results: DiskVideoEntry[] = [];
+  for (const bucket of buckets) {
+    if (!BUCKET_NAME_RE.test(bucket)) continue;
+
+    const bucketDir = path.join(root, bucket);
+    let entries: string[];
+    try {
+      entries = await fs.readdir(bucketDir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const match = entry.match(/^([A-Za-z0-9_\-]+)\.mp4$/);
+      if (!match) continue;
+
+      const [, id] = match;
+      const absolutePath = path.join(bucketDir, entry);
+      try {
+        const stat = await fs.stat(absolutePath);
+        if (!stat.isFile()) continue;
+
+        const metadata = await readVideoMetadataFromBucket(id, bucket);
+        const createdAtIso = metadataIsoString(metadata?.createdAtIso) ?? stat.mtime.toISOString();
+        results.push({
+          id,
+          bucket,
+          videoUrl: `/api/videos/${id}`,
+          createdAtIso,
+          sourceImageId: metadataString(metadata?.sourceImageId),
+          prompt: metadataString(metadata?.prompt),
+          model: metadataString(metadata?.model),
+          duration: metadataNumber(metadata?.duration),
+          resolution: metadataString(metadata?.resolution),
+          aspectRatio: metadataString(metadata?.aspectRatio),
+          requestId: metadataString(metadata?.requestId),
+          bytes: metadataNumber(metadata?.bytes) ?? stat.size
+        });
+      } catch {
+        // ignore unreadable entries
+      }
+    }
+  }
+
+  return results.sort((a, b) => {
+    const aTime = Date.parse(a.createdAtIso);
+    const bTime = Date.parse(b.createdAtIso);
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
 }
 
 export async function deleteImageById(id: string): Promise<boolean> {

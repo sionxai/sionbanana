@@ -19,6 +19,8 @@ type VideoGenerationResponse = {
   duration?: number;
   resolution?: string;
   aspectRatio?: string | null;
+  createdAtIso?: string;
+  bytes?: number;
   reason?: string;
   code?: string;
 };
@@ -34,6 +36,9 @@ export type VideoCreatedResult = {
     resolution?: string;
     aspectRatio?: string;
     createdAtIso?: string;
+    sourceImageId?: string;
+    prompt?: string;
+    bytes?: number;
   };
 };
 
@@ -197,7 +202,10 @@ export function VideoModal({
           duration: typeof result.duration === "number" ? result.duration : duration,
           resolution: result.resolution ?? resolution,
           aspectRatio: result.aspectRatio ?? aspectRatio,
-          createdAtIso: new Date().toISOString()
+          createdAtIso: result.createdAtIso ?? new Date().toISOString(),
+          sourceImageId,
+          prompt: trimmedPrompt,
+          bytes: typeof result.bytes === "number" ? result.bytes : undefined
         }
       });
     } catch (error) {

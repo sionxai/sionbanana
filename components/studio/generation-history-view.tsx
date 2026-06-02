@@ -23,6 +23,7 @@ import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
 import {
   broadcastHistoryUpdate,
   createVideoHistoryRecord,
+  HISTORY_REFRESH_EVENT,
   isVideoHistoryRecord,
   persistRecordsMerge,
   removeRecordFromLocalStorage
@@ -32,10 +33,117 @@ import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-m
 import { toast } from "sonner";
 
 const PAGE_SIZE = 36;
+const SERVER_VIDEO_METADATA_FLAG = "serverVideo";
+
+type DiskVideoHistoryEntry = {
+  id: string;
+  bucket?: string;
+  videoUrl?: string;
+  createdAtIso: string;
+  sourceImageId?: string;
+  prompt?: string;
+  model?: string;
+  duration?: number;
+  resolution?: string;
+  aspectRatio?: string;
+  requestId?: string;
+  bytes?: number;
+};
+
+type VideoHistoryApiResponse = {
+  ok?: boolean;
+  videos?: DiskVideoHistoryEntry[];
+  reason?: string;
+};
 
 function getLocalImageId(url?: string | null): string | null {
   const match = url?.match(/^\/api\/images\/([A-Za-z0-9_\-]+)/);
   return match?.[1] ?? null;
+}
+
+function isServerVideoHistoryRecord(record: GeneratedImageDocument): boolean {
+  return isVideoHistoryRecord(record) && record.metadata?.[SERVER_VIDEO_METADATA_FLAG] === true;
+}
+
+function createServerVideoHistoryRecord(video: DiskVideoHistoryEntry): GeneratedImageDocument {
+  const prompt = video.prompt?.trim() || "디스크에서 복원된 영상";
+  const sourceImageUrl = video.sourceImageId ? `/api/images/${video.sourceImageId}` : undefined;
+  const videoUrl = video.videoUrl ?? `/api/videos/${video.id}`;
+
+  return {
+    id: video.id,
+    userId: "local",
+    mode: "create",
+    kind: "video",
+    promptMeta: {
+      rawPrompt: prompt,
+      refinedPrompt: prompt
+    },
+    status: "completed",
+    imageUrl: sourceImageUrl,
+    thumbnailUrl: sourceImageUrl,
+    originalImageUrl: sourceImageUrl,
+    videoUrl,
+    videoMeta: {
+      sourceImageId: video.sourceImageId,
+      prompt: video.prompt,
+      requestId: video.requestId,
+      model: video.model,
+      duration: video.duration,
+      resolution: video.resolution,
+      aspectRatio: video.aspectRatio,
+      createdAtIso: video.createdAtIso,
+      bytes: video.bytes
+    },
+    metadata: {
+      sourceImageId: video.sourceImageId,
+      kind: "video",
+      bucket: video.bucket,
+      [SERVER_VIDEO_METADATA_FLAG]: true
+    },
+    model: video.model ?? "grok-video",
+    createdAt: video.createdAtIso,
+    updatedAt: video.createdAtIso
+  };
+}
+
+function mergeLocalAndServerVideoRecords(
+  localRecords: GeneratedImageDocument[],
+  serverVideoRecords: GeneratedImageDocument[]
+): GeneratedImageDocument[] {
+  const map = new Map<string, GeneratedImageDocument>();
+  const localVideoUrls = new Set<string>();
+
+  localRecords.forEach(record => {
+    map.set(record.id, record);
+    if (isVideoHistoryRecord(record) && record.videoUrl) {
+      localVideoUrls.add(record.videoUrl);
+    }
+  });
+
+  serverVideoRecords.forEach(record => {
+    if (map.has(record.id)) {
+      return;
+    }
+    if (record.videoUrl && localVideoUrls.has(record.videoUrl)) {
+      return;
+    }
+    map.set(record.id, record);
+  });
+
+  return Array.from(map.values()).sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
+}
+
+async function readServerVideoHistoryRecords(signal?: AbortSignal): Promise<GeneratedImageDocument[]> {
+  const response = await fetch("/api/history/videos", { signal, cache: "no-store" });
+  if (!response.ok) {
+    return [];
+  }
+  const data = await response.json() as VideoHistoryApiResponse;
+  if (!data.ok || !Array.isArray(data.videos)) {
+    return [];
+  }
+  return data.videos.map(createServerVideoHistoryRecord);
 }
 
 type ModeFilterValue = "all" | GenerationMode;
@@ -351,6 +459,8 @@ export function GenerationHistoryView() {
   const [timeframeFilter, setTimeframeFilter] = useState<TimeframeValue>("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
+  const [serverVideoRecords, setServerVideoRecords] = useState<GeneratedImageDocument[]>([]);
+  const [serverVideosLoading, setServerVideosLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [videoTargetRecord, setVideoTargetRecord] = useState<GeneratedImageDocument | null>(null);
   const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
@@ -361,12 +471,45 @@ export function GenerationHistoryView() {
     setLocalRecords(records ?? []);
   }, [records]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+
+    const reloadServerVideos = async () => {
+      setServerVideosLoading(true);
+      try {
+        const nextRecords = await readServerVideoHistoryRecords(controller.signal);
+        if (!disposed) {
+          setServerVideoRecords(nextRecords);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn("[History] Failed to read disk videos", error);
+        }
+      } finally {
+        if (!disposed && !controller.signal.aborted) {
+          setServerVideosLoading(false);
+        }
+      }
+    };
+
+    void reloadServerVideos();
+    const handleRefresh = () => {
+      void reloadServerVideos();
+    };
+
+    window.addEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.removeEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
+    };
+  }, []);
+
   const historyItems = useMemo(() => {
-    if (!localRecords.length) {
-      return [];
-    }
-    return [...localRecords].sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
-  }, [localRecords]);
+    return mergeLocalAndServerVideoRecords(localRecords, serverVideoRecords);
+  }, [localRecords, serverVideoRecords]);
+  const historyLoading = loading || serverVideosLoading;
 
   const tagOptions = useMemo(() => getHistoryTagOptions(historyItems), [historyItems]);
 
@@ -628,21 +771,37 @@ export function GenerationHistoryView() {
       return;
     }
 
-    setLocalRecords(prev => {
-      const map = new Map(prev.map(item => [item.id, item]));
-      updatedRecords.forEach(record => {
-        map.set(record.id, record);
+    const serverOnlyUpdates = updatedRecords.filter(isServerVideoHistoryRecord);
+    const persistableUpdates = updatedRecords.filter(record => !isServerVideoHistoryRecord(record));
+
+    if (persistableUpdates.length) {
+      setLocalRecords(prev => {
+        const map = new Map(prev.map(item => [item.id, item]));
+        persistableUpdates.forEach(record => {
+          map.set(record.id, record);
+        });
+        return Array.from(map.values());
       });
-      return Array.from(map.values());
-    });
+    }
+    if (serverOnlyUpdates.length) {
+      setServerVideoRecords(prev => {
+        const map = new Map(prev.map(item => [item.id, item]));
+        serverOnlyUpdates.forEach(record => {
+          map.set(record.id, record);
+        });
+        return Array.from(map.values());
+      });
+    }
     setSelectedRecord(prev => {
       if (!prev) {
         return prev;
       }
       return updatedRecords.find(record => record.id === prev.id) ?? prev;
     });
-    const merged = persistRecordsMerge(updatedRecords);
-    broadcastHistoryUpdate(merged, "history");
+    if (persistableUpdates.length) {
+      const merged = persistRecordsMerge(persistableUpdates);
+      broadcastHistoryUpdate(merged, "history");
+    }
   };
 
   const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
@@ -702,12 +861,22 @@ export function GenerationHistoryView() {
     }
 
     const isVideoRecord = isVideoHistoryRecord(record);
+    const isServerVideoRecord = isServerVideoHistoryRecord(record);
     const confirmed = window.confirm(
-      isVideoRecord
+      isServerVideoRecord
+        ? "이 디스크 영상 기록을 현재 화면에서 숨기시겠어요? 영상 파일은 삭제되지 않습니다."
+        : isVideoRecord
         ? "이 영상 기록을 삭제하시겠어요? 연결된 이미지 기록은 유지됩니다."
         : "이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다."
     );
     if (!confirmed) {
+      return;
+    }
+
+    if (isServerVideoRecord) {
+      setServerVideoRecords(prev => prev.filter(item => item.id !== record.id));
+      setSelectedRecord(prev => (prev && prev.id === record.id ? null : prev));
+      toast.success("영상 기록을 현재 화면에서 숨겼습니다.");
       return;
     }
 
@@ -776,7 +945,7 @@ export function GenerationHistoryView() {
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-foreground">생성 기록</h1>
         <p className="text-sm text-muted-foreground">
-          최근에 만든 이미지들을 한눈에 살펴보고, 사용한 프롬프트와 세부 정보를 확인하세요.
+          최근에 만든 이미지와 영상을 한눈에 살펴보고, 사용한 프롬프트와 세부 정보를 확인하세요.
         </p>
       </header>
 
@@ -896,7 +1065,7 @@ export function GenerationHistoryView() {
         </div>
       </div>
 
-      {loading ? (
+      {historyLoading ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }).map((_, index) => (
             <div
@@ -907,14 +1076,14 @@ export function GenerationHistoryView() {
         </div>
       ) : null}
 
-      {!loading && historyItems.length === 0 ? (
+      {!historyLoading && historyItems.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/60 bg-muted/20 py-20 text-center">
-          <p className="text-base font-medium text-foreground">아직 생성한 이미지가 없습니다.</p>
-          <p className="text-sm text-muted-foreground">스튜디오에서 이미지를 생성하면 이곳에 기록이 쌓입니다.</p>
+          <p className="text-base font-medium text-foreground">아직 생성한 이미지나 영상이 없습니다.</p>
+          <p className="text-sm text-muted-foreground">스튜디오에서 이미지를 생성하거나 영상을 만들면 이곳에 기록이 쌓입니다.</p>
         </div>
       ) : null}
 
-      {!loading && historyItems.length > 0 && filteredItems.length === 0 ? (
+      {!historyLoading && historyItems.length > 0 && filteredItems.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/60 bg-muted/20 py-20 text-center">
           <p className="text-base font-medium text-foreground">선택한 조건에 맞는 기록이 없습니다.</p>
           <p className="text-sm text-muted-foreground">필터를 조정하거나 기간을 넓혀보세요.</p>

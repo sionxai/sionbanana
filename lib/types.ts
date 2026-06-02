@@ -54,12 +54,15 @@ export interface GeneratedImageDocument {
   originalImageUrl?: string;
   videoUrl?: string;
   videoMeta?: {
+    sourceImageId?: string;
+    prompt?: string;
     requestId?: string;
     model?: string;
     duration?: number;
     resolution?: string;
     aspectRatio?: string;
     createdAtIso?: string;
+    bytes?: number;
   };
   diff?: ImageDiffMeta;
   favorite?: boolean;
