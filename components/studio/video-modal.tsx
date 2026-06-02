@@ -26,6 +26,7 @@ type VideoGenerationResponse = {
 export type VideoCreatedResult = {
   sourceImageId: string;
   videoUrl: string;
+  motionPrompt?: string;
   meta: {
     requestId?: string;
     model?: string;
@@ -49,6 +50,7 @@ const DURATION_OPTIONS: VideoDuration[] = [3, 5, 10];
 const RESOLUTION_OPTIONS: VideoResolution[] = ["480p", "720p"];
 const ASPECT_RATIO_OPTIONS: VideoAspectRatio[] = ["16:9", "9:16", "1:1"];
 const DEFAULT_MOTION_PROMPT = "카메라가 천천히 이동하고 피사체에 자연스러운 움직임이 더해집니다.";
+const VIDEO_ROUTE_PATTERN = /^\/api\/videos\/[A-Za-z0-9_\-]+$/;
 
 function shouldShowProxyHint(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -57,6 +59,10 @@ function shouldShowProxyHint(message: string): boolean {
 
 function getInitialPrompt(defaultPrompt?: string): string {
   return defaultPrompt?.trim() || DEFAULT_MOTION_PROMPT;
+}
+
+function isShortVideoRoute(videoUrl: string): boolean {
+  return VIDEO_ROUTE_PATTERN.test(videoUrl);
 }
 
 export function VideoModal({
@@ -175,10 +181,16 @@ export function VideoModal({
         return;
       }
 
+      if (!isShortVideoRoute(result.videoUrl)) {
+        setErrorReason("영상 저장 경로가 올바르지 않습니다.");
+        return;
+      }
+
       setVideoUrl(result.videoUrl);
       onVideoCreated?.({
         sourceImageId,
         videoUrl: result.videoUrl,
+        motionPrompt: trimmedPrompt,
         meta: {
           requestId: result.requestId,
           model: result.model,

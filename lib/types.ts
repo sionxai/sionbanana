@@ -46,6 +46,7 @@ export interface GeneratedImageDocument {
   id: string;
   userId: string;
   mode: GenerationMode;
+  kind?: "image" | "video";
   promptMeta: PromptMetadata;
   status: "pending" | "completed" | "failed";
   imageUrl?: string;

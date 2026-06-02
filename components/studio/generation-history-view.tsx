@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { Film } from "lucide-react";
+import { Film, Play } from "lucide-react";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
 import type { GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import { getAspectRatioLabel } from "@/lib/aspect";
@@ -20,7 +20,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
 import { REFERENCE_IMAGE_DOC_ID } from "@/components/studio/constants";
-import { broadcastHistoryUpdate, persistRecordsMerge, removeRecordFromLocalStorage } from "@/components/studio/history-sync";
+import {
+  broadcastHistoryUpdate,
+  createVideoHistoryRecord,
+  isVideoHistoryRecord,
+  persistRecordsMerge,
+  removeRecordFromLocalStorage
+} from "@/components/studio/history-sync";
 import { broadcastReferenceUpdate } from "@/components/studio/reference-sync";
 import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-modal";
 import { toast } from "sonner";
@@ -215,6 +221,8 @@ function GalleryCard({
   const previewUrl = record.thumbnailUrl ?? record.imageUrl ?? record.originalImageUrl;
   const promptPreview = record.promptMeta?.refinedPrompt ?? record.promptMeta?.rawPrompt ?? "";
   const isFavorite = isHistoryRecordFavorite(record);
+  const isVideoRecord = isVideoHistoryRecord(record);
+  const hasAttachedVideo = Boolean(record.videoUrl);
   const tags = getHistoryRecordTags(record);
 
   const handleCardClick = () => {
@@ -257,20 +265,28 @@ function GalleryCard({
             onChange={handleCheckboxToggle}
             onClick={handleCheckboxClick}
             className="pointer-events-auto h-4 w-4 accent-primary"
-            aria-label="이미지 선택"
+            aria-label="기록 선택"
           />
         </div>
-        {isFavorite ? (
+        {isVideoRecord ? (
+          <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-1">
+            <Badge className="bg-background/95 px-2.5 py-1 text-xs text-foreground shadow">
+              <Film className="mr-1 h-3.5 w-3.5" />
+              영상
+            </Badge>
+            {isFavorite ? <Badge className="bg-background/90 text-foreground shadow">★</Badge> : null}
+          </div>
+        ) : isFavorite ? (
           <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-1">
             <Badge className="bg-background/90 text-foreground shadow">★</Badge>
-            {record.videoUrl ? (
+            {hasAttachedVideo ? (
               <Badge className="bg-background/90 text-foreground shadow">
                 <Film className="mr-1 h-3 w-3" />
                 영상
               </Badge>
             ) : null}
           </div>
-        ) : record.videoUrl ? (
+        ) : hasAttachedVideo ? (
           <Badge className="pointer-events-none absolute right-3 top-3 z-20 bg-background/90 text-foreground shadow">
             <Film className="mr-1 h-3 w-3" />
             영상
@@ -282,12 +298,22 @@ function GalleryCard({
             alt={promptPreview || "생성 이미지"}
             fill
             sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-            className="object-contain object-center transition duration-300"
+            className={cn(
+              isVideoRecord ? "object-cover opacity-90" : "object-contain",
+              "object-center transition duration-300"
+            )}
             priority={false}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">미리보기 없음</div>
         )}
+        {isVideoRecord ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/10">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
+              <Play className="ml-0.5 h-7 w-7 fill-current" />
+            </div>
+          </div>
+        ) : null}
         {promptPreview ? (
           <div className="absolute inset-x-0 bottom-0 bg-black/60 px-3 py-2 text-xs text-white/90 line-clamp-2">
             {promptPreview}
@@ -298,7 +324,7 @@ function GalleryCard({
         <div className="flex items-center justify-between gap-2">
           <span className="truncate">{formatDate(record.createdAt)}</span>
           <Badge variant="outline" className="uppercase tracking-wide">
-            {record.mode}
+            {isVideoRecord ? "video" : record.mode}
           </Badge>
         </div>
         {tags.length ? (
@@ -493,7 +519,7 @@ export function GenerationHistoryView() {
 
   const handleDownloadSelected = () => {
     if (!selectedIds.length) {
-      toast.error("다운로드할 이미지를 선택해주세요.");
+      toast.error("다운로드할 항목을 선택해주세요.");
       return;
     }
 
@@ -510,7 +536,7 @@ export function GenerationHistoryView() {
     });
 
     if (!targets.length) {
-      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      toast.error("다운로드할 파일을 찾을 수 없습니다.");
       return;
     }
 
@@ -518,7 +544,7 @@ export function GenerationHistoryView() {
       startDownload(target, index * 200);
     });
 
-    toast.success(`${targets.length}개의 이미지 다운로드를 시작했습니다.`);
+    toast.success(`${targets.length}개의 파일 다운로드를 시작했습니다.`);
   };
 
   type DownloadTarget = {
@@ -527,6 +553,10 @@ export function GenerationHistoryView() {
   };
 
   const buildDownloadTarget = (record: GeneratedImageDocument): DownloadTarget | null => {
+    if (isVideoHistoryRecord(record) && record.videoUrl) {
+      return { href: record.videoUrl, filename: `${record.id}.mp4` };
+    }
+
     const url = record.imageUrl ?? record.originalImageUrl ?? record.thumbnailUrl;
     if (!url) {
       return null;
@@ -573,7 +603,7 @@ export function GenerationHistoryView() {
   const handleDownloadRecord = (record: GeneratedImageDocument) => {
     const target = buildDownloadTarget(record);
     if (!target) {
-      toast.error("다운로드할 이미지를 찾을 수 없습니다.");
+      toast.error("다운로드할 파일을 찾을 수 없습니다.");
       return;
     }
 
@@ -593,16 +623,30 @@ export function GenerationHistoryView() {
     setVideoTargetRecord(record);
   };
 
-  const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
+  const replaceRecords = (updatedRecords: GeneratedImageDocument[]) => {
+    if (!updatedRecords.length) {
+      return;
+    }
+
     setLocalRecords(prev => {
-      const exists = prev.some(item => item.id === updatedRecord.id);
-      return exists
-        ? prev.map(item => (item.id === updatedRecord.id ? updatedRecord : item))
-        : [updatedRecord, ...prev];
+      const map = new Map(prev.map(item => [item.id, item]));
+      updatedRecords.forEach(record => {
+        map.set(record.id, record);
+      });
+      return Array.from(map.values());
     });
-    setSelectedRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
-    const merged = persistRecordsMerge([updatedRecord]);
+    setSelectedRecord(prev => {
+      if (!prev) {
+        return prev;
+      }
+      return updatedRecords.find(record => record.id === prev.id) ?? prev;
+    });
+    const merged = persistRecordsMerge(updatedRecords);
     broadcastHistoryUpdate(merged, "history");
+  };
+
+  const replaceRecord = (updatedRecord: GeneratedImageDocument) => {
+    replaceRecords([updatedRecord]);
   };
 
   const handleVideoCreated = (result: VideoCreatedResult) => {
@@ -618,10 +662,17 @@ export function GenerationHistoryView() {
       videoMeta: result.meta,
       updatedAt: result.meta.createdAtIso ?? new Date().toISOString()
     };
+    const videoRecord = createVideoHistoryRecord({
+      sourceRecord,
+      videoUrl: result.videoUrl,
+      videoMeta: result.meta,
+      motionPrompt: result.motionPrompt,
+      existingIds: localRecords.map(record => record.id)
+    });
 
-    replaceRecord(updatedRecord);
+    replaceRecords([updatedRecord, videoRecord]);
     setVideoTargetRecord(prev => (prev && prev.id === updatedRecord.id ? updatedRecord : prev));
-    toast.success("영상을 생성 기록에 저장했습니다.");
+    toast.success("이미지 기록과 영상 카드를 함께 저장했습니다.");
   };
 
   const handleToggleFavorite = async (record: GeneratedImageDocument) => {
@@ -650,7 +701,12 @@ export function GenerationHistoryView() {
       return;
     }
 
-    const confirmed = window.confirm("이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다.");
+    const isVideoRecord = isVideoHistoryRecord(record);
+    const confirmed = window.confirm(
+      isVideoRecord
+        ? "이 영상 기록을 삭제하시겠어요? 연결된 이미지 기록은 유지됩니다."
+        : "이 이미지를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다."
+    );
     if (!confirmed) {
       return;
     }
@@ -659,16 +715,18 @@ export function GenerationHistoryView() {
     setSelectedRecord(prev => (prev && prev.id === record.id ? null : prev));
     removeRecordFromLocalStorage(record.id);
 
-    try {
-      const localImageId = getLocalImageId(record.imageUrl) ?? record.id;
-      if (record.imageUrl?.startsWith("/api/images/")) {
-        await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
+    if (!isVideoRecord) {
+      try {
+        const localImageId = getLocalImageId(record.imageUrl) ?? record.id;
+        if (record.imageUrl?.startsWith("/api/images/")) {
+          await fetch(`/api/images/${localImageId}`, { method: "DELETE" });
+        }
+      } catch (error) {
+        console.warn("[History] Failed to delete storage image", error);
       }
-    } catch (error) {
-      console.warn("[History] Failed to delete storage image", error);
     }
 
-    toast.success("이미지를 삭제했습니다.");
+    toast.success(isVideoRecord ? "영상 기록을 삭제했습니다." : "이미지를 삭제했습니다.");
   };
 
   const handleSetReference = async (record: GeneratedImageDocument) => {
@@ -703,9 +761,11 @@ export function GenerationHistoryView() {
       ? selectedRecord.promptMeta.rawPrompt
       : undefined;
   const negativePrompt = selectedRecord?.promptMeta?.negativePrompt;
+  const selectedIsVideoRecord = selectedRecord ? isVideoHistoryRecord(selectedRecord) : false;
   const modalImageUrl = selectedRecord
     ? selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? selectedRecord.originalImageUrl ?? ""
     : "";
+  const modalVideoUrl = selectedIsVideoRecord ? selectedRecord?.videoUrl ?? "" : "";
   const originalImageUrl = selectedRecord
     ? selectedRecord.originalImageUrl ?? selectedRecord.imageUrl ?? selectedRecord.thumbnailUrl ?? ""
     : "";
@@ -913,8 +973,20 @@ export function GenerationHistoryView() {
             </button>
 
             <div className="grid gap-6 p-6 lg:grid-cols-[1.2fr_1fr]">
-              <div className="relative aspect-[9/16] w-full max-h-[80vh] overflow-hidden rounded-2xl border border-border/60 bg-muted">
-                {modalImageUrl ? (
+              <div
+                className={cn(
+                  "relative w-full max-h-[80vh] overflow-hidden rounded-2xl border border-border/60",
+                  selectedIsVideoRecord ? "aspect-video bg-black" : "aspect-[9/16] bg-muted"
+                )}
+              >
+                {selectedIsVideoRecord && modalVideoUrl ? (
+                  <video
+                    controls
+                    src={modalVideoUrl}
+                    poster={modalImageUrl || undefined}
+                    className="h-full w-full bg-black object-contain"
+                  />
+                ) : modalImageUrl ? (
                   <>
                     <div className="absolute left-4 top-4 z-20 rounded-full bg-black/40 px-2 py-1 backdrop-blur">
                       <ToggleGroup
@@ -958,7 +1030,7 @@ export function GenerationHistoryView() {
                   </>
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-                    이미지 미리보기를 불러오지 못했습니다.
+                    미디어 미리보기를 불러오지 못했습니다.
                   </div>
                 )}
               </div>
@@ -968,10 +1040,22 @@ export function GenerationHistoryView() {
                   <p className="text-xs text-muted-foreground">{formatDate(selectedRecord.createdAt)}</p>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant="outline" className="uppercase tracking-wide">
-                      {selectedRecord.mode}
+                      {selectedIsVideoRecord ? "video" : selectedRecord.mode}
                     </Badge>
                     <span>•</span>
                     <span>{selectedRecord.model}</span>
+                    {selectedIsVideoRecord && selectedRecord.videoMeta?.duration ? (
+                      <>
+                        <span>•</span>
+                        <span>{selectedRecord.videoMeta.duration}초</span>
+                      </>
+                    ) : null}
+                    {selectedIsVideoRecord && selectedRecord.videoMeta?.resolution ? (
+                      <>
+                        <span>•</span>
+                        <span>{selectedRecord.videoMeta.resolution}</span>
+                      </>
+                    ) : null}
                     {selectedRecord.promptMeta?.aspectRatio ? (
                       <>
                         <span>•</span>
@@ -1023,7 +1107,7 @@ export function GenerationHistoryView() {
                   </div>
                 ) : null}
 
-                {selectedRecord.videoUrl ? (
+                {selectedRecord.videoUrl && !selectedIsVideoRecord ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Film className="h-4 w-4 text-muted-foreground" />
@@ -1046,24 +1130,36 @@ export function GenerationHistoryView() {
                       </a>
                     </Button>
                   ) : null}
-                  <Button size="sm" variant="outline" onClick={() => handleSetReference(selectedRecord)}>
-                    기준이미지
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDownloadRecord(selectedRecord)}
-                  >
-                    다운로드
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleOpenVideoModal(selectedRecord)}
-                  >
-                    <Film className="mr-2 h-4 w-4" />
-                    영상화
-                  </Button>
+                  {!selectedIsVideoRecord ? (
+                    <Button size="sm" variant="outline" onClick={() => handleSetReference(selectedRecord)}>
+                      기준이미지
+                    </Button>
+                  ) : null}
+                  {selectedIsVideoRecord && selectedRecord.videoUrl ? (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={selectedRecord.videoUrl} download={`${selectedRecord.id}.mp4`}>
+                        영상 다운로드
+                      </a>
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDownloadRecord(selectedRecord)}
+                    >
+                      다운로드
+                    </Button>
+                  )}
+                  {!selectedIsVideoRecord ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenVideoModal(selectedRecord)}
+                    >
+                      <Film className="mr-2 h-4 w-4" />
+                      영상화
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="destructive"

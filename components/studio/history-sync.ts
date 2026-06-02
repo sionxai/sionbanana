@@ -1,5 +1,6 @@
 import type { GeneratedImageDocument } from "@/lib/types";
 import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
+import { generateId } from "@/lib/utils";
 
 export const HISTORY_SYNC_EVENT = "yesgem:history-sync";
 export const HISTORY_REFRESH_EVENT = "yesgem-history-refresh";
@@ -8,6 +9,16 @@ export interface HistorySyncPayload {
   records: GeneratedImageDocument[];
   source?: string;
 }
+
+type VideoHistoryRecordInput = {
+  sourceRecord: GeneratedImageDocument;
+  videoUrl: string;
+  videoMeta?: GeneratedImageDocument["videoMeta"];
+  motionPrompt?: string;
+  existingIds?: Iterable<string>;
+};
+
+const VIDEO_ROUTE_PATTERN = /^\/api\/videos\/([A-Za-z0-9_\-]+)$/;
 
 export function broadcastHistoryUpdate(records: GeneratedImageDocument[], source?: string) {
   if (typeof window === "undefined") {
@@ -20,6 +31,67 @@ export function broadcastHistoryUpdate(records: GeneratedImageDocument[], source
   } catch (error) {
     console.warn("Failed to broadcast history update", error);
   }
+}
+
+export function isVideoHistoryRecord(record: GeneratedImageDocument): boolean {
+  return record.kind === "video";
+}
+
+export function getVideoIdFromUrl(videoUrl?: string | null): string | null {
+  const match = videoUrl?.match(VIDEO_ROUTE_PATTERN);
+  return match?.[1] ?? null;
+}
+
+export function createVideoHistoryRecord({
+  sourceRecord,
+  videoUrl,
+  videoMeta,
+  motionPrompt,
+  existingIds = []
+}: VideoHistoryRecordInput): GeneratedImageDocument {
+  const reservedIds = new Set([sourceRecord.id, ...existingIds]);
+  const extractedId = getVideoIdFromUrl(videoUrl);
+  let id = extractedId && !reservedIds.has(extractedId) ? extractedId : generateId();
+  while (reservedIds.has(id)) {
+    id = generateId();
+  }
+
+  const nowIso = videoMeta?.createdAtIso ?? new Date().toISOString();
+  const normalizedMotionPrompt = motionPrompt?.trim();
+  const sourceImageUrl = getPersistableImageUrl(sourceRecord);
+  const promptMeta = normalizedMotionPrompt
+    ? {
+        ...sourceRecord.promptMeta,
+        rawPrompt: normalizedMotionPrompt,
+        refinedPrompt: normalizedMotionPrompt
+      }
+    : { ...sourceRecord.promptMeta };
+
+  return {
+    id,
+    userId: sourceRecord.userId,
+    mode: sourceRecord.mode,
+    kind: "video",
+    promptMeta,
+    status: "completed",
+    imageUrl: sourceImageUrl,
+    thumbnailUrl: sourceRecord.thumbnailUrl && !isDataUrl(sourceRecord.thumbnailUrl)
+      ? sourceRecord.thumbnailUrl
+      : sourceImageUrl,
+    originalImageUrl: sourceRecord.originalImageUrl && !isDataUrl(sourceRecord.originalImageUrl)
+      ? sourceRecord.originalImageUrl
+      : sourceImageUrl,
+    videoUrl,
+    videoMeta,
+    metadata: {
+      sourceImageId: sourceRecord.id,
+      sourceImageMode: sourceRecord.mode,
+      kind: "video"
+    },
+    model: videoMeta?.model ?? sourceRecord.model,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
 }
 
 // 단일 진실 원천(localStorage)을 안전하게 갱신하기 위한 atomic merge.
@@ -69,7 +141,8 @@ export function persistRecordsMerge(localRecords: GeneratedImageDocument[]): Gen
       const looksBase64 = (url: unknown) => typeof url === "string" && url.startsWith("data:");
       return !(looksBase64((r as { imageUrl?: unknown }).imageUrl) ||
         looksBase64((r as { thumbnailUrl?: unknown }).thumbnailUrl) ||
-        looksBase64((r as { originalImageUrl?: unknown }).originalImageUrl));
+        looksBase64((r as { originalImageUrl?: unknown }).originalImageUrl) ||
+        looksBase64((r as { videoUrl?: unknown }).videoUrl));
     });
     try {
       window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(compact));
@@ -98,6 +171,15 @@ export function removeRecordFromLocalStorage(id: string) {
   } catch (error) {
     console.warn("Failed to remove record from localStorage", error);
   }
+}
+
+function getPersistableImageUrl(record: GeneratedImageDocument): string | undefined {
+  const candidates = [record.imageUrl, record.thumbnailUrl, record.originalImageUrl];
+  return candidates.find(url => typeof url === "string" && url.length > 0 && !isDataUrl(url));
+}
+
+function isDataUrl(url: string): boolean {
+  return url.startsWith("data:");
 }
 
 function parseIsoDate(value?: string | number | null | any): number {

@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationOptionsValue } from "@/components/studio/generation-options-panel";
-import { broadcastHistoryUpdate, persistRecordsMerge } from "@/components/studio/history-sync";
+import { broadcastHistoryUpdate, createVideoHistoryRecord, persistRecordsMerge } from "@/components/studio/history-sync";
 import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-modal";
 import {
   ANGLE_OPTIONS,
@@ -195,8 +195,14 @@ export function SceneCard({
       videoMeta: result.meta,
       updatedAt: result.meta.createdAtIso ?? new Date().toISOString()
     };
+    const videoRecord = createVideoHistoryRecord({
+      sourceRecord: scene.resultRecord,
+      videoUrl: result.videoUrl,
+      videoMeta: result.meta,
+      motionPrompt: result.motionPrompt
+    });
 
-    const merged = persistRecordsMerge([updatedRecord]);
+    const merged = persistRecordsMerge([updatedRecord, videoRecord]);
     broadcastHistoryUpdate(merged, "story");
     onRecordUpdate?.(updatedRecord);
   };
