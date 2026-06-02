@@ -21,6 +21,10 @@ function imagesDir(): string {
   return path.join(getDataDir(), "images");
 }
 
+function videosDir(): string {
+  return path.join(getDataDir(), "videos");
+}
+
 function monthBucket(date: Date = new Date()): string {
   const y = date.getUTCFullYear();
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -28,6 +32,7 @@ function monthBucket(date: Date = new Date()): string {
 }
 
 const FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.(png|jpg|jpeg|webp)$/;
+const VIDEO_FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.mp4$/;
 
 function safeImageId(id: string): string {
   const cleaned = id.replace(/[^A-Za-z0-9_\-]/g, "");
@@ -191,6 +196,56 @@ export async function readImageById(
       } catch {
         // try next
       }
+    }
+  }
+  return null;
+}
+
+export async function saveVideoBuffer(
+  id: string,
+  buffer: Buffer
+): Promise<{ relativePath: string; absolutePath: string; mimeType: string; bytes: number }> {
+  const fileName = safeFileName(id, "mp4");
+  const bucket = monthBucket();
+  const dir = path.join(videosDir(), bucket);
+  await fs.mkdir(dir, { recursive: true });
+  const absolutePath = path.join(dir, fileName);
+  await fs.writeFile(absolutePath, buffer);
+  return {
+    relativePath: path.join(bucket, fileName),
+    absolutePath,
+    mimeType: "video/mp4",
+    bytes: buffer.byteLength
+  };
+}
+
+export async function readVideoById(
+  id: string
+): Promise<{ stream: ReturnType<typeof createReadStream>; mimeType: string; bytes: number } | null> {
+  const cleaned = id.replace(/[^A-Za-z0-9_\-]/g, "");
+  if (!cleaned) return null;
+
+  const root = videosDir();
+  let buckets: string[];
+  try {
+    buckets = await fs.readdir(root);
+  } catch {
+    return null;
+  }
+
+  for (const bucket of buckets) {
+    const candidate = path.join(root, bucket, `${cleaned}.mp4`);
+    try {
+      const stat = await fs.stat(candidate);
+      if (VIDEO_FILE_NAME_RE.test(`${cleaned}.mp4`)) {
+        return {
+          stream: createReadStream(candidate),
+          mimeType: "video/mp4",
+          bytes: stat.size
+        };
+      }
+    } catch {
+      // try next
     }
   }
   return null;
