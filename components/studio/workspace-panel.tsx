@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { AspectRatioPreset, GeneratedImageDocument, GenerationMode } from "@/lib/types";
 import type { PromptDetails } from "@/components/studio/types";
 
@@ -67,7 +67,7 @@ const modeLabelMap: Record<GenerationMode, string> = {
 };
 
 
-export function WorkspacePanel({
+export const WorkspacePanel = memo(function WorkspacePanel({
   mode,
   record,
   comparisonRecord,
@@ -698,7 +698,7 @@ export function WorkspacePanel({
       </Card>
     </div>
   );
-}
+});
 
 function LogItem({ label, value }: { label: string; value: string }) {
   return (

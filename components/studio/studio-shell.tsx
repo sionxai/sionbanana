@@ -20,7 +20,7 @@ import {
   normalizeCameraSettings,
   type NormalizedCameraSettings
 } from "@/lib/studio-helpers/prompt";
-import { PromptPanel } from "@/components/studio/prompt-panel";
+import { PromptPanel, type PromptPanelDraftValues } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
 import { CharacterPickerModal } from "@/components/studio/character-picker-modal";
@@ -124,6 +124,20 @@ type StoryReferenceUploadResponse =
 
 const LOCAL_AUTH = { user: { uid: "local" } } as const;
 const useLocalUser = () => LOCAL_AUTH;
+
+function useStableCallback<T extends (...args: any[]) => any>(callback: T): T {
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  const stableCallback = useCallback((...args: Parameters<T>): ReturnType<T> => {
+    return callbackRef.current(...args);
+  }, []);
+
+  return stableCallback as T;
+}
 
 async function uploadReferenceFileToImageUrl(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) {
@@ -901,9 +915,18 @@ function StudioShellInner() {
     return () => window.removeEventListener(REFERENCE_SYNC_EVENT, handler as EventListener);
   }, [mergeLocalRecord, selectImage, setLocalRecords, user]);
 
-  const handleGenerate = (action: "primary" | "remix", promptOverride?: string) => {
-    const promptForGeneration = promptOverride?.trim() || prompt;
-    const refinedPromptForGeneration = promptOverride?.trim() ? "" : refinedPrompt;
+  const handleGenerate = (
+    action: "primary" | "remix",
+    promptOverride?: string,
+    draftValues?: PromptPanelDraftValues
+  ) => {
+    const promptOverrideValue = promptOverride?.trim();
+    const hasPromptOverride = Boolean(promptOverrideValue);
+    const promptForGeneration = promptOverrideValue || (draftValues?.prompt ?? prompt);
+    const refinedPromptForGeneration = hasPromptOverride ? "" : (draftValues?.refinedPrompt ?? refinedPrompt);
+    const negativePromptForGeneration = draftValues?.negativePrompt ?? negativePrompt;
+    const subjectDirectionForGeneration = draftValues?.subjectDirection ?? subjectDirection;
+    const cameraDirectionForGeneration = draftValues?.cameraDirection ?? cameraDirection;
 
     const execute = async () => {
       const guard = startGeneration();
@@ -933,8 +956,8 @@ function StudioShellInner() {
 
       const normalizedCameraSettings = normalizeCameraSettings(
         cameraAngle,
-        subjectDirection,
-        cameraDirection,
+        subjectDirectionForGeneration,
+        cameraDirectionForGeneration,
         zoomLevel
       );
 
@@ -983,10 +1006,10 @@ function StudioShellInner() {
       const hasCameraPromptFallback = Boolean(defaultCameraFallback && defaultCameraFallback.trim().length);
 
       const effectiveNegativePrompt = isCameraMode
-        ? [negativePrompt, CAMERA_MODE_NEGATIVE_GUARD]
+        ? [negativePromptForGeneration, CAMERA_MODE_NEGATIVE_GUARD]
             .filter(value => value && value.trim().length)
             .join(", ")
-        : negativePrompt;
+        : negativePromptForGeneration;
 
       const hasLightingInstruction = Boolean(lightingGuidance && lightingGuidance?.trim().length);
       const hasPoseInstruction = Boolean(poseGuidance && poseGuidance?.trim().length);
@@ -2804,12 +2827,17 @@ ${viewInstruction}`;
     }
   };
 
-  const handleRefinePrompt = async () => {
+  const handleRefinePrompt = async (draftValues?: PromptPanelDraftValues) => {
+    const promptForRefine = draftValues?.prompt ?? prompt;
+    const refinedPromptForRefine = draftValues?.refinedPrompt ?? refinedPrompt;
+    const negativePromptForRefine = draftValues?.negativePrompt ?? negativePrompt;
+    const subjectDirectionForRefine = draftValues?.subjectDirection ?? subjectDirection;
+    const cameraDirectionForRefine = draftValues?.cameraDirection ?? cameraDirection;
     const gallery = collectReferenceGalleryUrls();
     const normalizedCameraSettings = normalizeCameraSettings(
       cameraAngle,
-      subjectDirection,
-      cameraDirection,
+      subjectDirectionForRefine,
+      cameraDirectionForRefine,
       zoomLevel
     );
     const hasCameraReference = Boolean(referenceRecord || gallery.length);
@@ -2818,11 +2846,11 @@ ${viewInstruction}`;
     });
 
     const baseForGpt = (() => {
-      const refined = refinedPrompt && refinedPrompt.trim().length ? refinedPrompt : null;
+      const refined = refinedPromptForRefine && refinedPromptForRefine.trim().length ? refinedPromptForRefine : null;
       if (refined) {
         return refined;
       }
-      const raw = prompt && prompt.trim().length ? prompt : null;
+      const raw = promptForRefine && promptForRefine.trim().length ? promptForRefine : null;
       if (raw) {
         return raw;
       }
@@ -2844,6 +2872,9 @@ ${viewInstruction}`;
       basePrompt: baseForGpt,
       source: "gpt-manual",
       aspectRatio: aspectRatio === DEFAULT_ASPECT_RATIO ? undefined : aspectRatio,
+      negativePrompt: negativePromptForRefine,
+      subjectDirection: subjectDirectionForRefine === DEFAULT_SUBJECT_DIRECTION ? undefined : subjectDirectionForRefine,
+      cameraDirection: cameraDirectionForRefine === DEFAULT_CAMERA_DIRECTION ? undefined : cameraDirectionForRefine,
       gallery
     });
     if (result) {
@@ -2857,6 +2888,60 @@ ${viewInstruction}`;
   const previewImageUrl = getRecordGeneratedImageUrl(previewRecord);
   const previewPromptText = getRecordPromptText(previewRecord);
   const previewZoomPercent = Math.round(previewZoom.scale * 100);
+  const handlePromptPanelGenerate = useStableCallback((
+    action: "primary" | "remix",
+    draftValues?: PromptPanelDraftValues
+  ) => {
+    handleGenerate(action, undefined, draftValues);
+  });
+  const handleWorkspaceCompare = useStableCallback((record: GeneratedImageDocument) => {
+    if (!record) {
+      return;
+    }
+    selectImageAuto(record.id, record);
+    const comparisonSource = referenceRecord && referenceRecord.id !== record.id
+      ? referenceRecord.id
+      : comparisonImageId && comparisonImageId !== record.id && mergedRecords.some(item => item.id === comparisonImageId)
+        ? comparisonImageId
+        : mergedRecords.find(item => item.id !== record.id)?.id ?? null;
+    setComparisonImageId(comparisonSource ?? null);
+  });
+  const handleWorkspaceRegisterCharacter = useStableCallback((record: GeneratedImageDocument) => {
+    void handleRegisterRecordAsCharacter(record);
+  });
+  const handleDismissGenerationStatus = useStableCallback(() => {
+    setCurrentRequestId(null);
+  });
+  const handleClearComparison = useStableCallback(() => {
+    setComparisonImageId(null);
+  });
+  const handleOpenCharacterPicker = useStableCallback(() => {
+    setIsCharacterPickerOpen(true);
+  });
+  const handleHistoryRegisterCharacter = useStableCallback((recordId: string) => {
+    const target = mergedRecords.find(record => record.id === recordId);
+    if (target) {
+      void handleRegisterRecordAsCharacter(target);
+    } else {
+      toast.error("캐릭터로 등록할 이미지를 찾을 수 없습니다.");
+    }
+  });
+  const stableHandleHistorySelect = useStableCallback(handleHistorySelect);
+  const stableHandleReferenceUpload = useStableCallback(handleReferenceUpload);
+  const stableHandleReferenceRemove = useStableCallback(handleReferenceRemove);
+  const stableHandleSetReferenceFromHistory = useStableCallback(handleSetReferenceFromHistory);
+  const stableHandleToggleFavorite = useStableCallback(handleToggleFavorite);
+  const stableHandleDownloadRecord = useStableCallback(handleDownloadRecord);
+  const stableHandleDeleteRecord = useStableCallback(handleDeleteRecord);
+  const stableHandleDeleteAllRecords = useStableCallback(handleDeleteAllRecords);
+  const stableHandleSetComparison = useStableCallback(handleSetComparison);
+  const stableHandleUpdateRecordTags = useStableCallback(handleUpdateRecordTags);
+  const stableHandlePreviewRecord = useStableCallback(handlePreviewRecord);
+  const stableHandleReferenceSlotUpload = useStableCallback(handleReferenceSlotUpload);
+  const stableHandleReferenceSlotCreateUpload = useStableCallback(handleReferenceSlotCreateUpload);
+  const stableHandleReferenceSlotClear = useStableCallback(handleReferenceSlotClear);
+  const stableHandleReferenceSlotSelect = useStableCallback(handleReferenceSlotSelect);
+  const stableHandleReferenceSlotAdd = useStableCallback(handleReferenceSlotAdd);
 
   return (
     <div className="flex h-full flex-1 flex-col">
@@ -2918,7 +3003,7 @@ ${viewInstruction}`;
               poseSelections={poseSelections}
               onPoseSelectionsChange={handlePoseSelectionsChange}
               onResetPresets={handleResetPresets}
-              onGenerate={handleGenerate}
+              onGenerate={handlePromptPanelGenerate}
               onRefinePrompt={handleRefinePrompt}
               generating={isGenerating || characterBatchPending || view360BatchPending}
               inflightCount={inflightCount}
@@ -2960,21 +3045,10 @@ ${viewInstruction}`;
           showGenerationSuccess={showGenerationSuccess}
           successRecordId={successRecordId ?? undefined}
           promptDetails={lastPromptDetails}
-          onClickCompare={record => {
-            if (!record) {
-              return;
-            }
-            selectImageAuto(record.id, record);
-            const comparisonSource = referenceRecord && referenceRecord.id !== record.id
-              ? referenceRecord.id
-              : comparisonImageId && comparisonImageId !== record.id && mergedRecords.some(item => item.id === comparisonImageId)
-                ? comparisonImageId
-                : mergedRecords.find(item => item.id !== record.id)?.id ?? null;
-            setComparisonImageId(comparisonSource ?? null);
-          }}
-          onRegisterCharacter={record => void handleRegisterRecordAsCharacter(record)}
-          onDismissGenerationStatus={() => setCurrentRequestId(null)}
-          onClearComparison={() => setComparisonImageId(null)}
+          onClickCompare={handleWorkspaceCompare}
+          onRegisterCharacter={handleWorkspaceRegisterCharacter}
+          onDismissGenerationStatus={handleDismissGenerationStatus}
+          onClearComparison={handleClearComparison}
           />
         </StudioShellCenterPanel>
 
@@ -2999,42 +3073,35 @@ ${viewInstruction}`;
           <HistoryPanel
           records={historyRecords}
           selectedId={selectedImageId}
-          onSelect={handleHistorySelect}
+          onSelect={stableHandleHistorySelect}
           referenceImageUrl={referenceImageUrl}
           referenceImageKey={referenceImageState.signature}
-          onUploadReference={handleReferenceUpload}
-          onRemoveReference={handleReferenceRemove}
+          onUploadReference={stableHandleReferenceUpload}
+          onRemoveReference={stableHandleReferenceRemove}
           hasReference={hasReference}
-          onSetReference={handleSetReferenceFromHistory}
-          onOpenCharacterPicker={() => setIsCharacterPickerOpen(true)}
-          onToggleFavorite={handleToggleFavorite}
-          onDownload={handleDownloadRecord}
-          onDelete={handleDeleteRecord}
-          onRegisterCharacter={recordId => {
-            const target = mergedRecords.find(record => record.id === recordId);
-            if (target) {
-              void handleRegisterRecordAsCharacter(target);
-            } else {
-              toast.error("캐릭터로 등록할 이미지를 찾을 수 없습니다.");
-            }
-          }}
-          onDeleteAll={handleDeleteAllRecords}
+          onSetReference={stableHandleSetReferenceFromHistory}
+          onOpenCharacterPicker={handleOpenCharacterPicker}
+          onToggleFavorite={stableHandleToggleFavorite}
+          onDownload={stableHandleDownloadRecord}
+          onDelete={stableHandleDeleteRecord}
+          onRegisterCharacter={handleHistoryRegisterCharacter}
+          onDeleteAll={stableHandleDeleteAllRecords}
           comparisonId={comparisonImageId}
-          onCompare={handleSetComparison}
-          onClearComparison={() => setComparisonImageId(null)}
+          onCompare={stableHandleSetComparison}
+          onClearComparison={handleClearComparison}
           view={historyView}
           onChangeView={setHistoryView}
           tagFilter={historyTagFilter}
           tagOptions={historyTagOptions}
           onChangeTagFilter={setHistoryTagFilter}
-          onUpdateTags={handleUpdateRecordTags}
-          onPreview={handlePreviewRecord}
+          onUpdateTags={stableHandleUpdateRecordTags}
+          onPreview={stableHandlePreviewRecord}
           referenceSlots={referenceSlots}
-          onReferenceSlotUpload={handleReferenceSlotUpload}
-          onReferenceSlotCreateUpload={handleReferenceSlotCreateUpload}
-          onReferenceSlotClear={handleReferenceSlotClear}
-          onReferenceSlotSelect={handleReferenceSlotSelect}
-          onReferenceSlotAdd={handleReferenceSlotAdd}
+          onReferenceSlotUpload={stableHandleReferenceSlotUpload}
+          onReferenceSlotCreateUpload={stableHandleReferenceSlotCreateUpload}
+          onReferenceSlotClear={stableHandleReferenceSlotClear}
+          onReferenceSlotSelect={stableHandleReferenceSlotSelect}
+          onReferenceSlotAdd={stableHandleReferenceSlotAdd}
           referenceSlotsLimit={MAX_REFERENCE_SLOT_COUNT}
           emptyStateMessage={user ? "생성된 이미지가 아직 없습니다." : "로그인하여 생성 기록을 확인하세요."}
           emptyStateFavoriteMessage={user ? "즐겨찾기에 추가한 이미지가 없습니다." : "로그인 후 즐겨찾기를 사용할 수 있습니다."}

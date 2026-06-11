@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { memo, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import NextImage from "next/image";
 import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,7 +52,7 @@ interface HistoryPanelProps {
   emptyStateFavoriteMessage?: string;
 }
 
-export function HistoryPanel({
+export const HistoryPanel = memo(function HistoryPanel({
   records,
   selectedId,
   onSelect,
@@ -613,7 +613,7 @@ export function HistoryPanel({
       </Card>
     </div>
   );
-}
+});
 
 function EmptyState({ label, helper }: { label: string; helper?: string }) {
   return (

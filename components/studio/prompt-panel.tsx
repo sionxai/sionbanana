@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useEffect, useState } from "react";
+import { useCallback, useMemo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ const ZOOM_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 const APERTURE_MARKS = [0, 12, 28, 56, 110, 160, 220];
+const PROMPT_SYNC_DEBOUNCE_MS = 250;
 const NOISE_AUTO_CORRECTION_PROMPT = `Remove all noise, grain, and digital artifacts from the image
 while preserving all lines, shapes, colors, and composition exactly.
 Output a clean, denoised version with smooth gradients.`;
@@ -91,11 +92,119 @@ export type CharacterMentionChip = {
   status: CharacterMentionChipStatus;
 };
 
+export type PromptPanelDraftValues = {
+  prompt: string;
+  refinedPrompt: string;
+  negativePrompt: string;
+  subjectDirection: string;
+  cameraDirection: string;
+};
+
 function removeNoiseAutoCorrectionPrompt(value: string) {
   return value
     .replace(NOISE_AUTO_CORRECTION_PROMPT, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function useDebouncedPanelValue(
+  value: string,
+  onChange: (value: string) => void
+): {
+  value: string;
+  setValue: (value: string) => void;
+  commitValue: (value: string) => void;
+  flush: () => string;
+} {
+  const [localValue, setLocalValue] = useState(value);
+  const onChangeRef = useRef(onChange);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingValueRef = useRef<string | null>(null);
+  const lastPropagatedValueRef = useRef(value);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const propagate = useCallback(
+    (nextValue: string) => {
+      clearTimer();
+      pendingValueRef.current = null;
+      lastPropagatedValueRef.current = nextValue;
+      onChangeRef.current(nextValue);
+    },
+    [clearTimer]
+  );
+
+  const setValue = useCallback(
+    (nextValue: string) => {
+      setLocalValue(nextValue);
+      pendingValueRef.current = nextValue;
+      clearTimer();
+      timerRef.current = setTimeout(() => {
+        const pendingValue = pendingValueRef.current;
+        if (pendingValue === null) {
+          timerRef.current = null;
+          return;
+        }
+
+        pendingValueRef.current = null;
+        timerRef.current = null;
+        lastPropagatedValueRef.current = pendingValue;
+        onChangeRef.current(pendingValue);
+      }, PROMPT_SYNC_DEBOUNCE_MS);
+    },
+    [clearTimer]
+  );
+
+  const commitValue = useCallback(
+    (nextValue: string) => {
+      setLocalValue(nextValue);
+      propagate(nextValue);
+    },
+    [propagate]
+  );
+
+  const flush = useCallback(() => {
+    const pendingValue = pendingValueRef.current;
+    if (pendingValue === null) {
+      return localValue;
+    }
+
+    setLocalValue(pendingValue);
+    propagate(pendingValue);
+    return pendingValue;
+  }, [localValue, propagate]);
+
+  useEffect(() => {
+    if (value !== lastPropagatedValueRef.current) {
+      clearTimer();
+      pendingValueRef.current = null;
+      lastPropagatedValueRef.current = value;
+      setLocalValue(value);
+    }
+  }, [clearTimer, value]);
+
+  useEffect(() => {
+    return () => {
+      clearTimer();
+      const pendingValue = pendingValueRef.current;
+      if (pendingValue !== null) {
+        pendingValueRef.current = null;
+        lastPropagatedValueRef.current = pendingValue;
+        onChangeRef.current(pendingValue);
+      }
+    };
+  }, [clearTimer]);
+
+  return { value: localValue, setValue, commitValue, flush };
 }
 
 interface PromptPanelProps {
@@ -126,8 +235,8 @@ interface PromptPanelProps {
   poseSelections?: PoseSelections;
   onPoseSelectionsChange?: (category: PosePresetCategory, values: string[]) => void;
   onResetPresets?: () => void;
-  onGenerate?: (action: "primary" | "remix") => void;
-  onRefinePrompt?: () => void;
+  onGenerate?: (action: "primary" | "remix", values?: PromptPanelDraftValues) => void;
+  onRefinePrompt?: (values?: PromptPanelDraftValues) => void;
   generating?: boolean;
   inflightCount?: number;
   characterMentionChips?: CharacterMentionChip[];
@@ -198,6 +307,47 @@ export function PromptPanel({
   const [stylePresets, setStylePresets] = useState<StoryboardStyle[]>(FALLBACK_STORYBOARD_STYLES);
   const [styleLoading, setStyleLoading] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
+  const promptInput = useDebouncedPanelValue(prompt, onPromptChange);
+  const refinedPromptInput = useDebouncedPanelValue(refinedPrompt, onRefinedPromptChange);
+  const negativePromptInput = useDebouncedPanelValue(negativePrompt, onNegativePromptChange);
+  const subjectDirectionInput = useDebouncedPanelValue(subjectDirection, onSubjectDirectionChange);
+  const cameraDirectionInput = useDebouncedPanelValue(cameraDirection, onCameraDirectionChange);
+
+  const promptValue = promptInput.value;
+  const refinedPromptValue = refinedPromptInput.value;
+  const negativePromptValue = negativePromptInput.value;
+  const subjectDirectionValue = subjectDirectionInput.value;
+  const cameraDirectionValue = cameraDirectionInput.value;
+  const onGenerateRef = useRef(onGenerate);
+  const onRefinePromptRef = useRef(onRefinePrompt);
+
+  onGenerateRef.current = onGenerate;
+  onRefinePromptRef.current = onRefinePrompt;
+
+  const flushDraftValues = useCallback((): PromptPanelDraftValues => ({
+    prompt: promptInput.flush(),
+    refinedPrompt: refinedPromptInput.flush(),
+    negativePrompt: negativePromptInput.flush(),
+    subjectDirection: subjectDirectionInput.flush(),
+    cameraDirection: cameraDirectionInput.flush()
+  }), [cameraDirectionInput, negativePromptInput, promptInput, refinedPromptInput, subjectDirectionInput]);
+
+  const handleGenerateClick = useCallback(
+    (action: "primary" | "remix") => {
+      const draftValues = flushDraftValues();
+      setTimeout(() => {
+        onGenerateRef.current?.(action, draftValues);
+      }, 0);
+    },
+    [flushDraftValues]
+  );
+
+  const handleRefinePromptClick = useCallback(() => {
+    const draftValues = flushDraftValues();
+    setTimeout(() => {
+      onRefinePromptRef.current?.(draftValues);
+    }, 0);
+  }, [flushDraftValues]);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,9 +391,9 @@ export function PromptPanel({
         return;
       }
 
-      const current = prompt.trim();
+      const current = promptValue.trim();
       if (!current) {
-        onPromptChange(next);
+        promptInput.commitValue(next);
         return;
       }
 
@@ -251,46 +401,48 @@ export function PromptPanel({
         return;
       }
 
-      onPromptChange(`${current}\n\n${next}`);
+      promptInput.commitValue(`${current}\n\n${next}`);
     },
-    [onPromptChange, prompt]
+    [promptInput, promptValue]
   );
   const noiseAutoCorrectionEnabled = useMemo(
-    () => prompt.includes(NOISE_AUTO_CORRECTION_PROMPT),
-    [prompt]
+    () => promptValue.includes(NOISE_AUTO_CORRECTION_PROMPT),
+    [promptValue]
   );
   const handleToggleNoiseAutoCorrection = useCallback(
     (checked: boolean) => {
       if (checked) {
         appendPromptText(NOISE_AUTO_CORRECTION_PROMPT);
       } else {
-        onPromptChange(removeNoiseAutoCorrectionPrompt(prompt));
+        promptInput.commitValue(removeNoiseAutoCorrectionPrompt(promptValue));
       }
-      onRefinedPromptChange("");
+      refinedPromptInput.commitValue("");
     },
-    [appendPromptText, onPromptChange, onRefinedPromptChange, prompt]
+    [appendPromptText, promptInput, promptValue, refinedPromptInput]
   );
 
   const handleLightingSelectionsChange = useCallback(
     (category: LightingPresetCategory, values: string[]) => {
+      promptInput.flush();
       onLightingSelectionsChange?.(category, values);
     },
-    [onLightingSelectionsChange]
+    [onLightingSelectionsChange, promptInput]
   );
 
   const handlePoseSelectionsChange = useCallback(
     (category: PosePresetCategory, values: string[]) => {
+      promptInput.flush();
       onPoseSelectionsChange?.(category, values);
     },
-    [onPoseSelectionsChange]
+    [onPoseSelectionsChange, promptInput]
   );
 
   const handleExternalPresetApply = useCallback(
     (option: ExternalPresetOption) => {
       appendPromptText(option.prompt);
-      onRefinedPromptChange("");
+      refinedPromptInput.commitValue("");
     },
-    [appendPromptText, onRefinedPromptChange]
+    [appendPromptText, refinedPromptInput]
   );
 
   const handleStylePresetApply = useCallback(
@@ -301,57 +453,61 @@ export function PromptPanel({
         return;
       }
       appendPromptText(promptText);
-      onRefinedPromptChange("");
+      refinedPromptInput.commitValue("");
       toast.success(`${style.label} 스타일 프리셋을 적용했습니다.`);
     },
-    [appendPromptText, onRefinedPromptChange]
+    [appendPromptText, refinedPromptInput]
   );
 
   const handleCameraAngleChangeInternal = useCallback(
     (value: string | undefined) => {
+      promptInput.flush();
       onCameraAngleChange(value || DEFAULT_CAMERA_ANGLE);
     },
-    [onCameraAngleChange]
+    [onCameraAngleChange, promptInput]
   );
 
   const handleSubjectDirectionChangeInternal = useCallback(
     (value: string | undefined) => {
-      onSubjectDirectionChange(value || DEFAULT_SUBJECT_DIRECTION);
+      promptInput.flush();
+      subjectDirectionInput.setValue(value || DEFAULT_SUBJECT_DIRECTION);
     },
-    [onSubjectDirectionChange]
+    [promptInput, subjectDirectionInput]
   );
 
   const handleCameraDirectionChangeInternal = useCallback(
     (value: string | undefined) => {
-      onCameraDirectionChange(value || DEFAULT_CAMERA_DIRECTION);
+      promptInput.flush();
+      cameraDirectionInput.setValue(value || DEFAULT_CAMERA_DIRECTION);
     },
-    [onCameraDirectionChange]
+    [cameraDirectionInput, promptInput]
   );
 
   const handleZoomLevelChangeInternal = useCallback(
     (value: string | undefined) => {
+      promptInput.flush();
       onZoomLevelChange(value || DEFAULT_ZOOM_LEVEL);
     },
-    [onZoomLevelChange]
+    [onZoomLevelChange, promptInput]
   );
 
   const handleClearPrompt = useCallback(() => {
-    onPromptChange("");
-  }, [onPromptChange]);
+    promptInput.commitValue("");
+  }, [promptInput]);
 
   const handleCopyPrompt = useCallback(async () => {
-    if (!prompt.trim()) {
+    if (!promptValue.trim()) {
       toast.error("복사할 프롬프트가 없습니다.");
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(prompt);
+      await navigator.clipboard.writeText(promptValue);
       toast.success("프롬프트가 클립보드에 복사되었습니다.");
     } catch (error) {
       toast.error("프롬프트 복사에 실패했습니다.");
     }
-  }, [prompt]);
+  }, [promptValue]);
   const getCharacterMentionChipLabel = useCallback((status: CharacterMentionChipStatus) => {
     switch (status) {
       case "attached":
@@ -380,8 +536,11 @@ export function PromptPanel({
       </CardHeader>
       <CardContent className="flex h-full flex-col gap-4">
         <Textarea
-          value={prompt}
-          onChange={event => onPromptChange(event.target.value)}
+          value={promptValue}
+          onChange={event => promptInput.setValue(event.target.value)}
+          onBlur={() => {
+            promptInput.flush();
+          }}
           placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
           className="min-h-[160px] resize-none"
         />
@@ -403,11 +562,11 @@ export function PromptPanel({
         <div className="grid grid-cols-2 gap-2">
           <Button
             className="bg-sky-500 hover:bg-sky-500/90"
-            onClick={() => onGenerate?.("primary")}
+            onClick={() => handleGenerateClick("primary")}
           >
             {inflightCount > 0 ? `이미지 생성 (${inflightCount} 진행 중)` : "이미지 생성"}
           </Button>
-          <Button className="bg-amber-500 hover:bg-amber-500/90" onClick={() => onGenerate?.("remix")}>
+          <Button className="bg-amber-500 hover:bg-amber-500/90" onClick={() => handleGenerateClick("remix")}>
             변형 생성
           </Button>
           <Button className="bg-red-500 hover:bg-red-500/90" onClick={handleClearPrompt}>
@@ -451,8 +610,11 @@ export function PromptPanel({
           </div>
           <Label className="text-xs text-muted-foreground">GPT 프롬프트 리라이팅</Label>
           <Textarea
-            value={refinedPrompt}
-            onChange={event => onRefinedPromptChange(event.target.value)}
+            value={refinedPromptValue}
+            onChange={event => refinedPromptInput.setValue(event.target.value)}
+            onBlur={() => {
+              refinedPromptInput.flush();
+            }}
             placeholder="GPT가 보완한 프롬프트가 여기에 표시됩니다."
             className="min-h-[120px] resize-none border-dashed"
             readOnly={gptLoading}
@@ -461,7 +623,7 @@ export function PromptPanel({
             variant="outline"
             size="sm"
             className="w-full border-dashed"
-            onClick={onRefinePrompt}
+            onClick={handleRefinePromptClick}
             disabled={gptLoading}
           >
             {gptLoading ? "GPT 생성 중..." : "GPT에게 프롬프트 개선 요청"}
@@ -470,8 +632,11 @@ export function PromptPanel({
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">네거티브 프롬프트</Label>
           <Textarea
-            value={negativePrompt}
-            onChange={event => onNegativePromptChange(event.target.value)}
+            value={negativePromptValue}
+            onChange={event => negativePromptInput.setValue(event.target.value)}
+            onBlur={() => {
+              negativePromptInput.flush();
+            }}
             placeholder="포함하고 싶지 않은 요소를 입력하세요."
             className="min-h-[100px] resize-none"
           />
@@ -568,7 +733,7 @@ export function PromptPanel({
                 <Label className="text-xs text-muted-foreground">피사체 방향</Label>
                 <ToggleGroup
                   type="single"
-                  value={subjectDirection}
+                  value={subjectDirectionValue}
                   onValueChange={handleSubjectDirectionChangeInternal}
                   className="flex flex-wrap gap-2"
                 >
@@ -583,7 +748,7 @@ export function PromptPanel({
                 <Label className="text-xs text-muted-foreground">카메라 방향</Label>
                 <ToggleGroup
                   type="single"
-                  value={cameraDirection}
+                  value={cameraDirectionValue}
                   onValueChange={handleCameraDirectionChangeInternal}
                   className="flex flex-wrap gap-2"
                 >
@@ -636,7 +801,10 @@ export function PromptPanel({
               max={APERTURE_MAX}
               step={1}
               value={apertureValue}
-              onValueChange={handleApertureValueChange}
+              onValueChange={value => {
+                promptInput.flush();
+                handleApertureValueChange(value);
+              }}
             />
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
               {APERTURE_MARKS.map(mark => (
@@ -648,7 +816,10 @@ export function PromptPanel({
                 variant="outline"
                 size="sm"
                 className="border-dashed px-2 py-1 text-[11px]"
-                onClick={() => onApertureChange(APERTURE_NONE)}
+                onClick={() => {
+                  promptInput.flush();
+                  onApertureChange(APERTURE_NONE);
+                }}
                 disabled={aperture === APERTURE_NONE}
               >
                 기본값
@@ -801,9 +972,11 @@ export function PromptPanel({
             className="px-3"
             onClick={() => {
               onResetPresets();
-              onPromptChange("");
-              onRefinedPromptChange("");
-              onNegativePromptChange("");
+              promptInput.commitValue("");
+              refinedPromptInput.commitValue("");
+              negativePromptInput.commitValue("");
+              subjectDirectionInput.commitValue(DEFAULT_SUBJECT_DIRECTION);
+              cameraDirectionInput.commitValue(DEFAULT_CAMERA_DIRECTION);
             }}
           >
             프리셋 리셋
