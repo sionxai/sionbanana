@@ -5,9 +5,12 @@ import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 
 const DEFAULT_DIR = "./data";
 const BUCKET_NAME_RE = /^[A-Za-z0-9_\-]+$/;
+const THUMBNAIL_MAX_SIZE = 512;
+const THUMBNAIL_QUALITY = 80;
 
 export function getDataDir(): string {
   const fromEnv = process.env.SIONBANANA_DATA_DIR?.trim();
@@ -32,6 +35,7 @@ function monthBucket(date: Date = new Date()): string {
 }
 
 const FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.(png|jpg|jpeg|webp)$/;
+const THUMBNAIL_FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.thumb\.webp$/;
 const VIDEO_FILE_NAME_RE = /^[A-Za-z0-9_\-]+\.mp4$/;
 
 function safeImageId(id: string): string {
@@ -45,6 +49,11 @@ function safeImageId(id: string): string {
 function safeFileName(id: string, ext: string = "png"): string {
   const cleaned = safeImageId(id);
   return `${cleaned}.${ext}`;
+}
+
+function safeThumbnailFileName(id: string): string {
+  const cleaned = safeImageId(id);
+  return `${cleaned}.thumb.webp`;
 }
 
 function safeBucketName(bucket: string): string {
@@ -107,6 +116,78 @@ function metadataIsoString(value: unknown): string | undefined {
   return Number.isNaN(Date.parse(value)) ? undefined : value;
 }
 
+type ImageListCacheEntry = {
+  signature: string;
+  items: DiskImageEntry[];
+};
+
+const imageListCache = new Map<string, ImageListCacheEntry>();
+
+function imageListCacheKey(options: ListAllImagesOptions): string {
+  return options.includeMetadata ? "metadata" : "plain";
+}
+
+function cloneDiskImageEntry(entry: DiskImageEntry): DiskImageEntry {
+  return { ...entry };
+}
+
+function invalidateImageListCache() {
+  imageListCache.clear();
+}
+
+async function getImagesBucketSignature(root: string): Promise<{ buckets: string[]; signature: string }> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(root);
+  } catch {
+    return { buckets: [], signature: "missing" };
+  }
+
+  const buckets: string[] = [];
+  const parts: string[] = [];
+  for (const bucket of entries.sort()) {
+    if (!BUCKET_NAME_RE.test(bucket)) continue;
+    const bucketDir = path.join(root, bucket);
+    try {
+      const stat = await fs.stat(bucketDir);
+      if (!stat.isDirectory()) continue;
+      buckets.push(bucket);
+      parts.push(`${bucket}:${stat.mtimeMs}:${stat.size}`);
+    } catch {
+      // ignore unreadable buckets
+    }
+  }
+  return { buckets, signature: parts.join("|") };
+}
+
+async function writeImageThumbnail(id: string, dir: string, buffer: Buffer): Promise<void> {
+  const thumbnailPath = path.join(dir, safeThumbnailFileName(id));
+  const tempPath = `${thumbnailPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await sharp(buffer)
+      .resize({
+        width: THUMBNAIL_MAX_SIZE,
+        height: THUMBNAIL_MAX_SIZE,
+        fit: "inside",
+        withoutEnlargement: true
+      })
+      .webp({ quality: THUMBNAIL_QUALITY })
+      .toFile(tempPath);
+    await fs.rename(tempPath, thumbnailPath);
+  } catch (error) {
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // ignore missing temp file
+    }
+    console.warn(
+      "[local-storage] image thumbnail generation failed",
+      id,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
 async function readImageMetadataFromBucket(id: string, bucket: string): Promise<ImageMetadata | null> {
   const cleaned = safeImageId(id);
   const safeBucket = safeBucketName(bucket);
@@ -138,13 +219,16 @@ export async function saveImageBuffer(
   buffer: Buffer,
   mimeType: string = "image/png"
 ): Promise<{ relativePath: string; absolutePath: string; mimeType: string; bytes: number }> {
+  const cleaned = safeImageId(id);
   const ext = mimeType.includes("jpeg") ? "jpg" : mimeType.includes("webp") ? "webp" : "png";
-  const fileName = safeFileName(id, ext);
+  const fileName = safeFileName(cleaned, ext);
   const bucket = monthBucket();
   const dir = path.join(imagesDir(), bucket);
   await fs.mkdir(dir, { recursive: true });
   const absolutePath = path.join(dir, fileName);
   await fs.writeFile(absolutePath, buffer);
+  invalidateImageListCache();
+  await writeImageThumbnail(cleaned, dir, buffer);
   return {
     relativePath: path.join(bucket, fileName),
     absolutePath,
@@ -174,6 +258,7 @@ export async function saveImageMetadata(
   const absolutePath = path.join(dir, `${cleaned}.json`);
   const payload = compactImageMetadata(metadata);
   await fs.writeFile(absolutePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  invalidateImageListCache();
   return {
     relativePath: path.join(safeBucket, `${cleaned}.json`),
     absolutePath
@@ -231,6 +316,39 @@ export async function readImageById(
       } catch {
         // try next
       }
+    }
+  }
+  return null;
+}
+
+export async function readImageThumbnailById(
+  id: string
+): Promise<{ stream: ReturnType<typeof createReadStream>; mimeType: string; bytes: number } | null> {
+  const cleaned = id.replace(/[^A-Za-z0-9_\-]/g, "");
+  if (!cleaned) return null;
+
+  const root = imagesDir();
+  let buckets: string[];
+  try {
+    buckets = await fs.readdir(root);
+  } catch {
+    return null;
+  }
+
+  const fileName = safeThumbnailFileName(cleaned);
+  for (const bucket of buckets) {
+    const candidate = path.join(root, bucket, fileName);
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isFile() && THUMBNAIL_FILE_NAME_RE.test(fileName)) {
+        return {
+          stream: createReadStream(candidate),
+          mimeType: "image/webp",
+          bytes: stat.size
+        };
+      }
+    } catch {
+      // try next
     }
   }
   return null;
@@ -421,6 +539,15 @@ export async function deleteImageById(id: string): Promise<boolean> {
     } catch {
       // ignore missing metadata
     }
+    try {
+      await fs.unlink(path.join(root, bucket, safeThumbnailFileName(cleaned)));
+      removed = true;
+    } catch {
+      // ignore missing thumbnail
+    }
+  }
+  if (removed) {
+    invalidateImageListCache();
   }
   return removed;
 }
@@ -440,11 +567,15 @@ export type ListAllImagesOptions = {
 
 export async function listAllImages(options: ListAllImagesOptions = {}): Promise<DiskImageEntry[]> {
   const root = imagesDir();
-  let buckets: string[];
-  try {
-    buckets = await fs.readdir(root);
-  } catch {
+  const { buckets, signature } = await getImagesBucketSignature(root);
+  if (!buckets.length && signature === "missing") {
     return [];
+  }
+
+  const cacheKey = imageListCacheKey(options);
+  const cached = imageListCache.get(cacheKey);
+  if (cached?.signature === signature) {
+    return cached.items.map(cloneDiskImageEntry);
   }
 
   const results: DiskImageEntry[] = [];
@@ -463,15 +594,16 @@ export async function listAllImages(options: ListAllImagesOptions = {}): Promise
       try {
         const stat = await fs.stat(path.join(bucketDir, entry));
         if (!stat.isFile()) continue;
+        const metadata = options.includeMetadata ? await readImageMetadataFromBucket(id, bucket) : undefined;
         const imageEntry: DiskImageEntry = {
           id,
           ext,
           bucket,
-          createdAtIso: stat.mtime.toISOString(),
+          createdAtIso: metadataIsoString(metadata?.createdAtIso) ?? stat.mtime.toISOString(),
           size: stat.size
         };
         if (options.includeMetadata) {
-          imageEntry.metadata = await readImageMetadataFromBucket(id, bucket);
+          imageEntry.metadata = metadata ?? null;
         }
         results.push(imageEntry);
       } catch {
@@ -479,5 +611,9 @@ export async function listAllImages(options: ListAllImagesOptions = {}): Promise
       }
     }
   }
+  imageListCache.set(cacheKey, {
+    signature,
+    items: results.map(cloneDiskImageEntry)
+  });
   return results;
 }

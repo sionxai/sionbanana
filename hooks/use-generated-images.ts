@@ -6,6 +6,8 @@ import { LOCAL_STORAGE_KEY } from "@/components/studio/constants";
 
 interface UseGeneratedImagesOptions {
   limitResults?: number;
+  includeDiskFallback?: boolean;
+  diskFallbackLimit?: number;
   onNewRecord?: (record: GeneratedImageDocument) => void;
 }
 
@@ -134,18 +136,23 @@ function mergeWithDiskRecords(
   return sortRecords([...localRecords, ...fallbackRecords]);
 }
 
-async function readDiskRecords(signal?: AbortSignal): Promise<DiskImageEntry[]> {
-  const res = await fetch("/api/images", { signal, cache: "no-store" });
+async function readDiskRecords(limit: number, signal?: AbortSignal): Promise<DiskImageEntry[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`/api/images?${params.toString()}`, { signal, cache: "no-store" });
   if (!res.ok) return [];
   const data = (await res.json()) as { ok?: boolean; items?: DiskImageEntry[] };
   return data.ok && Array.isArray(data.items) ? data.items : [];
 }
 
 export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
-  const { limitResults } = options;
+  const {
+    limitResults,
+    includeDiskFallback = true,
+    diskFallbackLimit = 60
+  } = options;
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>(() => readRecords());
   const [diskItems, setDiskItems] = useState<DiskImageEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(includeDiskFallback);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -173,12 +180,19 @@ export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
   }, []);
 
   useEffect(() => {
+    if (!includeDiskFallback) {
+      setDiskItems(prev => (prev.length ? [] : prev));
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
+    const normalizedLimit = Number.isInteger(diskFallbackLimit) && diskFallbackLimit > 0 ? diskFallbackLimit : 60;
 
     const reloadDisk = async () => {
       setLoading(true);
       try {
-        const next = await readDiskRecords(controller.signal);
+        const next = await readDiskRecords(normalizedLimit, controller.signal);
         setDiskItems(prev => (diskItemsEqual(prev, next) ? prev : next));
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -198,7 +212,7 @@ export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
       controller.abort();
       window.removeEventListener(HISTORY_REFRESH_EVENT, handleCustom as EventListener);
     };
-  }, []);
+  }, [diskFallbackLimit, includeDiskFallback]);
 
   const mergedRecords = useMemo(
     () => mergeWithDiskRecords(localRecords, diskItems),

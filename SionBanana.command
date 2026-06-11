@@ -1,5 +1,6 @@
 #!/bin/zsh
 set -u
+setopt NO_BG_NICE  # zsh가 백그라운드 작업(&)을 nice +5로 깎는 것 방지 — 서버는 일반 우선순위로
 
 PROJECT_DIR="/Users/nohshinhee/Documents/2. coding/sionbanana"
 PORT="${SIONBANANA_PORT:-3002}"
@@ -68,8 +69,31 @@ else
   echo "[안내] progrok 미설치. 영상 기능을 쓰려면 'npm install -g progrok && progrok login'. (이미지 생성은 정상)"
 fi
 
-echo "Starting dev server on port $PORT..."
-npm run dev -- -p "$PORT" &
+should_build=1
+if [[ "${SIONBANANA_SKIP_BUILD:-0}" == "1" ]]; then
+  if [[ -d ".next" ]]; then
+    should_build=0
+    echo "Skipping build because SIONBANANA_SKIP_BUILD=1 and .next exists."
+  else
+    echo "SIONBANANA_SKIP_BUILD=1 was set, but .next was not found. Building first."
+  fi
+fi
+
+if [[ "$should_build" == "1" ]]; then
+  echo "Building SionBanana for production..."
+  if ! npm run build; then
+    echo
+    echo "SionBanana build failed. Server was not started."
+    echo "Fix the build errors above, then run this launcher again."
+    echo
+    echo "Press any key to close this window."
+    read -k 1
+    exit 1
+  fi
+fi
+
+echo "Starting production server on port $PORT..."
+npm run start -- -p "$PORT" &
 SERVER_PID=$!
 
 echo "Waiting for server to become ready..."

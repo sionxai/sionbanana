@@ -7,12 +7,19 @@ import { test } from "node:test";
 import {
   listAllImages,
   listVideos,
+  deleteImageById,
   readImageMetadata,
+  readImageThumbnailById,
   saveImageBuffer,
   saveImageMetadata,
   saveVideoBuffer,
   saveVideoMetadata
 } from "../lib/local/storage.ts";
+
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "base64"
+);
 
 async function useTempDataDir(t) {
   const previous = process.env.SIONBANANA_DATA_DIR;
@@ -32,8 +39,11 @@ async function useTempDataDir(t) {
 test("local storage saves and merges image metadata sidecars", async t => {
   await useTempDataDir(t);
 
-  const saved = await saveImageBuffer("image_123", Buffer.from("image-data"), "image/png");
+  const saved = await saveImageBuffer("image_123", TINY_PNG, "image/png");
   const bucket = path.dirname(saved.relativePath);
+  const thumbnail = await readImageThumbnailById("image_123");
+  assert.equal(thumbnail?.mimeType, "image/webp");
+  assert.ok((thumbnail?.bytes ?? 0) > 0);
 
   await saveImageMetadata("image_123", bucket, {
     rawPrompt: "raw prompt",
@@ -63,7 +73,7 @@ test("local storage saves and merges image metadata sidecars", async t => {
   assert.equal(withMetadata.length, 1);
   assert.equal(withMetadata[0].metadata?.rawPrompt, "raw prompt");
 
-  const legacySaved = await saveImageBuffer("legacy_456", Buffer.from("legacy-data"), "image/png");
+  const legacySaved = await saveImageBuffer("legacy_456", TINY_PNG, "image/png");
   assert.equal(path.dirname(legacySaved.relativePath), bucket);
   assert.equal(await readImageMetadata("legacy_456"), null);
 
@@ -72,6 +82,8 @@ test("local storage saves and merges image metadata sidecars", async t => {
 
   const withoutMetadata = await listAllImages();
   assert.equal(withoutMetadata.some(item => Object.hasOwn(item, "metadata")), false);
+  assert.equal(await deleteImageById("legacy_456"), true);
+  assert.equal(await readImageThumbnailById("legacy_456"), null);
 
   const savedVideo = await saveVideoBuffer("video_123", Buffer.from("video-data"));
   const videoBucket = path.dirname(savedVideo.relativePath);

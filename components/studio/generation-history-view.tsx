@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Film, Play } from "lucide-react";
 import { useGeneratedImages } from "@/hooks/use-generated-images";
@@ -33,7 +33,9 @@ import { VideoModal, type VideoCreatedResult } from "@/components/studio/video-m
 import { toast } from "sonner";
 
 const PAGE_SIZE = 36;
+const SERVER_IMAGE_PAGE_SIZE = 60;
 const SERVER_VIDEO_METADATA_FLAG = "serverVideo";
+const SERVER_IMAGE_METADATA_FLAG = "serverImage";
 
 type DiskVideoHistoryEntry = {
   id: string;
@@ -63,6 +65,10 @@ function getLocalImageId(url?: string | null): string | null {
 
 function isServerVideoHistoryRecord(record: GeneratedImageDocument): boolean {
   return isVideoHistoryRecord(record) && record.metadata?.[SERVER_VIDEO_METADATA_FLAG] === true;
+}
+
+function isServerImageHistoryRecord(record: GeneratedImageDocument): boolean {
+  return !isVideoHistoryRecord(record) && record.metadata?.[SERVER_IMAGE_METADATA_FLAG] === true;
 }
 
 function createServerVideoHistoryRecord(video: DiskVideoHistoryEntry): GeneratedImageDocument {
@@ -107,9 +113,77 @@ function createServerVideoHistoryRecord(video: DiskVideoHistoryEntry): Generated
   };
 }
 
+type DiskImageHistoryEntry = {
+  id: string;
+  ext?: string;
+  bucket?: string;
+  createdAtIso: string;
+  size?: number;
+  promptMeta?: { rawPrompt?: string; refinedPrompt?: string };
+};
+
+type ImageHistoryApiResponse = {
+  ok?: boolean;
+  items?: DiskImageHistoryEntry[];
+  nextCursor?: string | null;
+  total?: number;
+  reason?: string;
+};
+
+type ImageHistoryPage = {
+  records: GeneratedImageDocument[];
+  nextCursor: string | null;
+  total: number | null;
+};
+
+function createServerImageHistoryRecord(item: DiskImageHistoryEntry): GeneratedImageDocument {
+  const url = `/api/images/${item.id}`;
+  const raw = item.promptMeta?.rawPrompt?.trim() || "디스크에서 복원된 이미지";
+  const refined = item.promptMeta?.refinedPrompt?.trim() || raw;
+  return {
+    id: item.id,
+    userId: "local",
+    mode: "create",
+    kind: "image",
+    promptMeta: { rawPrompt: raw, refinedPrompt: refined },
+    status: "completed",
+    imageUrl: url,
+    thumbnailUrl: url,
+    originalImageUrl: url,
+    metadata: { bucket: item.bucket, [SERVER_IMAGE_METADATA_FLAG]: true },
+    model: "gpt-image",
+    createdAt: item.createdAtIso,
+    updatedAt: item.createdAtIso
+  };
+}
+
+async function readServerImageHistoryPage(
+  cursor: string | null,
+  signal?: AbortSignal
+): Promise<ImageHistoryPage> {
+  const params = new URLSearchParams({ limit: String(SERVER_IMAGE_PAGE_SIZE) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  const response = await fetch(`/api/images?${params.toString()}`, { signal, cache: "no-store" });
+  if (!response.ok) {
+    return { records: [], nextCursor: null, total: null };
+  }
+  const data = await response.json() as ImageHistoryApiResponse;
+  if (!data.ok || !Array.isArray(data.items)) {
+    return { records: [], nextCursor: null, total: null };
+  }
+  return {
+    records: data.items.map(createServerImageHistoryRecord),
+    nextCursor: data.nextCursor ?? null,
+    total: typeof data.total === "number" ? data.total : null
+  };
+}
+
 function mergeLocalAndServerVideoRecords(
   localRecords: GeneratedImageDocument[],
-  serverVideoRecords: GeneratedImageDocument[]
+  serverVideoRecords: GeneratedImageDocument[],
+  serverImageRecords: GeneratedImageDocument[] = []
 ): GeneratedImageDocument[] {
   const map = new Map<string, GeneratedImageDocument>();
   const localVideoUrls = new Set<string>();
@@ -131,7 +205,31 @@ function mergeLocalAndServerVideoRecords(
     map.set(record.id, record);
   });
 
+  serverImageRecords.forEach(record => {
+    if (map.has(record.id)) {
+      return;
+    }
+    map.set(record.id, record);
+  });
+
   return Array.from(map.values()).sort((a, b) => dateValueToEpoch(b.createdAt) - dateValueToEpoch(a.createdAt));
+}
+
+function appendUniqueHistoryRecords(
+  existing: GeneratedImageDocument[],
+  nextRecords: GeneratedImageDocument[]
+): GeneratedImageDocument[] {
+  if (!nextRecords.length) {
+    return existing;
+  }
+
+  const map = new Map(existing.map(record => [record.id, record]));
+  nextRecords.forEach(record => {
+    if (!map.has(record.id)) {
+      map.set(record.id, record);
+    }
+  });
+  return Array.from(map.values());
 }
 
 async function readServerVideoHistoryRecords(signal?: AbortSignal): Promise<GeneratedImageDocument[]> {
@@ -315,6 +413,11 @@ function PromptBlock({
   );
 }
 
+function getLocalThumbnailUrl(url?: string | null): string | null {
+  const id = getLocalImageId(url);
+  return id ? `/api/images/${id}?thumb=1` : null;
+}
+
 function GalleryCard({
   record,
   selected,
@@ -326,12 +429,19 @@ function GalleryCard({
   onSelect: (record: GeneratedImageDocument) => void;
   onToggleSelect: (recordId: string) => void;
 }) {
-  const previewUrl = record.thumbnailUrl ?? record.imageUrl ?? record.originalImageUrl;
+  const originalPreviewUrl = record.thumbnailUrl ?? record.imageUrl ?? record.originalImageUrl;
+  const thumbnailPreviewUrl = getLocalThumbnailUrl(originalPreviewUrl);
+  const [previewUrl, setPreviewUrl] = useState(thumbnailPreviewUrl ?? originalPreviewUrl);
   const promptPreview = record.promptMeta?.refinedPrompt ?? record.promptMeta?.rawPrompt ?? "";
   const isFavorite = isHistoryRecordFavorite(record);
   const isVideoRecord = isVideoHistoryRecord(record);
   const hasAttachedVideo = Boolean(record.videoUrl);
   const tags = getHistoryRecordTags(record);
+  const usesLocalPreview = Boolean(previewUrl?.startsWith("/api/images/"));
+
+  useEffect(() => {
+    setPreviewUrl(thumbnailPreviewUrl ?? originalPreviewUrl);
+  }, [originalPreviewUrl, thumbnailPreviewUrl]);
 
   const handleCardClick = () => {
     onSelect(record);
@@ -406,6 +516,12 @@ function GalleryCard({
             alt={promptPreview || "생성 이미지"}
             fill
             sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+            unoptimized={usesLocalPreview}
+            onError={() => {
+              if (thumbnailPreviewUrl && originalPreviewUrl && previewUrl === thumbnailPreviewUrl) {
+                setPreviewUrl(originalPreviewUrl);
+              }
+            }}
             className={cn(
               isVideoRecord ? "object-cover opacity-90" : "object-contain",
               "object-center transition duration-300"
@@ -451,7 +567,7 @@ function GalleryCard({
 }
 
 export function GenerationHistoryView() {
-  const { records, loading } = useGeneratedImages();
+  const { records, loading } = useGeneratedImages({ includeDiskFallback: false });
   const { user } = useLocalUser();
   const [selectedRecord, setSelectedRecord] = useState<GeneratedImageDocument | null>(null);
   const [modeFilter, setModeFilter] = useState<ModeFilterValue>("all");
@@ -461,15 +577,70 @@ export function GenerationHistoryView() {
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [serverVideoRecords, setServerVideoRecords] = useState<GeneratedImageDocument[]>([]);
   const [serverVideosLoading, setServerVideosLoading] = useState(true);
+  const [serverImageRecords, setServerImageRecords] = useState<GeneratedImageDocument[]>([]);
+  const [serverImagesLoading, setServerImagesLoading] = useState(true);
+  const [serverImagesLoadingMore, setServerImagesLoadingMore] = useState(false);
+  const [serverImageNextCursor, setServerImageNextCursor] = useState<string | null>(null);
+  const [serverImageTotal, setServerImageTotal] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [videoTargetRecord, setVideoTargetRecord] = useState<GeneratedImageDocument | null>(null);
   const [imageFitMode, setImageFitMode] = useState<"contain" | "cover">("contain");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const serverImageCursorRef = useRef<string | null>(null);
+  const serverImagesLoadingRef = useRef(false);
 
   useEffect(() => {
     setLocalRecords(records ?? []);
   }, [records]);
+
+  const loadServerImagePage = useCallback(
+    async ({ reset = false, signal }: { reset?: boolean; signal?: AbortSignal } = {}) => {
+      if (serverImagesLoadingRef.current) {
+        return;
+      }
+
+      const cursor = reset ? null : serverImageCursorRef.current;
+      if (!reset && !cursor) {
+        return;
+      }
+
+      serverImagesLoadingRef.current = true;
+      if (reset) {
+        setServerImagesLoading(true);
+      } else {
+        setServerImagesLoadingMore(true);
+      }
+
+      try {
+        const page = await readServerImageHistoryPage(cursor, signal);
+        if (signal?.aborted) {
+          return;
+        }
+        setServerImageRecords(prev => (reset ? page.records : appendUniqueHistoryRecords(prev, page.records)));
+        serverImageCursorRef.current = page.nextCursor;
+        setServerImageNextCursor(page.nextCursor);
+        setServerImageTotal(page.total);
+        if (!reset && page.records.length) {
+          setVisibleCount(prev => prev + PAGE_SIZE);
+        }
+      } catch (error) {
+        if (!signal?.aborted) {
+          console.warn("[History] Failed to read disk images", error);
+        }
+      } finally {
+        serverImagesLoadingRef.current = false;
+        if (!signal?.aborted) {
+          if (reset) {
+            setServerImagesLoading(false);
+          } else {
+            setServerImagesLoadingMore(false);
+          }
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -494,8 +665,10 @@ export function GenerationHistoryView() {
     };
 
     void reloadServerVideos();
+    void loadServerImagePage({ reset: true, signal: controller.signal });
     const handleRefresh = () => {
       void reloadServerVideos();
+      void loadServerImagePage({ reset: true });
     };
 
     window.addEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
@@ -504,12 +677,12 @@ export function GenerationHistoryView() {
       controller.abort();
       window.removeEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
     };
-  }, []);
+  }, [loadServerImagePage]);
 
   const historyItems = useMemo(() => {
-    return mergeLocalAndServerVideoRecords(localRecords, serverVideoRecords);
-  }, [localRecords, serverVideoRecords]);
-  const historyLoading = loading || serverVideosLoading;
+    return mergeLocalAndServerVideoRecords(localRecords, serverVideoRecords, serverImageRecords);
+  }, [localRecords, serverVideoRecords, serverImageRecords]);
+  const historyLoading = loading || serverVideosLoading || serverImagesLoading;
 
   const tagOptions = useMemo(() => getHistoryTagOptions(historyItems), [historyItems]);
 
@@ -567,10 +740,24 @@ export function GenerationHistoryView() {
     }));
   }, [displayedItems]);
 
-  const hasMoreItems = visibleCount < filteredItems.length;
-  const handleLoadMore = () => {
-    setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredItems.length));
-  };
+  const hasLocalMoreItems = visibleCount < filteredItems.length;
+  const canLoadServerImages = Boolean(serverImageNextCursor);
+  const hasMoreItems = hasLocalMoreItems || canLoadServerImages;
+  const handleLoadMore = useCallback(() => {
+    if (hasLocalMoreItems) {
+      setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredItems.length));
+      return;
+    }
+    if (serverImageNextCursor && !serverImagesLoadingMore) {
+      void loadServerImagePage();
+    }
+  }, [
+    filteredItems.length,
+    hasLocalMoreItems,
+    loadServerImagePage,
+    serverImageNextCursor,
+    serverImagesLoadingMore
+  ]);
 
   useEffect(() => {
     if (!hasMoreItems || typeof IntersectionObserver === "undefined") {
@@ -585,7 +772,7 @@ export function GenerationHistoryView() {
     const observer = new IntersectionObserver(
       entries => {
         if (entries.some(entry => entry.isIntersecting)) {
-          setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredItems.length));
+          handleLoadMore();
         }
       },
       { rootMargin: "480px 0px" }
@@ -593,7 +780,7 @@ export function GenerationHistoryView() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hasMoreItems, filteredItems.length]);
+  }, [handleLoadMore, hasMoreItems]);
 
   useEffect(() => {
     if (!selectedRecord) {
@@ -862,6 +1049,7 @@ export function GenerationHistoryView() {
 
     const isVideoRecord = isVideoHistoryRecord(record);
     const isServerVideoRecord = isServerVideoHistoryRecord(record);
+    const isServerImageRecord = isServerImageHistoryRecord(record);
     const confirmed = window.confirm(
       isServerVideoRecord
         ? "이 디스크 영상 기록을 현재 화면에서 숨기시겠어요? 영상 파일은 삭제되지 않습니다."
@@ -881,6 +1069,9 @@ export function GenerationHistoryView() {
     }
 
     setLocalRecords(prev => prev.filter(item => item.id !== record.id));
+    if (isServerImageRecord) {
+      setServerImageRecords(prev => prev.filter(item => item.id !== record.id));
+    }
     setSelectedRecord(prev => (prev && prev.id === record.id ? null : prev));
     removeRecordFromLocalStorage(record.id);
 
@@ -954,6 +1145,7 @@ export function GenerationHistoryView() {
           <span className="text-xs uppercase tracking-wide text-muted-foreground">필터</span>
           <span className="text-xs text-muted-foreground">
             총 {historyItems.length}개 중 {filteredItems.length}개 필터 · {displayedItems.length}개 표시
+            {serverImageTotal !== null ? ` · 디스크 이미지 ${serverImageRecords.length}/${serverImageTotal}개 로드` : ""}
           </span>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1116,8 +1308,17 @@ export function GenerationHistoryView() {
           ))}
           {hasMoreItems ? (
             <div ref={loadMoreRef} className="flex justify-center pt-2">
-              <Button type="button" variant="outline" onClick={handleLoadMore}>
-                더 보기 ({filteredItems.length - displayedItems.length}개 남음)
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleLoadMore}
+                disabled={serverImagesLoadingMore}
+              >
+                {serverImagesLoadingMore
+                  ? "불러오는 중..."
+                  : hasLocalMoreItems
+                  ? `더 보기 (${filteredItems.length - displayedItems.length}개 남음)`
+                  : "다음 기록 불러오기"}
               </Button>
             </div>
           ) : null}
