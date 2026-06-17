@@ -17,7 +17,8 @@ import type {
 export function buildCharacterReferencePrompt(
   promptText: string,
   mentionSource: string,
-  characters: Character[]
+  characters: Character[],
+  referenceIndexByHandle: Record<string, number> = {}
 ): string {
   const basePrompt = promptText.trim();
   const parsedMentions = parseCharacterMentions(mentionSource, characters);
@@ -33,7 +34,8 @@ export function buildCharacterReferencePrompt(
   const referenceMap = parsedMentions.mentioned
     .map((handle, index) => {
       const character = findCharacterByHandle(characters, handle);
-      return character ? `Image ${index + 1} = Character @${handle} (name: ${character.name})` : null;
+      const referenceIndex = referenceIndexByHandle[handle] ?? index + 1;
+      return character ? `Image ${referenceIndex} = Character @${handle} (name: ${character.name})` : null;
     })
     .filter((entry): entry is string => Boolean(entry))
     .join(". ");

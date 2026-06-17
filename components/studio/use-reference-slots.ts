@@ -11,7 +11,9 @@ import {
   INITIAL_REFERENCE_SLOT_COUNT,
   MAX_REFERENCE_SLOT_COUNT,
   REFERENCE_GALLERY_STORAGE_KEY,
+  createManualReferenceHandle,
   createReferenceSlot,
+  normalizeReferenceHandle,
   type ReferenceSlotState
 } from "@/lib/studio-helpers/constants";
 
@@ -26,7 +28,9 @@ type UseReferenceSlotsResult = {
 };
 
 const createInitialReferenceSlots = () =>
-  Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot());
+  Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, (_, index) =>
+    createReferenceSlot(createManualReferenceHandle(index))
+  );
 
 export function useReferenceSlots({ userUid }: UseReferenceSlotsArgs): UseReferenceSlotsResult {
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(createInitialReferenceSlots);
@@ -53,7 +57,7 @@ export function useReferenceSlots({ userUid }: UseReferenceSlotsArgs): UseRefere
       if (Array.isArray(parsed)) {
         const normalized = parsed
           .slice(0, MAX_REFERENCE_SLOT_COUNT)
-          .map((item: { id?: unknown; imageUrl?: unknown; updatedAt?: unknown; source?: unknown; characterId?: unknown }) => {
+          .map((item: { id?: unknown; imageUrl?: unknown; handle?: unknown; updatedAt?: unknown; source?: unknown; characterId?: unknown }, index) => {
             const imageUrl = typeof item?.imageUrl === "string" ? (item.imageUrl as string) : null;
             const source: ReferenceSlotState["source"] =
               item?.source === "manual" || item?.source === "character-mention"
@@ -61,6 +65,7 @@ export function useReferenceSlots({ userUid }: UseReferenceSlotsArgs): UseRefere
                 : imageUrl
                   ? "manual"
                   : undefined;
+            const handle = normalizeReferenceHandle(item?.handle) || createManualReferenceHandle(index);
             return {
               id:
                 typeof item?.id === "string"
@@ -69,6 +74,7 @@ export function useReferenceSlots({ userUid }: UseReferenceSlotsArgs): UseRefere
                       ? crypto.randomUUID()
                       : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
               imageUrl,
+              handle,
               updatedAt: typeof item?.updatedAt === "string" ? (item.updatedAt as string) : new Date().toISOString(),
               source,
               characterId: typeof item?.characterId === "string" ? (item.characterId as string) : undefined
@@ -111,6 +117,7 @@ export function useReferenceSlots({ userUid }: UseReferenceSlotsArgs): UseRefere
         return {
           id: slot.id,
           imageUrl,
+          handle: slot.handle,
           updatedAt: slot.updatedAt,
           source: imageUrl ? slot.source ?? "manual" : undefined,
           characterId: imageUrl ? slot.characterId : undefined

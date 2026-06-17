@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 export type ReferenceSlotView = {
   id: string;
   imageUrl: string | null;
+  handle: string;
 };
 
 type ReferenceSlotGalleryProps = {
@@ -134,6 +135,11 @@ function ReferenceSlotCard({
         ) : (
           <EmptyReferenceSlot label="참조 이미지" />
         )}
+        {slot.handle ? (
+          <div className="absolute left-2 top-2 rounded-md bg-background/85 px-2 py-1 text-[11px] font-semibold text-foreground shadow-sm">
+            @{slot.handle}
+          </div>
+        ) : null}
         <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-background/70 opacity-0 transition group-hover:opacity-100">
           <div className="pointer-events-auto flex flex-col gap-1 p-2">
             <Button

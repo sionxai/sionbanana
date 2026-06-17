@@ -6,6 +6,7 @@ import { findCharacterByHandle, loadCharacters, subscribeCharacters, type Charac
 import { parseCharacterMentions } from "@/lib/character-mentions";
 import {
   MAX_REFERENCE_SLOT_COUNT,
+  createManualReferenceHandle,
   createReferenceSlot,
   type ReferenceSlotState
 } from "@/lib/studio-helpers/constants";
@@ -46,6 +47,14 @@ export function useCharacterMentions({
     const chips: CharacterMentionChip[] = [];
     const seen = new Set<string>();
 
+    // 이미지가 첨부된 참조 슬롯 핸들(@ref1 등). 캐릭터는 아니지만 유효한 첨부 핸들이므로
+    // "미등록"이 아니라 "첨부됨"으로 표시한다.
+    const attachedReferenceHandles = new Set(
+      referenceSlots
+        .filter(slot => Boolean(slot.imageUrl) && slot.handle.trim())
+        .map(slot => slot.handle.trim())
+    );
+
     parsedCharacterMentions.mentioned.forEach(handle => {
       if (seen.has(handle)) {
         return;
@@ -71,7 +80,10 @@ export function useCharacterMentions({
         return;
       }
       seen.add(handle);
-      chips.push({ handle, status: "invalid" });
+      chips.push({
+        handle,
+        status: attachedReferenceHandles.has(handle) ? "attached" : "invalid"
+      });
     });
 
     return chips;
@@ -88,12 +100,17 @@ export function useCharacterMentions({
     setReferenceSlots(prev => {
       const now = new Date().toISOString();
       let changed = false;
-      let next = prev.map(slot => {
+      let next = prev.map((slot, index) => {
         if (slot.source !== "character-mention" || !slot.characterId || mentionedById.has(slot.characterId)) {
           return slot;
         }
         changed = true;
-        return { id: slot.id, imageUrl: null, updatedAt: now };
+        return {
+          id: slot.id,
+          imageUrl: null,
+          handle: createManualReferenceHandle(index),
+          updatedAt: now
+        };
       });
 
       const existingMentionIds = new Set(
@@ -108,11 +125,11 @@ export function useCharacterMentions({
         );
 
         if (existingSlot) {
-          if (existingSlot.imageUrl !== character.primaryImageUrl) {
+          if (existingSlot.imageUrl !== character.primaryImageUrl || existingSlot.handle !== character.handle) {
             changed = true;
             next = next.map(slot =>
               slot.id === existingSlot.id
-                ? { ...slot, imageUrl: character.primaryImageUrl, updatedAt: now }
+                ? { ...slot, imageUrl: character.primaryImageUrl, handle: character.handle, updatedAt: now }
                 : slot
             );
           }
@@ -132,6 +149,7 @@ export function useCharacterMentions({
               ? {
                   ...slot,
                   imageUrl: character.primaryImageUrl,
+                  handle: character.handle,
                   source: "character-mention",
                   characterId: character.id,
                   updatedAt: now
@@ -149,6 +167,7 @@ export function useCharacterMentions({
             {
               ...createReferenceSlot(),
               imageUrl: character.primaryImageUrl,
+              handle: character.handle,
               source: "character-mention",
               characterId: character.id,
               updatedAt: now

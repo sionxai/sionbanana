@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import NextImage from "next/image";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -84,12 +86,20 @@ const PROMPT_SYNC_DEBOUNCE_MS = 250;
 const NOISE_AUTO_CORRECTION_PROMPT = `Remove all noise, grain, and digital artifacts from the image
 while preserving all lines, shapes, colors, and composition exactly.
 Output a clean, denoised version with smooth gradients.`;
+const MENTION_HANDLE_CHARACTER_PATTERN = /[A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]/u;
 
 export type CharacterMentionChipStatus = "attached" | "missing-image" | "invalid";
 
 export type CharacterMentionChip = {
   handle: string;
   status: CharacterMentionChipStatus;
+};
+
+export type PromptMentionOption = {
+  handle: string;
+  label: string;
+  imageUrl?: string | null;
+  source: "reference" | "character";
 };
 
 export type PromptPanelDraftValues = {
@@ -99,6 +109,45 @@ export type PromptPanelDraftValues = {
   subjectDirection: string;
   cameraDirection: string;
 };
+
+type MentionTrigger = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+function isMentionHandleCharacter(value: string | undefined): boolean {
+  return Boolean(value && MENTION_HANDLE_CHARACTER_PATTERN.test(value));
+}
+
+function isMentionBoundary(value: string | undefined): boolean {
+  return !value || (!isMentionHandleCharacter(value) && value !== "@");
+}
+
+function findMentionTrigger(value: string, caretPosition: number): MentionTrigger | null {
+  if (caretPosition < 1 || caretPosition > value.length) {
+    return null;
+  }
+
+  let start = caretPosition - 1;
+  while (start >= 0 && isMentionHandleCharacter(value[start])) {
+    start -= 1;
+  }
+
+  if (value[start] !== "@") {
+    return null;
+  }
+
+  if (!isMentionBoundary(start > 0 ? value[start - 1] : undefined)) {
+    return null;
+  }
+
+  return {
+    start,
+    end: caretPosition,
+    query: value.slice(start + 1, caretPosition)
+  };
+}
 
 function removeNoiseAutoCorrectionPrompt(value: string) {
   return value
@@ -240,6 +289,7 @@ interface PromptPanelProps {
   generating?: boolean;
   inflightCount?: number;
   characterMentionChips?: CharacterMentionChip[];
+  mentionOptions?: PromptMentionOption[];
 }
 
 export function PromptPanel({
@@ -274,7 +324,8 @@ export function PromptPanel({
   onRefinePrompt,
   generating,
   inflightCount = 0,
-  characterMentionChips = []
+  characterMentionChips = [],
+  mentionOptions = []
 }: PromptPanelProps) {
   const {
     externalGroups,
@@ -318,6 +369,9 @@ export function PromptPanel({
   const negativePromptValue = negativePromptInput.value;
   const subjectDirectionValue = subjectDirectionInput.value;
   const cameraDirectionValue = cameraDirectionInput.value;
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [mentionTrigger, setMentionTrigger] = useState<MentionTrigger | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const onGenerateRef = useRef(onGenerate);
   const onRefinePromptRef = useRef(onRefinePrompt);
 
@@ -348,6 +402,140 @@ export function PromptPanel({
       onRefinePromptRef.current?.(draftValues);
     }, 0);
   }, [flushDraftValues]);
+
+  const normalizedMentionOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const normalized: PromptMentionOption[] = [];
+
+    mentionOptions.forEach(option => {
+      const handle = option.handle.trim().replace(/^@+/, "");
+      if (!handle) {
+        return;
+      }
+      const key = `${option.source}:${handle}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      normalized.push({ ...option, handle });
+    });
+
+    return normalized;
+  }, [mentionOptions]);
+
+  const filteredMentionOptions = useMemo(() => {
+    if (!mentionTrigger) {
+      return [];
+    }
+
+    const query = mentionTrigger.query.trim().toLocaleLowerCase();
+    const filtered = query
+      ? normalizedMentionOptions.filter(option => {
+          const handle = option.handle.toLocaleLowerCase();
+          const label = option.label.toLocaleLowerCase();
+          return handle.includes(query) || label.includes(query);
+        })
+      : normalizedMentionOptions;
+
+    return filtered.slice(0, 12);
+  }, [mentionTrigger, normalizedMentionOptions]);
+
+  const mentionSections = useMemo(() => {
+    const indexed = filteredMentionOptions.map((option, index) => ({ option, index }));
+    return [
+      {
+        key: "reference",
+        label: "첨부 이미지",
+        items: indexed.filter(item => item.option.source === "reference")
+      },
+      {
+        key: "character",
+        label: "캐릭터",
+        items: indexed.filter(item => item.option.source === "character")
+      }
+    ].filter(section => section.items.length > 0);
+  }, [filteredMentionOptions]);
+
+  const mentionMenuOpen = Boolean(mentionTrigger && filteredMentionOptions.length > 0);
+
+  const updateMentionTrigger = useCallback((value: string, caretPosition: number | null | undefined) => {
+    const nextTrigger = findMentionTrigger(value, caretPosition ?? value.length);
+    setMentionTrigger(nextTrigger);
+    setActiveMentionIndex(0);
+  }, []);
+
+  const insertMentionOption = useCallback(
+    (option: PromptMentionOption) => {
+      const textarea = promptTextareaRef.current;
+      const caretPosition = textarea?.selectionStart ?? promptValue.length;
+      const trigger = mentionTrigger ?? findMentionTrigger(promptValue, caretPosition);
+      if (!trigger) {
+        return;
+      }
+
+      const before = promptValue.slice(0, trigger.start);
+      const after = promptValue.slice(trigger.end);
+      const suffix = after.startsWith(" ") ? "" : " ";
+      const inserted = `@${option.handle}${suffix}`;
+      const nextPrompt = `${before}${inserted}${after}`;
+      const nextCaretPosition = before.length + inserted.length;
+
+      promptInput.commitValue(nextPrompt);
+      setMentionTrigger(null);
+
+      window.requestAnimationFrame(() => {
+        const currentTextarea = promptTextareaRef.current;
+        currentTextarea?.focus();
+        currentTextarea?.setSelectionRange(nextCaretPosition, nextCaretPosition);
+      });
+    },
+    [mentionTrigger, promptInput, promptValue]
+  );
+
+  const handlePromptKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!mentionMenuOpen) {
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveMentionIndex(index => (index + 1) % filteredMentionOptions.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveMentionIndex(index =>
+          index === 0 ? filteredMentionOptions.length - 1 : index - 1
+        );
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const option = filteredMentionOptions[activeMentionIndex];
+        if (option) {
+          insertMentionOption(option);
+        }
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMentionTrigger(null);
+      }
+    },
+    [activeMentionIndex, filteredMentionOptions, insertMentionOption, mentionMenuOpen]
+  );
+
+  useEffect(() => {
+    if (!filteredMentionOptions.length) {
+      setActiveMentionIndex(0);
+      return;
+    }
+    setActiveMentionIndex(index => Math.min(index, filteredMentionOptions.length - 1));
+  }, [filteredMentionOptions.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -493,6 +681,7 @@ export function PromptPanel({
 
   const handleClearPrompt = useCallback(() => {
     promptInput.commitValue("");
+    setMentionTrigger(null);
   }, [promptInput]);
 
   const handleCopyPrompt = useCallback(async () => {
@@ -535,15 +724,75 @@ export function PromptPanel({
         <CardTitle className="text-base">프롬프트 입력</CardTitle>
       </CardHeader>
       <CardContent className="flex h-full flex-col gap-4">
-        <Textarea
-          value={promptValue}
-          onChange={event => promptInput.setValue(event.target.value)}
-          onBlur={() => {
-            promptInput.flush();
-          }}
-          placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
-          className="min-h-[160px] resize-none"
-        />
+        <div className="relative">
+          <Textarea
+            ref={promptTextareaRef}
+            value={promptValue}
+            onChange={event => {
+              const nextValue = event.target.value;
+              promptInput.setValue(nextValue);
+              updateMentionTrigger(nextValue, event.target.selectionStart);
+            }}
+            onSelect={event => {
+              updateMentionTrigger(promptValue, event.currentTarget.selectionStart);
+            }}
+            onKeyDown={handlePromptKeyDown}
+            onBlur={() => {
+              promptInput.flush();
+              setMentionTrigger(null);
+            }}
+            placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
+            className="min-h-[160px] resize-none"
+            aria-autocomplete="list"
+            aria-expanded={mentionMenuOpen}
+          />
+          {mentionMenuOpen ? (
+            <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg">
+              {mentionSections.map(section => (
+                <div key={section.key} className="border-b last:border-b-0">
+                  <div className="bg-muted/60 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
+                    {section.label}
+                  </div>
+                  <div className="max-h-56 overflow-y-auto py-1">
+                    {section.items.map(({ option, index }) => (
+                      <button
+                        key={`${option.source}-${option.handle}`}
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
+                          activeMentionIndex === index ? "bg-accent text-accent-foreground" : "hover:bg-accent/60"
+                        )}
+                        onMouseDown={event => {
+                          event.preventDefault();
+                          insertMentionOption(option);
+                        }}
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-[10px] font-semibold text-muted-foreground">
+                          {option.imageUrl ? (
+                            <NextImage
+                              src={option.imageUrl}
+                              alt=""
+                              width={32}
+                              height={32}
+                              className="h-full w-full object-cover"
+                              unoptimized
+                            />
+                          ) : (
+                            "@"
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">@{option.handle}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{option.label}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
         {characterMentionChips.length ? (
           <div className="flex flex-wrap gap-2">
             {characterMentionChips.map(chip => (

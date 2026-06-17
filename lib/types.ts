@@ -28,6 +28,12 @@ export interface PromptMetadata {
   };
   aspectRatio?: AspectRatioPreset;
   referenceGallery?: string[];
+  referenceHandles?: string[];
+  referenceHandleMap?: Array<{
+    handle: string;
+    referenceIndex: number;
+    url: string;
+  }>;
   lighting?: Record<string, string[]>;
   pose?: Record<string, string[]>;
   externalPresets?: string[];

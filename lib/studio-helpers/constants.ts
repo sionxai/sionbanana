@@ -8,15 +8,29 @@ export const MAX_REFERENCE_GALLERY_COUNT = MAX_REFERENCE_SLOT_COUNT;
 export interface ReferenceSlotState {
   id: string;
   imageUrl: string | null;
+  handle: string;
   updatedAt: string;
   source?: "manual" | "character-mention";
   characterId?: string;
 }
 
-export function createReferenceSlot(): ReferenceSlotState {
+export function normalizeReferenceHandle(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/^@+/, "") : "";
+}
+
+export function createManualReferenceHandle(index: number): string {
+  return `ref${index + 1}`;
+}
+
+export function createReferenceSlot(handle?: string): ReferenceSlotState {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return { id, imageUrl: null, updatedAt: new Date().toISOString() };
+  return {
+    id,
+    imageUrl: null,
+    handle: normalizeReferenceHandle(handle),
+    updatedAt: new Date().toISOString()
+  };
 }

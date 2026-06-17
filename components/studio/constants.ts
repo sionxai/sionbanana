@@ -5,6 +5,8 @@ export {
   MAX_REFERENCE_SLOT_COUNT,
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
+  createManualReferenceHandle,
+  normalizeReferenceHandle,
   createReferenceSlot
 } from "@/lib/studio-helpers/constants";
 export type { ReferenceSlotState } from "@/lib/studio-helpers/constants";

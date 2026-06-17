@@ -20,7 +20,7 @@ import {
   normalizeCameraSettings,
   type NormalizedCameraSettings
 } from "@/lib/studio-helpers/prompt";
-import { PromptPanel, type PromptPanelDraftValues } from "@/components/studio/prompt-panel";
+import { PromptPanel, type PromptMentionOption, type PromptPanelDraftValues } from "@/components/studio/prompt-panel";
 import { WorkspacePanel } from "@/components/studio/workspace-panel";
 import { HistoryPanel } from "@/components/studio/history-panel";
 import { CharacterPickerModal } from "@/components/studio/character-picker-modal";
@@ -66,8 +66,13 @@ import {
   MAX_REFERENCE_SLOT_COUNT,
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
+  createManualReferenceHandle,
   createReferenceSlot
 } from "@/lib/studio-helpers/constants";
+import {
+  buildReferenceHandleMap,
+  type ReferenceHandleMapEntry
+} from "@/lib/studio-helpers/reference-handles";
 import type {
   LightingPresetCategory,
   LightingSelections,
@@ -232,6 +237,46 @@ type ViewBatchOutcome = {
   reason?: string;
 };
 
+type ReferenceHandleSlot = {
+  slotId: string;
+  url: string;
+  handle: string;
+};
+
+type ReferenceRequestPayload = {
+  referenceImageUrl?: string;
+  referenceGallery: string[];
+  referenceHandles: string[];
+  referenceHandleMap: ReferenceHandleMapEntry[];
+};
+
+function buildReferenceRequestPayload(
+  referenceImageForRequest: string | null,
+  slotReferences: ReferenceHandleSlot[]
+): ReferenceRequestPayload {
+  const hasPrimaryOutsideSlots = Boolean(
+    referenceImageForRequest && !slotReferences.some(item => item.url === referenceImageForRequest)
+  );
+  const referenceImageUrl = hasPrimaryOutsideSlots ? referenceImageForRequest ?? undefined : undefined;
+  const galleryLimit = Math.max(0, MAX_REFERENCE_SLOT_COUNT - (referenceImageUrl ? 1 : 0));
+  const referenceGallery = slotReferences.slice(0, galleryLimit).map(item => item.url);
+  const referenceHandles = [
+    ...(referenceImageUrl && referenceGallery.length ? [""] : []),
+    ...slotReferences.slice(0, galleryLimit).map(item => item.handle)
+  ];
+  const referenceUrls = [
+    ...(referenceImageUrl ? [referenceImageUrl] : []),
+    ...referenceGallery
+  ];
+
+  return {
+    referenceImageUrl,
+    referenceGallery,
+    referenceHandles,
+    referenceHandleMap: buildReferenceHandleMap(referenceUrls, referenceHandles)
+  };
+}
+
 interface RunViewBatchParams {
   views: ViewSpec[];
   actionLabel: string;
@@ -240,6 +285,8 @@ interface RunViewBatchParams {
   targetModel: string;
   referenceImageForRequest: string | null;
   uniqueGalleryReferences: string[];
+  referenceHandles: string[];
+  referenceHandleMap: ReferenceHandleMapEntry[];
   effectiveCameraAngle: string | undefined;
   cameraPayload: CameraSettingsPayload;
   apertureLabel: string;
@@ -314,6 +361,66 @@ function StudioShellInner() {
     referenceSlots,
     setReferenceSlots
   });
+  const promptMentionOptions = useMemo<PromptMentionOption[]>(() => {
+    const options: PromptMentionOption[] = [];
+    const seen = new Set<string>();
+
+    referenceSlots.forEach(slot => {
+      const handle = slot.handle.trim();
+      if (!slot.imageUrl || !handle) {
+        return;
+      }
+      const key = `reference:${handle}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      options.push({
+        handle,
+        label: slot.source === "character-mention" ? "첨부된 캐릭터 참조" : "첨부된 참조 이미지",
+        imageUrl: slot.imageUrl,
+        source: "reference"
+      });
+    });
+
+    characters.forEach(character => {
+      const handle = character.handle.trim();
+      if (!handle) {
+        return;
+      }
+      const key = `character:${handle}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      options.push({
+        handle,
+        label: character.name,
+        imageUrl: character.thumbnailUrl || character.primaryImageUrl,
+        source: "character"
+      });
+    });
+
+    return options;
+  }, [characters, referenceSlots]);
+  const referenceSlotHandleItems = useMemo<ReferenceHandleSlot[]>(() => {
+    const seenUrls = new Set<string>();
+    return referenceSlots
+      .map((slot, index) => {
+        const url = slot.imageUrl?.trim();
+        const handle = slot.handle.trim() || createManualReferenceHandle(index);
+        return url && handle
+          ? { slotId: slot.id, url, handle }
+          : null;
+      })
+      .filter((item): item is ReferenceHandleSlot => {
+        if (!item || seenUrls.has(item.url)) {
+          return false;
+        }
+        seenUrls.add(item.url);
+        return true;
+      });
+  }, [referenceSlots]);
   const [isCharacterPickerOpen, setIsCharacterPickerOpen] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [useGptPrompt, setUseGptPrompt] = useState(false);
@@ -488,7 +595,11 @@ function StudioShellInner() {
 
     if (!currentUid && prevUid) {
       // ensure reference state cleared when logging out entirely
-      setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+      setReferenceSlots(
+        Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, (_, index) =>
+          createReferenceSlot(createManualReferenceHandle(index))
+        )
+      );
     }
 
     lastUidRef.current = currentUid;
@@ -986,7 +1097,8 @@ function StudioShellInner() {
         null;
 
       const referenceMetadata = (referenceCandidate?.metadata ?? {}) as { referenceId?: string | null };
-      const uniqueGalleryReferences = collectReferenceGalleryUrls().filter(url => url !== referenceImageForRequest);
+      const referenceRequest = buildReferenceRequestPayload(referenceImageForRequest, referenceSlotHandleItems);
+      const uniqueGalleryReferences = referenceRequest.referenceGallery;
 
       // Define mode variables
       const isCameraMode = activeMode === "camera";
@@ -1000,7 +1112,7 @@ function StudioShellInner() {
       const applyPoseGuidanceTo = (value: string | null | undefined) =>
         combinePromptWithGuidance(value, poseGuidance);
 
-      const hasCameraReference = Boolean(referenceImageForRequest || uniqueGalleryReferences.length);
+      const hasCameraReference = Boolean(referenceRequest.referenceImageUrl || uniqueGalleryReferences.length);
       const cameraPromptFallback = buildCameraPrompt({ settings: normalizedCameraSettings });
       const defaultCameraFallback = cameraPromptFallback;
       const hasCameraPromptFallback = Boolean(defaultCameraFallback && defaultCameraFallback.trim().length);
@@ -1158,7 +1270,15 @@ function StudioShellInner() {
         }
       }
 
-      promptToSend = buildCharacterReferencePrompt(promptToSend, promptForGeneration, characters);
+      const referenceIndexByHandle = Object.fromEntries(
+        referenceRequest.referenceHandleMap.map(item => [item.handle, item.referenceIndex])
+      );
+      promptToSend = buildCharacterReferencePrompt(
+        promptToSend,
+        promptForGeneration,
+        characters,
+        referenceIndexByHandle
+      );
 
       // Create new prompt details for history
       const actualUserPrompt = action === "remix"
@@ -1199,8 +1319,8 @@ function StudioShellInner() {
         outputMimeType: "image/png"
       };
 
-      if (referenceImageForRequest) {
-        generationOptions.referenceImageUrl = referenceImageForRequest;
+      if (referenceRequest.referenceImageUrl) {
+        generationOptions.referenceImageUrl = referenceRequest.referenceImageUrl;
       }
       if (shouldApplyAspectRatio) {
         generationOptions.aspectRatio = aspectRatioValue;
@@ -1208,6 +1328,9 @@ function StudioShellInner() {
 
       if (uniqueGalleryReferences.length) {
         generationOptions.referenceGallery = uniqueGalleryReferences;
+      }
+      if (referenceRequest.referenceHandles.some(Boolean)) {
+        generationOptions.referenceHandles = referenceRequest.referenceHandles;
       }
 
       // 좌하단 옵션 패널의 값 병합 (quality / size / format / moderation / count)
@@ -1297,6 +1420,10 @@ function StudioShellInner() {
           metadataPayload.referenceGallery = uniqueGalleryReferences;
           metadataPayload.referenceGalleryCount = uniqueGalleryReferences.length;
         }
+        if (referenceRequest.referenceHandleMap.length) {
+          metadataPayload.referenceHandles = referenceRequest.referenceHandles;
+          metadataPayload.referenceHandleMap = referenceRequest.referenceHandleMap;
+        }
 
         // NOTE: 서버(/api/generate)에서 이미 Storage 업로드 및 Firestore 저장을 수행하므로
         // 클라이언트에서 중복 저장하지 않음. storedImageUrl은 base64 이미지를 사용.
@@ -1314,6 +1441,8 @@ function StudioShellInner() {
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
             referenceGallery: uniqueGalleryReferences,
+            referenceHandles: referenceRequest.referenceHandles,
+            referenceHandleMap: referenceRequest.referenceHandleMap,
             ...(lightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
             ...(poseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
@@ -1411,7 +1540,7 @@ function StudioShellInner() {
           toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
           return;
         }
-        const newSlot = createReferenceSlot();
+        const newSlot = createReferenceSlot(createManualReferenceHandle(referenceSlots.length));
         setReferenceSlots(prev => [...prev, newSlot]);
         targetSlot = newSlot;
       }
@@ -1448,7 +1577,7 @@ function StudioShellInner() {
         toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
         return prev;
       }
-      return [...prev, createReferenceSlot()];
+      return [...prev, createReferenceSlot(createManualReferenceHandle(prev.length))];
     });
   };
 
@@ -1482,7 +1611,7 @@ function StudioShellInner() {
           : [
               ...prev,
               {
-                ...createReferenceSlot(),
+                ...createReferenceSlot(createManualReferenceHandle(prev.length)),
                 imageUrl: character.primaryImageUrl,
                 source: "manual",
                 characterId: character.id,
@@ -1563,7 +1692,15 @@ function StudioShellInner() {
       setReferenceSlots(prev =>
         prev.length >= MAX_REFERENCE_SLOT_COUNT
           ? prev
-          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, source: "manual", updatedAt: now }]
+          : [
+              ...prev,
+              {
+                ...createReferenceSlot(createManualReferenceHandle(prev.length)),
+                imageUrl: storedUrl,
+                source: "manual",
+                updatedAt: now
+              }
+            ]
       );
       const filledAfter = referenceSlots.filter(item => item.imageUrl).length + 1;
       if (filledAfter >= 5) {
@@ -1609,6 +1746,8 @@ function StudioShellInner() {
     targetModel,
     referenceImageForRequest,
     uniqueGalleryReferences,
+    referenceHandles,
+    referenceHandleMap,
     effectiveCameraAngle,
     cameraPayload,
     apertureLabel,
@@ -1786,6 +1925,9 @@ ${viewInstruction}`;
         if (uniqueGalleryReferences.length) {
           generationOptions.referenceGallery = uniqueGalleryReferences;
         }
+        if (referenceHandles.some(Boolean)) {
+          generationOptions.referenceHandles = referenceHandles;
+        }
         if (targetDimensions) {
           generationOptions.dimensions = targetDimensions;
         }
@@ -1876,6 +2018,10 @@ ${viewInstruction}`;
           metadataPayload.referenceGallery = uniqueGalleryReferences;
           metadataPayload.referenceGalleryCount = uniqueGalleryReferences.length;
         }
+        if (referenceHandleMap.length) {
+          metadataPayload.referenceHandles = referenceHandles;
+          metadataPayload.referenceHandleMap = referenceHandleMap;
+        }
         if (promptSummary) {
           metadataPayload.promptSummary = promptSummary;
         }
@@ -1899,6 +2045,8 @@ ${viewInstruction}`;
             camera: cameraPayload,
             aspectRatio: aspectRatioValue,
             referenceGallery: uniqueGalleryReferences,
+            referenceHandles,
+            referenceHandleMap,
             ...(batchLightingGuidance ? { lighting: cloneLightingSelections(lightingSelections) } : {}),
             ...(batchPoseGuidance ? { pose: clonePoseSelections(poseSelections) } : {})
           },
@@ -2007,6 +2155,8 @@ ${viewInstruction}`;
       basePromptDefault: string;
       referenceImageForRequest: string | null;
       uniqueGalleryReferences: string[];
+      referenceHandles: string[];
+      referenceHandleMap: ReferenceHandleMapEntry[];
       effectiveCameraAngle: string | undefined;
       cameraPayload: CameraSettingsPayload;
       apertureLabel: string;
@@ -2086,6 +2236,8 @@ ${viewInstruction}`;
       basePromptDefault: string;
       referenceImageForRequest: string | null;
       uniqueGalleryReferences: string[];
+      referenceHandles: string[];
+      referenceHandleMap: ReferenceHandleMapEntry[];
       effectiveCameraAngle: string | undefined;
       cameraPayload: CameraSettingsPayload;
       apertureLabel: string;
@@ -3008,6 +3160,7 @@ ${viewInstruction}`;
               generating={isGenerating || characterBatchPending || view360BatchPending}
               inflightCount={inflightCount}
               characterMentionChips={characterMentionChips}
+              mentionOptions={promptMentionOptions}
             />
           )}
         </StudioShellSidePanel>

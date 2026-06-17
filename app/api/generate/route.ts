@@ -13,6 +13,13 @@ import {
 } from "@/lib/codex-fetch";
 import { CodexAuthError } from "@/lib/codex-oauth";
 import { saveImageBuffer, readImageById, saveImageMetadata, type ImageMetadata } from "@/lib/local/storage";
+import {
+  buildReferenceHandleMappings,
+  formatOrdinal,
+  normalizeReferenceHandle,
+  replaceReferenceHandleMentions,
+  resolveReferenceHandles
+} from "@/lib/studio-helpers/reference-handles";
 
 const generationModes = [
   "create",
@@ -78,6 +85,7 @@ const generationOptionsSchema = z
     referenceImage: referenceSourceSchema.optional(),
     referenceImageUrl: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional(),
     referenceGallery: z.array(referenceSourceSchema).max(MAX_REFERENCE_IMAGES).optional(),
+    referenceHandles: z.array(z.string().max(64)).max(MAX_REFERENCE_IMAGES + 1).optional(),
     idempotencyKey: z
       .string()
       .min(8)
@@ -190,7 +198,9 @@ async function runGenerateWithIdempotency(
 
 async function executeGenerate(request: NextRequest, payload: GeneratePayload): Promise<GenerateResult> {
   const referenceSettings = getReferenceImageSettings(payload.options);
+  const requestedReferenceHandles = getReferenceHandles(payload.options);
   const referenceParts: CodexContentPart[] = [];
+  const galleryResolvedFlags: boolean[] = [];
   const requestOrigin = request.nextUrl.origin;
 
   const primary = await resolveReferenceSource(referenceSettings.primary, requestOrigin);
@@ -204,6 +214,7 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
   for (const entry of referenceSettings.gallery) {
     if (referenceParts.length >= MAX_REFERENCE_IMAGES) break;
     const resolved = await resolveReferenceSource(entry, requestOrigin);
+    galleryResolvedFlags.push(Boolean(resolved));
     if (resolved) {
       referenceParts.push({
         type: "input_image",
@@ -212,7 +223,13 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
     }
   }
 
-  const promptText = buildPrompt(payload, referenceParts.length > 0);
+  const resolvedReferenceHandles = resolveReferenceHandles({
+    requestedHandles: requestedReferenceHandles,
+    primaryRequested: Boolean(referenceSettings.primary),
+    primaryResolved: Boolean(primary),
+    galleryResolvedFlags
+  });
+  const promptText = buildPrompt(payload, referenceParts.length > 0, resolvedReferenceHandles);
 
   const userContent: CodexContentPart[] = [
     ...referenceParts,
@@ -354,6 +371,8 @@ async function saveGeneratedImageMetadata({
   image: { revisedPrompt?: string };
   createdAtIso: string;
 }): Promise<void> {
+  const referenceHandles = getReferenceHandles(payload.options);
+  const referenceHandleMap = buildReferenceHandleMappings(referenceHandles);
   const metadata: ImageMetadata = {
     rawPrompt: payload.prompt,
     refinedPrompt: payload.refinedPrompt || image.revisedPrompt || undefined,
@@ -371,7 +390,9 @@ async function saveGeneratedImageMetadata({
     batchItemId: payload.options?.batchItemId,
     batchItemName: payload.options?.batchItemName,
     characterView: payload.options?.characterView,
-    characterViewLabel: payload.options?.characterViewLabel
+    characterViewLabel: payload.options?.characterViewLabel,
+    referenceHandles: referenceHandles.some(Boolean) ? referenceHandles : undefined,
+    referenceHandleMap: referenceHandleMap.length ? referenceHandleMap : undefined
   };
 
   try {
@@ -463,8 +484,26 @@ function isCacheableGenerationResult(result: GenerateResult): boolean {
   return result.status >= 200 && result.status < 300 && result.body.ok === true;
 }
 
-function buildPrompt(payload: GeneratePayload, hasReferenceImage: boolean) {
-  const segments = [payload.refinedPrompt || payload.prompt];
+function getReferenceHandles(options: unknown): string[] {
+  if (!options || typeof options !== "object") {
+    return [];
+  }
+  const raw = (options as Record<string, unknown>).referenceHandles;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .slice(0, MAX_REFERENCE_IMAGES + 1)
+    .map(item => normalizeReferenceHandle(item));
+}
+
+function buildPrompt(payload: GeneratePayload, hasReferenceImage: boolean, referenceHandles: string[]) {
+  const referenceHandleMappings = buildReferenceHandleMappings(referenceHandles);
+  const promptBody = replaceReferenceHandleMentions(
+    payload.refinedPrompt || payload.prompt,
+    referenceHandleMappings
+  );
+  const segments = [promptBody];
 
   if (payload.negativePrompt) {
     segments.push(`Negative prompt: ${payload.negativePrompt}`);
@@ -494,6 +533,13 @@ function buildPrompt(payload: GeneratePayload, hasReferenceImage: boolean) {
     : 0;
   if (galleryCount > 0) {
     segments.push(`Additional reference gallery provided: ${galleryCount} image(s).`);
+  }
+
+  if (referenceHandleMappings.length) {
+    const mappingText = referenceHandleMappings
+      .map(item => `@${item.handle} = the ${formatOrdinal(item.referenceIndex)} reference image`)
+      .join("; ");
+    segments.push(`Reference handle map: ${mappingText}.`);
   }
 
   const aspectRatioSetting =

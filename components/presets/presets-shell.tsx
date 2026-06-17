@@ -38,6 +38,8 @@ import {
   REFERENCE_GALLERY_STORAGE_KEY,
   REFERENCE_IMAGE_DOC_ID,
   ReferenceSlotState,
+  createManualReferenceHandle,
+  normalizeReferenceHandle,
   createReferenceSlot
 } from "@/components/studio/constants";
 import type { ViewSpec } from "@/components/studio/types";
@@ -97,6 +99,12 @@ const PHOTO_DUMP_VIEWS: ViewSpec[] = [
   { id: "style-bokeh", label: "보케", instruction: "Shallow depth-of-field with large bokeh highlights" },
   { id: "style-cinematic", label: "시네마틱", instruction: "Cinematic lighting with anamorphic flares" }
 ];
+
+function createInitialReferenceSlots(): ReferenceSlotState[] {
+  return Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, (_, index) =>
+    createReferenceSlot(createManualReferenceHandle(index))
+  );
+}
 
 const PHOTO_DUMP_VARIATION_VIEWS: ViewSpec[] = [
   {
@@ -971,9 +979,7 @@ export function PresetsShell() {
   const { records, loading } = useGeneratedImages();
   const [localRecords, setLocalRecords] = useState<GeneratedImageDocument[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
-  const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(() =>
-    Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot())
-  );
+  const [referenceSlots, setReferenceSlots] = useState<ReferenceSlotState[]>(createInitialReferenceSlots);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [previewRecord, setPreviewRecord] = useState<GeneratedImageDocument | null>(null);
   const [referenceImageUploading, setReferenceImageUploading] = useState(false);
@@ -1009,13 +1015,13 @@ export function PresetsShell() {
       } catch {}
       setLocalRecords([]);
       setSelectedImageId(null);
-      setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+      setReferenceSlots(createInitialReferenceSlots());
       persistedHistorySignatureRef.current = getHistorySignature([]);
       broadcastReferenceUpdate(null, "presets");
     }
 
     if (!currentUid && prevUid) {
-      setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+      setReferenceSlots(createInitialReferenceSlots());
     }
 
     lastUidRef.current = currentUid;
@@ -1077,7 +1083,7 @@ export function PresetsShell() {
     try {
       const raw = window.localStorage.getItem(REFERENCE_GALLERY_STORAGE_KEY);
       if (!raw) {
-        setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+        setReferenceSlots(createInitialReferenceSlots());
         return;
       }
 
@@ -1085,7 +1091,7 @@ export function PresetsShell() {
       if (Array.isArray(parsed)) {
         const normalized = parsed
           .slice(0, MAX_REFERENCE_SLOT_COUNT)
-          .map((item: { id?: unknown; imageUrl?: unknown; updatedAt?: unknown }) => ({
+          .map((item: { id?: unknown; imageUrl?: unknown; handle?: unknown; updatedAt?: unknown }, index) => ({
             id:
               typeof item?.id === "string"
                 ? (item.id as string)
@@ -1093,6 +1099,7 @@ export function PresetsShell() {
                     ? crypto.randomUUID()
                     : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
             imageUrl: typeof item?.imageUrl === "string" ? (item.imageUrl as string) : null,
+            handle: normalizeReferenceHandle(item?.handle) || createManualReferenceHandle(index),
             updatedAt: typeof item?.updatedAt === "string" ? (item.updatedAt as string) : new Date().toISOString()
           }));
 
@@ -1106,14 +1113,14 @@ export function PresetsShell() {
 
         const ensured = normalizedFiltered.length
           ? normalizedFiltered
-          : Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot());
+          : createInitialReferenceSlots();
         setReferenceSlots(ensured);
       } else {
-        setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+        setReferenceSlots(createInitialReferenceSlots());
       }
     } catch (error) {
       console.warn("Failed to load reference slots", error);
-      setReferenceSlots(Array.from({ length: INITIAL_REFERENCE_SLOT_COUNT }, () => createReferenceSlot()));
+      setReferenceSlots(createInitialReferenceSlots());
     }
   }, [user?.uid, setReferenceSlots]);
 
@@ -1125,6 +1132,7 @@ export function PresetsShell() {
       const payload = referenceSlots.map(slot => ({
         id: slot.id,
         imageUrl: slot.imageUrl,
+        handle: slot.handle,
         updatedAt: slot.updatedAt
       }));
       window.localStorage.setItem(REFERENCE_GALLERY_STORAGE_KEY, JSON.stringify(payload));
@@ -1460,7 +1468,7 @@ type ReferenceImageState = {
         toast.error(`참조 이미지는 최대 ${MAX_REFERENCE_SLOT_COUNT}개까지 추가할 수 있습니다.`);
         return prev;
       }
-      return [...prev, createReferenceSlot()];
+      return [...prev, createReferenceSlot(createManualReferenceHandle(prev.length))];
     });
   };
 
@@ -1490,7 +1498,14 @@ type ReferenceImageState = {
       setReferenceSlots(prev =>
         prev.length >= MAX_REFERENCE_SLOT_COUNT
           ? prev
-          : [...prev, { ...createReferenceSlot(), imageUrl: storedUrl, updatedAt: now }]
+          : [
+              ...prev,
+              {
+                ...createReferenceSlot(createManualReferenceHandle(prev.length)),
+                imageUrl: storedUrl,
+                updatedAt: now
+              }
+            ]
       );
       toast.success("참조 이미지를 추가했습니다.");
     } catch (error) {
@@ -2544,6 +2559,11 @@ type ReferenceImageState = {
                       }
                     }}
                   >
+                    {slot.handle ? (
+                      <div className="absolute left-2 top-2 z-10 rounded-md bg-background/85 px-2 py-1 text-[11px] font-semibold text-foreground shadow-sm">
+                        @{slot.handle}
+                      </div>
+                    ) : null}
                     {slot.imageUrl ? (
                       <>
                         <Image src={slot.imageUrl} alt="reference slot" width={160} height={120} className="h-full w-full object-cover" />
