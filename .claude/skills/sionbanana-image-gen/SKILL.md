@@ -9,12 +9,14 @@ description: Use this skill to generate images via 시온바나나 local tool wh
 
 Use this skill when the user asks in natural language for image creation, scene generation, character sheets, key visuals, image series exploration (e.g. "10개 만들어줘"), batch/parallel generation, character library use, or upscaling selected 시온바나나 results.
 
+세로 웹툰 완성본(그림 안에 통합된 한글 말풍선 + 세로 이어붙이기)은 이 스킬이 아니라 **`sionbanana-webtoon`** 스킬을 쓴다. 이 스킬은 단일 키이미지·가로 스토리보드·레퍼런스 시트 중심이다.
+
 Prefer the local helper workflow over editing app code. `docs/agent-automation-workflow.md` is historical context; this `SKILL.md` is the source of truth.
 
 ## Prerequisites
 
 - Run from the 시온바나나 project directory.
-- 시온바나나 dev server running, default port `3002`.
+- 시온바나나 서버 실행 중 (런처 `SionBanana.command` = 프로덕션 모드 빌드·기동), default port `3002`.
 - Confirm `/api/health` (must return `"authenticated": true`) before generation.
 
 ```bash
@@ -25,7 +27,9 @@ curl -s http://localhost:3002/api/health
 
 ### Phase 1: 탐색 (병렬 batch — 권장)
 
-Generate N attempts **in parallel** with `--batch N --concurrency C`. **기본 동시성은 4** (helper·runJobs·storyboard 모두 기본 4로 통일됨). 4가 Codex rate limit 안전선이다 (실측: 4 parallel = no 429).
+Generate N attempts **in parallel** with `--batch N --concurrency C`. **기본 동시성 4는 "레퍼런스 없는" 프롬프트-only 생성 기준**이다 (실측: 4 parallel = no 429).
+
+> 🚨 **referenceGallery/referenceSlug를 거는 컷은 `--concurrency 2` 이하로.** 레퍼런스 이미지는 `input-images per min` 조직 쿼터(4000)를 따로 소모해서, 동시성 3~4로 돌리면 다수 컷이 502 `"Rate limit reached ... on input-images per min"`으로 실패한다 (실측: 웹툰·반장선거 세션 공통). **한 세션에서 이미지를 많이 생성하면 이 분당 한도가 누적 포화**되어 `--retry`의 짧은 백오프로는 절대 안 풀린다 → 이미지 생성을 **수 분간 완전히 멈춰 window를 비운 뒤** 재개한다. (안전필터 502와 구분: rate limit은 reason에 "Rate limit reached"가 명시됨.)
 
 > ⚠️ **서버/머신 부하가 높으면 2~3으로 낮춰라.** dev 서버는 이미지 생성 시 메모리를 크게 쓰므로, 다른 무거운 앱(다른 dev 서버 등)이 같이 떠 있거나 Load Average가 높으면 동시성 4에서 서버가 죽을 수 있다 (실측). 그럴 땐 spec의 `concurrency: 2` 또는 `--concurrency 2`로 낮춘다. 10 이상은 비권장 — 더 빠르지도 않고 ~20% rate-limit 실패가 난다.
 
@@ -107,6 +111,7 @@ node scripts/storyboard.mjs organize path/to/storyboard.spec.json storyboard.sum
 - 검수 후 실패하거나 어색한 컷만 별도 spec으로 부분 재생성한다. 이후 기존 summary의 해당 slug 항목을 새 결과로 교체하거나, 같은 slug 항목이 뒤에 오도록 summary를 합친 뒤 `organize`를 다시 실행한다.
 - 전경에 큰 신체부위(다리/발/손)가 들어가는 prompt는 원근 왜곡 위험이 높다. 주인공 중심 구도를 명확히 쓰고 negative prompt에 `giant oversized leg, distorted limbs, foot in foreground, extra limbs, deformed hands`를 넣는 편이 안전하다.
 - 시나리오 헤더의 컷 수와 실제 컷 번호가 불일치할 수 있으니, 자동화는 문서 헤더보다 실제 cut 번호와 slug 기준으로 진행한다.
+- `scenes[].n`은 **1 이상의 정수만** 허용된다 (`n=0` 거부, 실측). 프롤로그·에필로그는 scene 1(또는 마지막 scene)로 넣고 `title`을 "프롤로그 · …"로 적어 구분한다 — cut slug(`cut-0-1` 등)는 자유.
 
 ### Phase 1d: 레퍼런스 시트 자동 생성
 
@@ -127,16 +132,17 @@ node scripts/storyboard.mjs organize path/to/storyboard.spec.json storyboard.sum
 
 ```
 Character reference sheet for {인물명}. 
-Left half: full-body front view and full-body back view standing on a neutral gray background.
+Left half: full-body front view and full-body back view standing on a plain light background.
 Right half: 4-panel face grid (front, 3/4 left, 3/4 right, profile).
 {나이, 성별, 체형, 신장 등 신체 특징}
 {헤어스타일, 색상}
 {의상 상세: 색상, 소재, 질감, 특이사항(찢어짐, 얼룩 등)}
 {소품: 모자, 신발, 액세서리}
-Hyperrealistic photography, studio lighting, consistent identity across all views.
+Hyperrealistic cinematic photography, natural cinematic side lighting, 35mm film look, NOT 3D game render or CGI, consistent identity across all views.
 ```
 
 - `--slug "ref-char-{인물명}"`, `--quality high`, `--aspect "16:9"`
+- ⚠️ 실사 작품의 시트에 "균일 스튜디오 조명 + 중립 회색 배경" 조합을 쓰지 마라 — 게임 에셋 턴테이블 톤이 되고 그 톤이 컷에 전이된다 (실전 교훈 #3과 동일). 위 템플릿의 시네마틱 측광 문구를 유지할 것.
 
 #### 장소 시트
 
