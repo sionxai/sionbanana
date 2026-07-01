@@ -22,6 +22,10 @@
 # local data (이미지, SQLite)
 /data/
 
+# 이미지/스토리보드 생성 세션 부산물 (data/storyboard/에 두는 게 정석, 루트 유출 안전망)
+*.run.log
+*.summary.json
+
 # misc
 npm-debug.log*
 yarn-error.log*

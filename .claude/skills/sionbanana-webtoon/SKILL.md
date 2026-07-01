@@ -139,8 +139,8 @@ Right half: 4-panel face grid (front, 3/4 left, 3/4 right, profile).
 - 칸이 많거나(3칸+) 텍스트가 길면 식자·정렬이 흐트러질 수 있다 → 텍스트는 짧게, 검수에서 칸 분할·칸별 텍스트 위치 확인.
 
 ```bash
-node scripts/storyboard.mjs run data/storyboard/<project>.spec.json --port 3002 --concurrency 2 > <project>.summary.json
-node scripts/storyboard.mjs organize data/storyboard/<project>.spec.json <project>.summary.json
+node scripts/storyboard.mjs run data/storyboard/<project>.spec.json --port 3002 --concurrency 2 > data/storyboard/<project>.summary.json
+node scripts/storyboard.mjs organize data/storyboard/<project>.spec.json data/storyboard/<project>.summary.json
 ```
 
 > ⚠️ **rate limit 주의 (실측, 중요)**: 레퍼런스를 연결한 컷을 동시성 4로 돌리면 `input-images per min` 한도(4000)를 쳐서 다수 컷이 502로 실패한다. **`--concurrency`는 2 이하**, 실패분은 `--retry`·긴 `--retry-base-delay`로 부분 재생성. 한 세션에서 이미지를 많이 생성하면 **조직 분당 한도가 누적 포화**되어 짧은 재시도로는 안 풀린다 → **이미지 생성을 수 분간 완전히 멈춰 window를 비운 뒤** 재시도한다. (안전필터 502와 구분: rate limit reason에 "Rate limit reached" 명시.)

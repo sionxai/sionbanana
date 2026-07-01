@@ -92,10 +92,11 @@ node scripts/agent-generate.mjs --concurrency 4 --retry 2 --port 3002 < storyboa
 
 ```bash
 node scripts/storyboard.mjs jobs templates/storyboard.example.json
-node scripts/storyboard.mjs run path/to/storyboard.spec.json --port 3002 > storyboard.summary.json
-node scripts/storyboard.mjs organize path/to/storyboard.spec.json storyboard.summary.json
+node scripts/storyboard.mjs run data/storyboard/<project>.spec.json --port 3002 > data/storyboard/<project>.summary.json
+node scripts/storyboard.mjs organize data/storyboard/<project>.spec.json data/storyboard/<project>.summary.json
 ```
 
+- **spec·summary는 루트가 아니라 `data/storyboard/<project>.spec.json` / `<project>.summary.json`에 둔다** — 루트에 쓰면 git status를 어지럽혀 세션 간 "이거 커밋해야 하나?" 혼란을 만든다 (실측: 루트에 부산물 33개 누적).
 - spec은 `title`, `outDir`, `defaults`, `scenes[].cuts[]` 구조를 사용한다. 각 cut은 `slug`, `prompt`가 필수이고 `size`, `quality`, `count`, `category`는 cut 값이 없으면 `defaults`에서 채운다.
 - ★ **콘티 메타(index에 자동 표시) — 시나리오 작업 시 반드시 채운다.** `organize`가 만드는 `index.html`은 단순 썸네일 갤러리가 아니라 **콘티(스토리보드 문서)**다. 아래 필드를 spec에 채우면 index에 그대로 렌더된다(안 채우면 그 줄이 비어 콘티 구실을 못 한다):
   - spec 최상위 `logline`(한 줄 줄거리) + `synopsis`(씬 흐름 문자열 배열) → index 상단 **📖 스토리라인** 블록.
