@@ -12,6 +12,7 @@ interface UseGeneratedImagesOptions {
 }
 
 const HISTORY_REFRESH_EVENT = "yesgem-history-refresh";
+const IMAGES_UPDATED_EVENT = "sionbanana:images-updated";
 
 type DiskImageEntry = {
   id: string;
@@ -208,9 +209,11 @@ export function useGeneratedImages(options: UseGeneratedImagesOptions = {}) {
     reloadDisk();
     const handleCustom = () => reloadDisk();
     window.addEventListener(HISTORY_REFRESH_EVENT, handleCustom as EventListener);
+    window.addEventListener(IMAGES_UPDATED_EVENT, handleCustom as EventListener);
     return () => {
       controller.abort();
       window.removeEventListener(HISTORY_REFRESH_EVENT, handleCustom as EventListener);
+      window.removeEventListener(IMAGES_UPDATED_EVENT, handleCustom as EventListener);
     };
   }, [diskFallbackLimit, includeDiskFallback]);
 

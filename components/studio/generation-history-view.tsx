@@ -36,6 +36,7 @@ const PAGE_SIZE = 36;
 const SERVER_IMAGE_PAGE_SIZE = 60;
 const SERVER_VIDEO_METADATA_FLAG = "serverVideo";
 const SERVER_IMAGE_METADATA_FLAG = "serverImage";
+const IMAGES_UPDATED_EVENT = "sionbanana:images-updated";
 
 type DiskVideoHistoryEntry = {
   id: string;
@@ -670,12 +671,17 @@ export function GenerationHistoryView() {
       void reloadServerVideos();
       void loadServerImagePage({ reset: true });
     };
+    const handleImagesUpdated = () => {
+      void loadServerImagePage({ reset: true });
+    };
 
     window.addEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
+    window.addEventListener(IMAGES_UPDATED_EVENT, handleImagesUpdated as EventListener);
     return () => {
       disposed = true;
       controller.abort();
       window.removeEventListener(HISTORY_REFRESH_EVENT, handleRefresh as EventListener);
+      window.removeEventListener(IMAGES_UPDATED_EVENT, handleImagesUpdated as EventListener);
     };
   }, [loadServerImagePage]);
 
