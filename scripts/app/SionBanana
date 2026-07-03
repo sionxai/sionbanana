@@ -34,7 +34,25 @@ if ! health_ok; then
 fi
 
 if [ -d "/Applications/Google Chrome.app" ]; then
-  /usr/bin/open -na "Google Chrome" --args --app="$STUDIO"
+  focus_existing_studio_window() {
+    /usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1
+set targetUrl to "localhost:3002/studio"
+tell application "Google Chrome"
+  repeat with chromeWindow in windows
+    try
+      if (URL of active tab of chromeWindow) contains targetUrl then
+        set index of chromeWindow to 1
+        activate
+        return
+      end if
+    end try
+  end repeat
+end tell
+error "SionBanana Studio window not found"
+APPLESCRIPT
+  }
+
+  focus_existing_studio_window || /usr/bin/open -na "Google Chrome" --args --app="$STUDIO"
 else
   /usr/bin/open "$STUDIO"
 fi
