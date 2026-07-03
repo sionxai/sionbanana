@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -u
+
+HEALTH="http://localhost:3002/api/health"
+STUDIO="http://localhost:3002/studio"
+JOB_LABEL="com.sionbanana.server"
+USER_DOMAIN="gui/501"
+
+health_ok() {
+  /usr/bin/curl -fsS -m 2 "$HEALTH" >/dev/null 2>&1
+}
+
+notify_startup_failure() {
+  /usr/bin/osascript -e 'display notification "서버 기동 실패 — ~/Library/Logs/SionBanana/server.log 확인" with title "SionBanana"' >/dev/null 2>&1 || true
+}
+
+if ! health_ok; then
+  /bin/launchctl kickstart "${USER_DOMAIN}/${JOB_LABEL}" >/dev/null 2>&1 || true
+
+  ready=0
+  for _ in {1..45}; do
+    /bin/sleep 2
+    if health_ok; then
+      ready=1
+      break
+    fi
+  done
+
+  if [ "$ready" -ne 1 ]; then
+    notify_startup_failure
+    exit 1
+  fi
+fi
+
+if [ -d "/Applications/Google Chrome.app" ]; then
+  /usr/bin/open -na "Google Chrome" --args --app="$STUDIO"
+else
+  /usr/bin/open "$STUDIO"
+fi
+
+exit 0
