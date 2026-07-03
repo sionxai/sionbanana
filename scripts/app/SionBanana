@@ -6,6 +6,13 @@ HEALTH="http://localhost:3002/api/health"
 STUDIO="http://localhost:3002/studio"
 JOB_LABEL="com.sionbanana.server"
 USER_DOMAIN="gui/501"
+STOP_FLAG="$HOME/Library/Application Support/SionBanana/server-stopped"
+APP_LOG="$HOME/Library/Logs/SionBanana/app.log"
+
+/bin/mkdir -p "$(/usr/bin/dirname "$APP_LOG")"
+log_app() { printf '%s %s\n' "$(/bin/date '+%F %T')" "$1" >>"$APP_LOG"; }
+
+log_app "start"
 
 health_ok() {
   /usr/bin/curl -fsS -m 2 "$HEALTH" >/dev/null 2>&1
@@ -15,7 +22,11 @@ notify_startup_failure() {
   /usr/bin/osascript -e 'display notification "서버 기동 실패 — ~/Library/Logs/SionBanana/server.log 확인" with title "SionBanana"' >/dev/null 2>&1 || true
 }
 
+/bin/rm -f "$STOP_FLAG"
+log_app "stop flag removed: $STOP_FLAG"
+
 if ! health_ok; then
+  log_app "health not ok; kickstart"
   /bin/launchctl kickstart "${USER_DOMAIN}/${JOB_LABEL}" >/dev/null 2>&1 || true
 
   ready=0
@@ -31,6 +42,8 @@ if ! health_ok; then
     notify_startup_failure
     exit 1
   fi
+else
+  log_app "health ok"
 fi
 
 if [ -d "/Applications/Google Chrome.app" ]; then
@@ -56,5 +69,6 @@ APPLESCRIPT
 else
   /usr/bin/open "$STUDIO"
 fi
+log_app "window open/focus"
 
 exit 0

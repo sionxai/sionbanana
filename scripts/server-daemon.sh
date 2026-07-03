@@ -18,6 +18,15 @@ cd "$PROJECT_DIR" || {
   exit 1
 }
 
+STOP_FLAG="$HOME/Library/Application Support/SionBanana/server-stopped"
+if [ -f "$STOP_FLAG" ]; then
+  echo "[daemon] stopped by user; parked"
+  while [ -f "$STOP_FLAG" ]; do
+    sleep 10
+  done
+  echo "[daemon] resume requested; starting"
+fi
+
 echo "[daemon] $(date '+%F %T') start (port ${PORT})"
 
 if curl -fsS -o /dev/null "$STUDIO_URL" 2>/dev/null; then
