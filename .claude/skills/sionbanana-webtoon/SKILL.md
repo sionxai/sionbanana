@@ -12,7 +12,7 @@ description: Use this skill to produce a finished vertical webtoon (manhwa) from
 
 ## Prerequisites
 
-- 시온바나나 프로젝트 디렉토리에서 실행, 서버 포트 `3002` (런처 `SionBanana.command` = 프로덕션 모드).
+- 시온바나나 프로젝트 디렉토리에서 실행, 서버 포트 `3002` (launchd 상주 `com.sionbanana.server` — kill해도 자동 재기동. 재빌드 반영: `npm run build && launchctl kickstart -k gui/501/com.sionbanana.server`).
 - `curl -s http://localhost:3002/api/health` 로 `"authenticated": true` 확인.
 - 한글 폰트: macOS `AppleSDGothicNeo`(스크립트가 자동 탐색). Pillow 설치 필요.
 

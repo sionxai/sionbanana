@@ -16,7 +16,7 @@ Prefer the local helper workflow over editing app code. `docs/agent-automation-w
 ## Prerequisites
 
 - Run from the 시온바나나 project directory.
-- 시온바나나 서버 실행 중 (런처 `SionBanana.command` = 프로덕션 모드 빌드·기동), default port `3002`.
+- 시온바나나 서버는 **launchd 상주**(`com.sionbanana.server` — 로그인 자동기동, kill해도 자동 재기동). 코드 변경 반영은 `npm run build && launchctl kickstart -k gui/501/com.sionbanana.server`. 앱 창은 `~/Applications/SionBanana.app`(Chrome 앱 모드), 수동 백업 런처 `SionBanana.command`. default port `3002`.
 - Confirm `/api/health` (must return `"authenticated": true`) before generation.
 
 ```bash
