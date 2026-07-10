@@ -57,4 +57,4 @@ else
 fi
 
 echo "[daemon] starting production server on port ${PORT}"
-exec npm run start -- -p "$PORT"
+exec npm run start -- -H 127.0.0.1 -p "$PORT"

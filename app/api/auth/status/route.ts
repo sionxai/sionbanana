@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCodexAuthStatus, getWebCodexAuthFilePath } from "@/lib/codex-oauth";
 
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {

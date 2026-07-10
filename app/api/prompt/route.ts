@@ -106,6 +106,9 @@ function buildPromptInstruction(payload: z.infer<typeof requestSchema>) {
     "You are an expert AI image prompt engineer. Rewrite the user's prompt into a richer, production-ready description while preserving the main subject and intent."
   );
   segments.push(
+    "If the base prompt contains @handle tokens (e.g., @ref1, @민수), preserve every @handle token verbatim in finalPrompt — do not translate, remove, or paraphrase them; they are reference-image identifiers."
+  );
+  segments.push(
     "Always integrate the provided camera settings using cinematic vocabulary. Mention the camera angle explicitly (e.g., 'low-angle hero shot') and convert the aperture into depth-of-field language (e.g., 'shot at f/1.4 for a shallow depth of field')."
   );
   segments.push(

@@ -25,7 +25,7 @@ type StoryboardScene = {
   cinematography: SceneCinematography;
 };
 
-const STORYBOARD_MODEL = "gpt-5.5";
+const STORYBOARD_MODEL = DEFAULT_TEXT_MODEL;
 const HANDLE_PATTERN = /@([A-Za-z0-9_가-힣ㄱ-ㅎㅏ-ㅣ]+)/gu;
 
 const handleSchema = z
@@ -247,7 +247,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       {
         ok: true,
         scenes,
-        meta: { model: STORYBOARD_MODEL || DEFAULT_TEXT_MODEL }
+        meta: { model: STORYBOARD_MODEL }
       },
       { status: 200 }
     );

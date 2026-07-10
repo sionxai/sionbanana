@@ -7,7 +7,24 @@ export const runtime = "nodejs";
 
 const SHUTDOWN_DELAY_MS = 300;
 
-export async function POST() {
+function isAllowedOrigin(origin: string): boolean {
+  try {
+    const parsedOrigin = new URL(origin);
+    return (
+      parsedOrigin.protocol === "http:" &&
+      (parsedOrigin.hostname === "localhost" || parsedOrigin.hostname === "127.0.0.1")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function POST(request: Request) {
+  const origin = request.headers.get("origin");
+  if (origin !== null && !isAllowedOrigin(origin)) {
+    return NextResponse.json({ ok: false, reason: "forbidden origin" }, { status: 403 });
+  }
+
   const stopFlagDir = path.join(os.homedir(), "Library", "Application Support", "SionBanana");
   const stopFlagPath = path.join(stopFlagDir, "server-stopped");
   const stoppedAt = new Date().toISOString();

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getActiveStoryboardStylesAdmin } from "@/lib/storyboard/firestore-admin";
 import { FALLBACK_STORYBOARD_STYLES } from "@/data/storyboard-styles";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const styles = await getActiveStoryboardStylesAdmin().catch(() => []);

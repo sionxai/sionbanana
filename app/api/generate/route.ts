@@ -8,6 +8,7 @@ import { generateId } from "@/lib/utils";
 import {
   callCodexResponses,
   CodexResponseError,
+  DEFAULT_IMAGE_MODEL,
   type CodexContentPart,
   type CodexImageOptions
 } from "@/lib/codex-fetch";
@@ -349,7 +350,7 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
       imageUrl: primaryImage.imageUrl,
       base64Image: primaryImage.base64Image,
       storagePath: primaryImage.storagePath,
-      model: "gpt-image-2",
+      model: DEFAULT_IMAGE_MODEL,
       id: primaryImage.id,
       revisedPrompt: primaryImage.revisedPrompt,
       images: persisted,
@@ -377,7 +378,7 @@ async function saveGeneratedImageMetadata({
     rawPrompt: payload.prompt,
     refinedPrompt: payload.refinedPrompt || image.revisedPrompt || undefined,
     revisedPrompt: image.revisedPrompt,
-    model: "gpt-image-2",
+    model: DEFAULT_IMAGE_MODEL,
     mode: payload.mode,
     createdAtIso,
     negativePrompt: payload.negativePrompt || undefined,
