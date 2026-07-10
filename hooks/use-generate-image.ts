@@ -69,7 +69,15 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 export async function callGenerateApi(variables: GenerateVariables, signal?: AbortSignal): Promise<GenerateResponse> {
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), GENERATE_TIMEOUT_MS);
-  const effectiveSignal = signal || timeoutController.signal;
+  const effectiveSignal = timeoutController.signal;
+  const handleExternalAbort = () => timeoutController.abort();
+  if (signal) {
+    if (signal.aborted) {
+      timeoutController.abort();
+    } else {
+      signal.addEventListener("abort", handleExternalAbort, { once: true });
+    }
+  }
   const requestVariables: GenerateVariables = {
     ...variables,
     options: {
@@ -136,6 +144,7 @@ export async function callGenerateApi(variables: GenerateVariables, signal?: Abo
     };
   } finally {
     clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", handleExternalAbort);
   }
 }
 

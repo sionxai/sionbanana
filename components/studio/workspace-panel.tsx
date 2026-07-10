@@ -367,18 +367,10 @@ export const WorkspacePanel = memo(function WorkspacePanel({
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{record ? new Date(record.createdAt).toLocaleString() : "미생성"}</span>
             <Separator orientation="vertical" className="h-4" />
-            <span>{record?.model ?? "gpt-image-2"}</span>
+            <span>{record?.model ?? "—"}</span>
           </div>
         </div>
-        {showReferencePlaceholder ? (
-          <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/20 p-6 text-center">
-            <div className="relative h-32 w-32">
-              <Image src={REFERENCE_PLACEHOLDER_IMAGE} alt="기준 이미지 플레이스홀더" fill sizes="128px" className="object-contain" priority={false} />
-            </div>
-            <p className="mt-4 text-sm font-semibold text-muted-foreground">기준 이미지를 등록해주세요</p>
-            <p className="text-xs text-muted-foreground/80">우측 기준 이미지 카드에서 업로드하거나 히스토리에서 드래그할 수 있습니다.</p>
-          </div>
-        ) : hasAfterImage ? (
+        {hasAfterImage ? (
           <DiffSlider
             key={`${record?.id ?? "workspace-diff"}-${referenceImageKey ?? 0}`}
             beforeSrc={isDiffAvailable ? beforeImageWithBust : undefined}
@@ -390,6 +382,14 @@ export const WorkspacePanel = memo(function WorkspacePanel({
             panZoomBind={imagePanZoomBind}
             isPanning={isImagePanning}
           />
+        ) : showReferencePlaceholder ? (
+          <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/20 p-6 text-center">
+            <div className="relative h-32 w-32">
+              <Image src={REFERENCE_PLACEHOLDER_IMAGE} alt="기준 이미지 플레이스홀더" fill sizes="128px" className="object-contain" priority={false} />
+            </div>
+            <p className="mt-4 text-sm font-semibold text-muted-foreground">기준 이미지를 등록해주세요</p>
+            <p className="text-xs text-muted-foreground/80">우측 기준 이미지 카드에서 업로드하거나 히스토리에서 드래그할 수 있습니다.</p>
+          </div>
         ) : (
           <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/30 text-sm text-muted-foreground">
             생성된 이미지가 없습니다. 좌측에서 프롬프트를 입력해 이미지를 생성해보세요.

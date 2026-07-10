@@ -1047,6 +1047,7 @@ function StudioShellInner() {
       // 이미지 생성은 오래 걸릴 수 있어 API 호출 timeout과 같은 값으로 둔다.
       const timeoutId = setTimeout(() => {
         console.warn(`Generation timeout after ${GENERATE_TIMEOUT_MS / 1000} seconds, forcing completion`);
+        guard.abort();
         guard.onError('Generation timeout - please try again');
         clearActiveGuard();
         setCurrentRequestId(null);
@@ -1495,12 +1496,8 @@ function StudioShellInner() {
         setFreshlyGeneratedRecord(newRecord);
 
         // Clear active guard directly since we're handling success here
-        if (activeGuard && activeGuard.requestId === guard.requestId) {
-          if (activeGuard.timeoutId) {
-            clearTimeout(activeGuard.timeoutId);
-          }
-          clearActiveGuard();
-        }
+        clearTimeout(timeoutId);
+        clearActiveGuard();
         guard.onSuccess(newRecord.id);
         selectImageAuto(id, newRecord);
         // 자동 promote 비활성화 — 사용자가 history에서 명시 선택 시에만 reference로 등록.
