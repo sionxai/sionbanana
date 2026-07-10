@@ -9,6 +9,7 @@ import {
   getRecordGeneratedImageUrl,
   getRecordPromptText
 } from "@/lib/studio-helpers/url";
+import { collectProtectedLocalImageIds } from "@/lib/studio-helpers/protected-images";
 import {
   applyCameraPromptDirectives,
   buildCameraAdjustmentInstruction,
@@ -1468,6 +1469,28 @@ function StudioShellInner() {
         // 사용자가 history-panel에서 "기준이미지로 사용"을 누를 때만 promote.
         mergeLocalRecord(newRecord, { promoteToReference: false });
 
+        result.images?.slice(1).forEach((image, index) => {
+          if (image.id === newRecord.id) {
+            return;
+          }
+          const siblingImageUrl = image.imageUrl || image.base64Image;
+          if (!siblingImageUrl) {
+            return;
+          }
+          const siblingRecord: GeneratedImageDocument = {
+            ...newRecord,
+            id: image.id,
+            imageUrl: siblingImageUrl,
+            thumbnailUrl: siblingImageUrl,
+            originalImageUrl: siblingImageUrl,
+            diff: undefined,
+            metadata: { ...(newRecord.metadata ?? {}), batchIndex: index + 2 },
+            createdAt: now,
+            updatedAt: now
+          };
+          mergeLocalRecord(siblingRecord, { promoteToReference: false });
+        });
+
         // Set freshly generated record for immediate display
         setFreshlyGeneratedRecord(newRecord);
 
@@ -2540,6 +2563,18 @@ ${viewInstruction}`;
       return;
     }
 
+    const protectedLocalImageIds = collectProtectedLocalImageIds([
+      referenceImageState.url,
+      ...referenceSlots.map(slot => slot.imageUrl),
+      ...mergedRecords
+        .filter(record => record.id === REFERENCE_IMAGE_DOC_ID)
+        .flatMap(record => [record.imageUrl, record.originalImageUrl, record.thumbnailUrl])
+    ]);
+    const targetLocalImageId = getLocalImageIdForRecord(target);
+    const shouldPreserveLocalFile = Boolean(
+      targetLocalImageId && protectedLocalImageIds.has(targetLocalImageId)
+    );
+
     setLocalRecords(prev => prev.filter(record => record.id !== recordId));
     setDiskRecords(prev => prev.filter(record => record.id !== recordId));
     removeRecordFromLocalStorage(recordId);
@@ -2549,13 +2584,16 @@ ${viewInstruction}`;
       selectImage(fallbackId);
     }
 
-    try {
-      await deleteLocalImageFile(target);
-    } catch (error) {
-      console.warn("Failed to delete local image file", error);
+    if (shouldPreserveLocalFile) {
+      toast.info("기록만 삭제했습니다. 파일은 기준/참조 이미지로 사용 중이라 보존됩니다.");
+    } else {
+      try {
+        await deleteLocalImageFile(target);
+      } catch (error) {
+        console.warn("Failed to delete local image file", error);
+      }
+      toast.success("이미지를 삭제했습니다.");
     }
-
-    toast.success("이미지를 삭제했습니다.");
   };
 
   const handleDeleteAllRecords = async () => {
@@ -2577,14 +2615,28 @@ ${viewInstruction}`;
 
     if (!confirmed) return;
 
+    const protectedLocalImageIds = collectProtectedLocalImageIds([
+      referenceImageState.url,
+      ...referenceSlots.map(slot => slot.imageUrl),
+      ...mergedRecords
+        .filter(record => record.id === REFERENCE_IMAGE_DOC_ID)
+        .flatMap(record => [record.imageUrl, record.originalImageUrl, record.thumbnailUrl])
+    ]);
+
     console.log(`[DeleteAll] Starting deletion of ${recordsToDelete.length} records`);
     console.log(`[DeleteAll] User ID: ${user.uid}`);
 
     try {
       let localFileFailCount = 0;
+      let protectedLocalFileCount = 0;
       for (const record of recordsToDelete) {
         removeRecordFromLocalStorage(record.id);
-        if (!getLocalImageIdForRecord(record)) {
+        const localImageId = getLocalImageIdForRecord(record);
+        if (!localImageId) {
+          continue;
+        }
+        if (protectedLocalImageIds.has(localImageId)) {
+          protectedLocalFileCount++;
           continue;
         }
         try {
@@ -2603,11 +2655,14 @@ ${viewInstruction}`;
       selectImage(null);
       broadcastHistoryUpdate(historyRecords.filter(r => r.id === REFERENCE_IMAGE_DOC_ID), "studio");
 
-      toast.success(
-        localFileFailCount > 0
+      const successMessage = protectedLocalFileCount > 0
+        ? localFileFailCount > 0
+          ? `${recordsToDelete.length}개의 기록을 삭제했습니다. 기준/참조 이미지로 사용 중인 파일 ${protectedLocalFileCount}개는 보존했고, 파일 ${localFileFailCount}개는 정리하지 못했습니다.`
+          : `${recordsToDelete.length}개의 기록을 삭제했습니다. 기준/참조 이미지로 사용 중인 파일 ${protectedLocalFileCount}개는 보존했습니다.`
+        : localFileFailCount > 0
           ? `${recordsToDelete.length}개의 기록을 삭제했습니다. 파일 ${localFileFailCount}개는 정리하지 못했습니다.`
-          : `${recordsToDelete.length}개의 이미지를 삭제했습니다.`
-      );
+          : `${recordsToDelete.length}개의 이미지를 삭제했습니다.`;
+      toast.success(successMessage);
     } catch (error) {
       console.error("[DeleteAll] Failed to delete all records:", error);
       toast.error("일부 이미지 삭제에 실패했습니다.");

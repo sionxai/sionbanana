@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { GenerationMode } from "@/lib/types";
 import { describeAspectRatioForPrompt } from "@/lib/aspect";
+import { resolveRequestedSize } from "@/lib/generation/size";
 import { generateId } from "@/lib/utils";
 import {
   callCodexResponses,
@@ -237,7 +238,7 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
     { type: "input_text", text: promptText }
   ];
 
-  const requestedSize = payload.options?.imageSize ?? payload.options?.aspectRatio;
+  const requestedSize = resolveRequestedSize(payload.options?.imageSize, payload.options?.aspectRatio);
   const imageOptions: CodexImageOptions = {
     quality: mapQuality(payload.options?.quality),
     size: mapSize(requestedSize),
