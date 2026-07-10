@@ -27,17 +27,33 @@ if [ -f "$STOP_FLAG" ]; then
   echo "[daemon] resume requested; starting"
 fi
 
+LOG_FILE="$HOME/Library/Logs/SionBanana/server.log"
+if [ -f "$LOG_FILE" ]; then
+  if [ "$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)" -gt 10485760 ]; then
+    {
+      tail -c 5242880 "$LOG_FILE" > "${LOG_FILE}.tmp" &&
+        cat "${LOG_FILE}.tmp" > "$LOG_FILE"
+    } || true
+    rm -f "${LOG_FILE}.tmp" || true
+  fi
+  chmod 600 "$LOG_FILE" || true
+fi
+
+if [ -f "$PROJECT_DIR/.env.local" ]; then
+  chmod 600 "$PROJECT_DIR/.env.local" || true
+fi
+
 echo "[daemon] $(date '+%F %T') start (port ${PORT})"
 
-if curl -fsS -o /dev/null "$STUDIO_URL" 2>/dev/null; then
+if curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "$STUDIO_URL" 2>/dev/null; then
   echo "[daemon] port ${PORT} already served by another process; standing by as guardian"
-  while curl -fsS -o /dev/null "$STUDIO_URL" 2>/dev/null; do
+  while curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "$STUDIO_URL" 2>/dev/null; do
     sleep 10
   done
   echo "[daemon] foreign server stopped; taking over"
 fi
 
-if curl -fsS -o /dev/null "$GROK_MODELS_URL" 2>/dev/null || lsof -nP -iTCP:"$GROK_PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "$GROK_MODELS_URL" 2>/dev/null || lsof -nP -iTCP:"$GROK_PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "[daemon] grok proxy already available on port ${GROK_PROXY_PORT}; reusing"
 elif command -v progrok >/dev/null 2>&1 && [[ -f "$HOME/.progrok/auth.json" ]]; then
   echo "[daemon] starting grok proxy on port ${GROK_PROXY_PORT}"
@@ -45,6 +61,20 @@ elif command -v progrok >/dev/null 2>&1 && [[ -f "$HOME/.progrok/auth.json" ]]; 
 else
   echo "[daemon] warning: progrok proxy unavailable; video features disabled, image generation unaffected"
 fi
+
+(
+  while true; do
+    sleep 60
+    [ -f "$STOP_FLAG" ] && exit 0
+    if ! curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "$GROK_MODELS_URL" 2>/dev/null \
+       && ! lsof -nP -iTCP:"$GROK_PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      if command -v progrok >/dev/null 2>&1 && [ -f "$HOME/.progrok/auth.json" ]; then
+        echo "[grok-watchdog] proxy down; restarting"
+        progrok proxy --host 127.0.0.1 --port "$GROK_PROXY_PORT" >>/tmp/sionbanana-grok-proxy.log 2>&1 &
+      fi
+    fi
+  done
+) &
 
 if [[ ! -f ".next/BUILD_ID" ]]; then
   echo "[daemon] .next/BUILD_ID missing; running production build"
