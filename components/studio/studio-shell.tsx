@@ -371,7 +371,7 @@ function StudioShellInner() {
       if (!slot.imageUrl || !handle) {
         return;
       }
-      const key = `reference:${handle}`;
+      const key = handle;
       if (seen.has(key)) {
         return;
       }
@@ -389,7 +389,7 @@ function StudioShellInner() {
       if (!handle) {
         return;
       }
-      const key = `character:${handle}`;
+      const key = handle;
       if (seen.has(key)) {
         return;
       }
@@ -1617,6 +1617,7 @@ function StudioShellInner() {
             ? {
                 ...item,
                 imageUrl: character.primaryImageUrl,
+                handle: character.handle,
                 source: "manual",
                 characterId: character.id,
                 updatedAt: now
@@ -1631,7 +1632,7 @@ function StudioShellInner() {
           : [
               ...prev,
               {
-                ...createReferenceSlot(createManualReferenceHandle(prev.length)),
+                ...createReferenceSlot(character.handle),
                 imageUrl: character.primaryImageUrl,
                 source: "manual",
                 characterId: character.id,

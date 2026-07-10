@@ -44,6 +44,24 @@ test("replaceReferenceHandleMentions replaces mapped handles only", () => {
   );
 });
 
+test("replaceReferenceHandleMentions preserves Korean particles after a mapped handle", () => {
+  const mappings = buildReferenceHandleMappings(["민수"]);
+
+  assert.equal(
+    replaceReferenceHandleMentions("@민수가 웃는다", mappings),
+    "the 1st reference image (@민수)가 웃는다"
+  );
+});
+
+test("replaceReferenceHandleMentions prefers an exact handle over a shorter prefix", () => {
+  const mappings = buildReferenceHandleMappings(["ref1", "ref12"]);
+
+  assert.equal(
+    replaceReferenceHandleMentions("@ref12", mappings),
+    "the 2nd reference image (@ref12)"
+  );
+});
+
 test("buildReferenceHandleMap aligns urls and handles while skipping incomplete entries", () => {
   assert.deepEqual(
     buildReferenceHandleMap(

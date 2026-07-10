@@ -67,7 +67,7 @@ export function useCharacterMentions({
       }
 
       const attached = referenceSlots.some(
-        slot => slot.source === "character-mention" && slot.characterId === character.id && Boolean(slot.imageUrl)
+        slot => Boolean(slot.imageUrl) && (slot.characterId === character.id || slot.handle === character.handle)
       );
       chips.push({
         handle,

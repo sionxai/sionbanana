@@ -52,13 +52,25 @@ export function replaceReferenceHandleMentions(text: string, mappings: Reference
   }
 
   const indexByHandle = new Map(mappings.map(item => [item.handle, item.referenceIndex]));
+  const handlesByLength = [...indexByHandle.keys()]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
   return text.replace(HANDLE_TOKEN_PATTERN, (match, rawHandle: string) => {
     const normalizedHandle = normalizeReferenceHandleValue(rawHandle);
-    const referenceIndex = indexByHandle.get(normalizedHandle);
+    const exactReferenceIndex = indexByHandle.get(normalizedHandle);
+    if (exactReferenceIndex) {
+      return `the ${formatOrdinal(exactReferenceIndex)} reference image (@${normalizedHandle})`;
+    }
+
+    const prefixHandle = handlesByLength.find(handle => normalizedHandle.startsWith(handle));
+    if (!prefixHandle) {
+      return match;
+    }
+    const referenceIndex = indexByHandle.get(prefixHandle);
     if (!referenceIndex) {
       return match;
     }
-    return `the ${formatOrdinal(referenceIndex)} reference image (@${normalizedHandle})`;
+    return `the ${formatOrdinal(referenceIndex)} reference image (@${prefixHandle})${normalizedHandle.slice(prefixHandle.length)}`;
   });
 }
 
