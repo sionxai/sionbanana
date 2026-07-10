@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getCodexAuthStatus } from "@/lib/codex-oauth";
 import { DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL } from "@/lib/codex-fetch";
 
+// 인증 상태·모델 설정은 실시간 값이어야 한다 — 정적 프리렌더 금지
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const codex = await getCodexAuthStatus();
 

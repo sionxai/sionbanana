@@ -37,8 +37,13 @@ type Usage = {
   credits?: Record<string, unknown>;
 };
 
+type GenerationModels = {
+  text: string;
+  image: string;
+};
+
 type ApiResponse =
-  | { ok: true; usage: Usage }
+  | { ok: true; usage: Usage; models?: GenerationModels }
   | { ok: false; reason: string; code?: string };
 
 type AuthStatus = {
@@ -135,6 +140,7 @@ function WindowRow({
 
 export function UsageView() {
   const [data, setData] = useState<Usage | null>(null);
+  const [models, setModels] = useState<GenerationModels | null>(null);
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,8 +167,10 @@ export function UsageView() {
       if (!body.ok) {
         setError(body.reason || "사용량을 불러오지 못했습니다.");
         setData(null);
+        setModels(null);
       } else {
         setData(body.usage);
+        setModels(body.models ?? null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "네트워크 오류");
@@ -271,6 +279,21 @@ export function UsageView() {
                 <span className="text-muted-foreground">계정 ID</span>
                 <span className="font-mono text-xs">{data.account_id ?? authStatus?.accountId ?? "—"}</span>
               </div>
+              {models ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">생성 모델</span>
+                  <span className="flex items-center gap-1.5">
+                    {models.text === models.image ? (
+                      <Badge variant="outline" className="font-mono text-[11px]">{models.image}</Badge>
+                    ) : (
+                      <>
+                        <Badge variant="outline" className="font-mono text-[11px]">텍스트 {models.text}</Badge>
+                        <Badge variant="outline" className="font-mono text-[11px]">이미지 {models.image}</Badge>
+                      </>
+                    )}
+                  </span>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
