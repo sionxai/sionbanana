@@ -1,0 +1,475 @@
+import sharp from "sharp";
+
+import type { FrameRect, GridSpec, MatteSpec, Pivot } from "./types";
+
+// Deterministic analysis thresholds: alpha > 8, component area >= max(4px, 0.05%),
+// and the main component's 95th y percentile as the foot baseline.
+const ALPHA_THRESHOLD = 8;
+const MIN_COMPONENT_AREA_RATIO = 0.0005;
+const BASELINE_QUANTILE = 0.95;
+
+type ImageInfo = {
+  data: Buffer;
+  width: number;
+  height: number;
+};
+
+export type FrameAnalysis = {
+  trim: FrameRect;
+  pivot: Pivot;
+};
+
+export type NormalizeFrameInput = {
+  buf: Buffer;
+  trim?: FrameRect;
+  pivot?: Pivot;
+};
+
+export type NormalizedFrame = FrameAnalysis & {
+  buf: Buffer;
+};
+
+export type NormalizeOptions = {
+  margin?: number;
+};
+
+export type PackOptions = {
+  cols?: number;
+  padding?: number;
+};
+
+function assertPositiveInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be an integer greater than zero.`);
+  }
+}
+
+function assertNonnegativeInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a nonnegative integer.`);
+  }
+}
+
+function splitDimension(total: number, count: number, policy: GridSpec["remainderPolicy"]): number[] {
+  const base = Math.floor(total / count);
+  if (base < 1) {
+    throw new RangeError("Grid cells must be at least one pixel wide and high.");
+  }
+
+  if (policy === "crop") {
+    return Array.from({ length: count }, () => base);
+  }
+
+  const remainder = total - base * count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+export function computeGrid(
+  sheetW: number,
+  sheetH: number,
+  grid: GridSpec
+): FrameRect[] {
+  assertPositiveInteger(sheetW, "sheetW");
+  assertPositiveInteger(sheetH, "sheetH");
+  assertPositiveInteger(grid.cols, "grid.cols");
+  assertPositiveInteger(grid.rows, "grid.rows");
+
+  const gutter = grid.gutter ?? 0;
+  const policy = grid.remainderPolicy ?? "distribute";
+  assertNonnegativeInteger(gutter, "grid.gutter");
+
+  const availableW = sheetW - gutter * (grid.cols - 1);
+  const availableH = sheetH - gutter * (grid.rows - 1);
+  const widths = splitDimension(availableW, grid.cols, policy);
+  const heights = splitDimension(availableH, grid.rows, policy);
+  const rects: FrameRect[] = [];
+
+  let y = 0;
+  for (const height of heights) {
+    let x = 0;
+    for (const width of widths) {
+      rects.push({ x, y, w: width, h: height });
+      x += width + gutter;
+    }
+    y += height + gutter;
+  }
+
+  return rects;
+}
+
+export async function sliceFrames(sheetBuf: Buffer, rects: FrameRect[]): Promise<Buffer[]> {
+  const metadata = await sharp(sheetBuf).metadata();
+  if (!metadata.width || !metadata.height) {
+    throw new Error("Unable to determine source-sheet dimensions.");
+  }
+
+  return Promise.all(
+    rects.map((rect, index) => {
+      assertNonnegativeInteger(rect.x, `rects[${index}].x`);
+      assertNonnegativeInteger(rect.y, `rects[${index}].y`);
+      assertPositiveInteger(rect.w, `rects[${index}].w`);
+      assertPositiveInteger(rect.h, `rects[${index}].h`);
+      if (rect.x + rect.w > metadata.width! || rect.y + rect.h > metadata.height!) {
+        throw new RangeError(`rects[${index}] extends beyond the source sheet.`);
+      }
+      return sharp(sheetBuf).extract({ left: rect.x, top: rect.y, width: rect.w, height: rect.h }).png().toBuffer();
+    })
+  );
+}
+
+async function decodeRgba(imageBuf: Buffer): Promise<ImageInfo> {
+  const result = await sharp(imageBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return {
+    data: result.data,
+    width: result.info.width,
+    height: result.info.height
+  };
+}
+
+function encodeRgba(image: ImageInfo): Promise<Buffer> {
+  return sharp(image.data, {
+    raw: { width: image.width, height: image.height, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+}
+
+function parseHexColor(value: string): [number, number, number] {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+    throw new TypeError("matte.keyColor must use #RRGGBB format.");
+  }
+  return [
+    Number.parseInt(value.slice(1, 3), 16),
+    Number.parseInt(value.slice(3, 5), 16),
+    Number.parseInt(value.slice(5, 7), 16)
+  ];
+}
+
+function colorDistancePercent(data: Buffer, offset: number, key: [number, number, number]): number {
+  const red = data[offset] - key[0];
+  const green = data[offset + 1] - key[1];
+  const blue = data[offset + 2] - key[2];
+  return (Math.sqrt(red * red + green * green + blue * blue) / Math.sqrt(3 * 255 * 255)) * 100;
+}
+
+function inferEdgeColor(image: ImageInfo): [number, number, number] {
+  const counts = new Map<number, number>();
+  const add = (x: number, y: number) => {
+    const offset = (y * image.width + x) * 4;
+    const key = (image.data[offset] << 16) | (image.data[offset + 1] << 8) | image.data[offset + 2];
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  };
+
+  for (let x = 0; x < image.width; x += 1) {
+    add(x, 0);
+    if (image.height > 1) add(x, image.height - 1);
+  }
+  for (let y = 1; y < image.height - 1; y += 1) {
+    add(0, y);
+    if (image.width > 1) add(image.width - 1, y);
+  }
+
+  let selected = 0;
+  let selectedCount = -1;
+  for (const [key, count] of counts) {
+    if (count > selectedCount || (count === selectedCount && key < selected)) {
+      selected = key;
+      selectedCount = count;
+    }
+  }
+  return [(selected >> 16) & 255, (selected >> 8) & 255, selected & 255];
+}
+
+function alphaFactor(distance: number, tolerance: number, softness: number): number {
+  if (distance <= tolerance) return 0;
+  if (softness === 0 || distance >= tolerance + softness) return 1;
+  return (distance - tolerance) / softness;
+}
+
+function applyPixelAlpha(
+  data: Buffer,
+  offset: number,
+  factor: number,
+  key: [number, number, number],
+  despill: boolean
+): void {
+  const originalAlpha = data[offset + 3];
+  if (despill && factor > 0 && factor < 1) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      data[offset + channel] = Math.round(
+        Math.max(0, Math.min(255, (data[offset + channel] - key[channel] * (1 - factor)) / factor))
+      );
+    }
+  }
+  data[offset + 3] = Math.round(originalAlpha * factor);
+}
+
+export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Buffer> {
+  const image = await decodeRgba(frameBuf);
+  if (matte.mode === "none") {
+    return encodeRgba(image);
+  }
+
+  const tolerance = matte.tolerance ?? 12;
+  const softness = matte.softness ?? 2;
+  const despill = matte.despill ?? true;
+  const key = matte.keyColor ? parseHexColor(matte.keyColor) : inferEdgeColor(image);
+
+  if (matte.mode === "keyColor") {
+    if (!matte.keyColor) {
+      throw new TypeError("matte.keyColor is required when mode is keyColor.");
+    }
+    for (let offset = 0; offset < image.data.length; offset += 4) {
+      const factor = alphaFactor(colorDistancePercent(image.data, offset, key), tolerance, softness);
+      applyPixelAlpha(image.data, offset, factor, key, despill);
+    }
+    return encodeRgba(image);
+  }
+
+  const visited = new Uint8Array(image.width * image.height);
+  const queue = new Int32Array(image.width * image.height);
+  let queueStart = 0;
+  let queueEnd = 0;
+  const maxDistance = tolerance + softness;
+  const enqueue = (x: number, y: number) => {
+    const index = y * image.width + x;
+    if (visited[index]) return;
+    const offset = index * 4;
+    if (colorDistancePercent(image.data, offset, key) > maxDistance) return;
+    visited[index] = 1;
+    queue[queueEnd] = index;
+    queueEnd += 1;
+  };
+
+  for (let x = 0; x < image.width; x += 1) {
+    enqueue(x, 0);
+    if (image.height > 1) enqueue(x, image.height - 1);
+  }
+  for (let y = 1; y < image.height - 1; y += 1) {
+    enqueue(0, y);
+    if (image.width > 1) enqueue(image.width - 1, y);
+  }
+
+  while (queueStart < queueEnd) {
+    const index = queue[queueStart];
+    queueStart += 1;
+    const x = index % image.width;
+    const y = Math.floor(index / image.width);
+    const offset = index * 4;
+    const factor = alphaFactor(colorDistancePercent(image.data, offset, key), tolerance, softness);
+    applyPixelAlpha(image.data, offset, factor, key, despill);
+
+    if (x > 0) enqueue(x - 1, y);
+    if (x + 1 < image.width) enqueue(x + 1, y);
+    if (y > 0) enqueue(x, y - 1);
+    if (y + 1 < image.height) enqueue(x, y + 1);
+  }
+
+  return encodeRgba(image);
+}
+
+export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
+  const image = await decodeRgba(rgbaBuf);
+  const foreground = new Uint8Array(image.width * image.height);
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let index = 0; index < foreground.length; index += 1) {
+    if (image.data[index * 4 + 3] <= ALPHA_THRESHOLD) continue;
+    foreground[index] = 1;
+    const x = index % image.width;
+    const y = Math.floor(index / image.width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  if (maxX < 0) {
+    return { trim: { x: 0, y: 0, w: 0, h: 0 }, pivot: { x: 0, y: 0 } };
+  }
+
+  const visited = new Uint8Array(foreground.length);
+  const queue = new Int32Array(foreground.length);
+  const minimumArea = Math.max(4, Math.ceil(image.width * image.height * MIN_COMPONENT_AREA_RATIO));
+  let largest: number[] = [];
+  let largestEligible: number[] = [];
+
+  for (let seed = 0; seed < foreground.length; seed += 1) {
+    if (!foreground[seed] || visited[seed]) continue;
+    let queueStart = 0;
+    let queueEnd = 1;
+    queue[0] = seed;
+    visited[seed] = 1;
+    const component: number[] = [];
+
+    while (queueStart < queueEnd) {
+      const index = queue[queueStart];
+      queueStart += 1;
+      component.push(index);
+      const x = index % image.width;
+      const y = Math.floor(index / image.width);
+
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nextX = x + dx;
+          const nextY = y + dy;
+          if (nextX < 0 || nextX >= image.width || nextY < 0 || nextY >= image.height) continue;
+          const next = nextY * image.width + nextX;
+          if (!foreground[next] || visited[next]) continue;
+          visited[next] = 1;
+          queue[queueEnd] = next;
+          queueEnd += 1;
+        }
+      }
+    }
+
+    if (component.length > largest.length) largest = component;
+    if (component.length >= minimumArea && component.length > largestEligible.length) {
+      largestEligible = component;
+    }
+  }
+
+  if (largestEligible.length > 0) largest = largestEligible;
+
+  const sortedY = largest.map(index => Math.floor(index / image.width)).sort((a, b) => a - b);
+  const baseline = sortedY[Math.floor((sortedY.length - 1) * BASELINE_QUANTILE)];
+  const baselinePixels = largest.filter(index => Math.floor(index / image.width) >= baseline);
+  const pivotX = Math.round(
+    baselinePixels.reduce((sum, index) => sum + (index % image.width), 0) / baselinePixels.length
+  );
+
+  return {
+    trim: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+    pivot: { x: pivotX, y: baseline }
+  };
+}
+
+export async function normalizeFrames(
+  frames: Array<Buffer | NormalizeFrameInput>,
+  opts: NormalizeOptions = {}
+): Promise<{ canvas: { w: number; h: number }; frames: NormalizedFrame[] }> {
+  if (frames.length === 0) {
+    throw new RangeError("normalizeFrames requires at least one frame.");
+  }
+  const margin = opts.margin ?? 2;
+  assertNonnegativeInteger(margin, "opts.margin");
+
+  const analyzed = await Promise.all(
+    frames.map(async frame => {
+      const input = Buffer.isBuffer(frame) ? { buf: frame } : frame;
+      const analysis = input.trim && input.pivot ? { trim: input.trim, pivot: input.pivot } : await analyzeFrame(input.buf);
+      return {
+        buf: input.buf,
+        trim: analysis.trim,
+        pivot: { x: Math.round(analysis.pivot.x), y: Math.round(analysis.pivot.y) }
+      };
+    })
+  );
+
+  let minLeft = Infinity;
+  let minTop = Infinity;
+  let maxRight = -Infinity;
+  let maxBottom = -Infinity;
+  for (const frame of analyzed) {
+    if (frame.trim.w === 0 || frame.trim.h === 0) continue;
+    minLeft = Math.min(minLeft, frame.trim.x - frame.pivot.x);
+    minTop = Math.min(minTop, frame.trim.y - frame.pivot.y);
+    maxRight = Math.max(maxRight, frame.trim.x + frame.trim.w - frame.pivot.x);
+    maxBottom = Math.max(maxBottom, frame.trim.y + frame.trim.h - frame.pivot.y);
+  }
+
+  if (!Number.isFinite(minLeft)) {
+    minLeft = minTop = maxRight = maxBottom = 0;
+  }
+  const canvas = {
+    w: Math.max(1, Math.ceil(maxRight - minLeft + margin * 2)),
+    h: Math.max(1, Math.ceil(maxBottom - minTop + margin * 2))
+  };
+  const sharedPivot = { x: margin - minLeft, y: margin - minTop };
+
+  const normalized = await Promise.all(
+    analyzed.map(async frame => {
+      const trim = {
+        x: sharedPivot.x + frame.trim.x - frame.pivot.x,
+        y: sharedPivot.y + frame.trim.y - frame.pivot.y,
+        w: frame.trim.w,
+        h: frame.trim.h
+      };
+      const base = sharp({
+        create: {
+          width: canvas.w,
+          height: canvas.h,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 0 }
+        }
+      });
+
+      let buf: Buffer;
+      if (frame.trim.w === 0 || frame.trim.h === 0) {
+        buf = await base.png().toBuffer();
+      } else {
+        const cropped = await sharp(frame.buf)
+          .extract({ left: frame.trim.x, top: frame.trim.y, width: frame.trim.w, height: frame.trim.h })
+          .png()
+          .toBuffer();
+        buf = await base.composite([{ input: cropped, left: trim.x, top: trim.y }]).png().toBuffer();
+      }
+
+      return { buf, trim, pivot: { ...sharedPivot } };
+    })
+  );
+
+  return { canvas, frames: normalized };
+}
+
+export async function packSheet(
+  normFrames: Array<Buffer | NormalizedFrame>,
+  opts: PackOptions = {}
+): Promise<{ buf: Buffer; rects: FrameRect[] }> {
+  if (normFrames.length === 0) {
+    throw new RangeError("packSheet requires at least one frame.");
+  }
+  const padding = opts.padding ?? 2;
+  assertNonnegativeInteger(padding, "opts.padding");
+  const cols = opts.cols ?? Math.ceil(Math.sqrt(normFrames.length));
+  assertPositiveInteger(cols, "opts.cols");
+
+  const buffers = normFrames.map(frame => (Buffer.isBuffer(frame) ? frame : frame.buf));
+  const metadata = await Promise.all(buffers.map(buf => sharp(buf).metadata()));
+  const cellW = Math.max(...metadata.map(info => info.width ?? 0));
+  const cellH = Math.max(...metadata.map(info => info.height ?? 0));
+  if (cellW < 1 || cellH < 1) {
+    throw new Error("Unable to determine normalized-frame dimensions.");
+  }
+  const rows = Math.ceil(buffers.length / cols);
+  const sheetW = cols * cellW + (cols - 1) * padding;
+  const sheetH = rows * cellH + (rows - 1) * padding;
+  const rects: FrameRect[] = buffers.map((_, index) => ({
+    x: (index % cols) * (cellW + padding),
+    y: Math.floor(index / cols) * (cellH + padding),
+    w: cellW,
+    h: cellH
+  }));
+  const composites = buffers.map((input, index) => ({
+    input,
+    left: rects[index].x,
+    top: rects[index].y
+  }));
+  const buf = await sharp({
+    create: {
+      width: sheetW,
+      height: sheetH,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
+
+  return { buf, rects };
+}
