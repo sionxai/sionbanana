@@ -21,7 +21,9 @@ type MotionEditorPanelProps = {
   isPatching: boolean;
   onMatteDirtyChange: (dirty: boolean) => void;
   updateProject: (
-    patch: Partial<Pick<MotionProject, "grid" | "matte" | "frames" | "animations">>
+    patch: Partial<
+      Pick<MotionProject, "sliceMode" | "grid" | "matte" | "frames" | "animations">
+    >
   ) => Promise<MotionProject>;
 };
 
@@ -84,13 +86,17 @@ export function MotionEditorPanel({
   }, []);
 
   useEffect(() => {
-    if (synchronizedProjectIdRef.current === project.id) return;
-    synchronizedProjectIdRef.current = project.id;
-    clearMatteTimer();
-    setMatteDirty(false);
-    sliderInteractingRef.current = false;
-    matteDraftRef.current = project.matte;
-    setMatteDraft(project.matte);
+    const changedProject = synchronizedProjectIdRef.current !== project.id;
+    if (changedProject) {
+      synchronizedProjectIdRef.current = project.id;
+      clearMatteTimer();
+      setMatteDirty(false);
+      sliderInteractingRef.current = false;
+    }
+    if (changedProject || !matteDirtyRef.current) {
+      matteDraftRef.current = project.matte;
+      setMatteDraft(project.matte);
+    }
     setGridCols(project.grid.cols);
     setGridRows(project.grid.rows);
   }, [clearMatteTimer, project.grid, project.id, project.matte, setMatteDirty]);
@@ -169,6 +175,7 @@ export function MotionEditorPanel({
   };
 
   const commitGrid = async () => {
+    if (project.sliceMode !== "grid") return;
     if (
       !Number.isInteger(gridCols) ||
       !Number.isInteger(gridRows) ||
@@ -196,6 +203,27 @@ export function MotionEditorPanel({
       if (!mountedRef.current) return;
       if (includeMatte) setMatteDirty(true);
       toast.error(error instanceof Error ? error.message : "격자를 재빌드하지 못했습니다.");
+    }
+  };
+
+  const commitSliceMode = async (sliceMode: MotionProject["sliceMode"]) => {
+    if (sliceMode === project.sliceMode) return;
+    const includeMatte = matteDirtyRef.current;
+    clearMatteTimer();
+    if (includeMatte) setMatteDirty(false);
+    try {
+      const rebuilt = await updateProject({
+        sliceMode,
+        ...(includeMatte ? { matte: matteDraftRef.current } : {})
+      });
+      if (!mountedRef.current) return;
+      setGridCols(rebuilt.grid.cols);
+      setGridRows(rebuilt.grid.rows);
+      toast.success(sliceMode === "auto" ? "자동 슬라이싱을 적용했습니다." : "격자 슬라이싱을 적용했습니다.");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      if (includeMatte) setMatteDirty(true);
+      toast.error(error instanceof Error ? error.message : "슬라이싱 모드를 변경하지 못했습니다.");
     }
   };
 
@@ -370,9 +398,43 @@ export function MotionEditorPanel({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">격자 조절</CardTitle>
+          <CardTitle className="text-lg">슬라이싱</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>모드</Label>
+            <ToggleGroup
+              type="single"
+              value={project.sliceMode}
+              disabled={disabled}
+              className="grid grid-cols-2 gap-2"
+              onValueChange={value => {
+                if (value === "auto" || value === "grid") void commitSliceMode(value);
+              }}
+            >
+              <ToggleGroupItem value="auto" disabled={disabled}>
+                자동 감지
+              </ToggleGroupItem>
+              <ToggleGroupItem value="grid" disabled={disabled}>
+                격자 고정
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
+          {project.sliceMode === "auto" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+              <span className="text-sm text-muted-foreground">
+                감지 결과 {project.grid.cols} × {project.grid.rows}
+              </span>
+              <Badge variant="secondary">
+                신뢰도 {Math.round(project.sliceConfidence * 100)}%
+              </Badge>
+              {project.sliceConfidence < 0.7 ? (
+                <Badge variant="warning">격자와 다르게 감지됨 — 확인 필요</Badge>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="editor-grid-cols">열</Label>
@@ -382,7 +444,7 @@ export function MotionEditorPanel({
                 min={1}
                 step={1}
                 value={gridCols}
-                disabled={disabled}
+                disabled={disabled || project.sliceMode !== "grid"}
                 onChange={event => setGridCols(Number(event.target.value))}
                 onKeyDown={event => {
                   if (event.key === "Enter") void commitGrid();
@@ -397,7 +459,7 @@ export function MotionEditorPanel({
                 min={1}
                 step={1}
                 value={gridRows}
-                disabled={disabled}
+                disabled={disabled || project.sliceMode !== "grid"}
                 onChange={event => setGridRows(Number(event.target.value))}
                 onKeyDown={event => {
                   if (event.key === "Enter") void commitGrid();
@@ -407,12 +469,18 @@ export function MotionEditorPanel({
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-muted-foreground">
-              {gridCols > 0 && gridRows > 0 ? gridCols * gridRows : 0}프레임
+              {project.sliceMode === "auto"
+                ? project.frames.length
+                : gridCols > 0 && gridRows > 0
+                  ? gridCols * gridRows
+                  : 0}
+              프레임
             </span>
             <Button
               size="sm"
               disabled={
                 disabled ||
+                project.sliceMode !== "grid" ||
                 (gridCols === project.grid.cols && gridRows === project.grid.rows)
               }
               onClick={() => void commitGrid()}

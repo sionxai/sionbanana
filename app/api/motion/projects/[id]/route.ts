@@ -11,7 +11,8 @@ import {
   animationSchema,
   frameSchema,
   gridSpecSchema,
-  matteSpecSchema
+  matteSpecSchema,
+  sliceModeValues
 } from "@/lib/motion/types";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ class InvalidRequestJsonError extends Error {}
 
 const patchSchema = z
   .object({
+    sliceMode: z.enum(sliceModeValues).optional(),
     grid: gridSpecSchema.optional(),
     matte: matteSpecSchema.optional(),
     frames: z.array(frameSchema).optional(),

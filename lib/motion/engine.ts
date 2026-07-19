@@ -38,6 +38,21 @@ export type PackOptions = {
   padding?: number;
 };
 
+export type DetectFrameRectsOptions = {
+  expectedCols?: number;
+  expectedRows?: number;
+  minGapRatio?: number;
+  minAreaRatio?: number;
+  padding?: number;
+};
+
+export type DetectedFrameRects = {
+  rects: FrameRect[];
+  rows: number;
+  cols: number;
+  confidence: number;
+};
+
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new RangeError(`${name} must be an integer greater than zero.`);
@@ -95,6 +110,171 @@ export function computeGrid(
   }
 
   return rects;
+}
+
+function projectionBands(projection: Uint32Array, minimumGap: number): Array<[number, number]> {
+  let first = 0;
+  while (first < projection.length && projection[first] === 0) first += 1;
+  if (first === projection.length) return [];
+
+  const bands: Array<[number, number]> = [];
+  let bandStart = first;
+  let cursor = first;
+  while (cursor < projection.length) {
+    if (projection[cursor] > 0) {
+      cursor += 1;
+      continue;
+    }
+    const gapStart = cursor;
+    while (cursor < projection.length && projection[cursor] === 0) cursor += 1;
+    if (cursor < projection.length && cursor - gapStart >= minimumGap) {
+      bands.push([bandStart, gapStart - 1]);
+      bandStart = cursor;
+    }
+  }
+  bands.push([bandStart, cursor - 1]);
+  return bands;
+}
+
+export function detectFrameRects(
+  rgbaBuf: Buffer,
+  meta: { width: number; height: number },
+  opts: DetectFrameRectsOptions = {}
+): DetectedFrameRects {
+  assertPositiveInteger(meta.width, "meta.width");
+  assertPositiveInteger(meta.height, "meta.height");
+  if (rgbaBuf.length !== meta.width * meta.height * 4) {
+    throw new RangeError("rgbaBuf must contain exactly width * height * 4 RGBA bytes.");
+  }
+  if (opts.expectedCols !== undefined) {
+    assertPositiveInteger(opts.expectedCols, "opts.expectedCols");
+  }
+  if (opts.expectedRows !== undefined) {
+    assertPositiveInteger(opts.expectedRows, "opts.expectedRows");
+  }
+
+  const minGapRatio = opts.minGapRatio ?? 0.01;
+  const minAreaRatio = opts.minAreaRatio ?? 0.0005;
+  const padding = opts.padding ?? 2;
+  if (!Number.isFinite(minGapRatio) || minGapRatio < 0 || minGapRatio > 1) {
+    throw new RangeError("opts.minGapRatio must be between zero and one.");
+  }
+  if (!Number.isFinite(minAreaRatio) || minAreaRatio < 0 || minAreaRatio > 1) {
+    throw new RangeError("opts.minAreaRatio must be between zero and one.");
+  }
+  assertNonnegativeInteger(padding, "opts.padding");
+
+  const pixelCount = meta.width * meta.height;
+  const foreground = new Uint8Array(pixelCount);
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (rgbaBuf[index * 4 + 3] > 16) foreground[index] = 1;
+  }
+
+  const retained = new Uint8Array(pixelCount);
+  const visited = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  const minimumArea = Math.max(1, Math.ceil(pixelCount * minAreaRatio));
+  for (let seed = 0; seed < pixelCount; seed += 1) {
+    if (!foreground[seed] || visited[seed]) continue;
+    let queueStart = 0;
+    let queueEnd = 1;
+    queue[0] = seed;
+    visited[seed] = 1;
+
+    while (queueStart < queueEnd) {
+      const index = queue[queueStart];
+      queueStart += 1;
+      const x = index % meta.width;
+      const y = Math.floor(index / meta.width);
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nextX = x + dx;
+          const nextY = y + dy;
+          if (nextX < 0 || nextX >= meta.width || nextY < 0 || nextY >= meta.height) continue;
+          const next = nextY * meta.width + nextX;
+          if (!foreground[next] || visited[next]) continue;
+          visited[next] = 1;
+          queue[queueEnd] = next;
+          queueEnd += 1;
+        }
+      }
+    }
+
+    if (queueEnd >= minimumArea) {
+      for (let index = 0; index < queueEnd; index += 1) retained[queue[index]] = 1;
+    }
+  }
+
+  const minimumGap = Math.max(
+    1,
+    Math.ceil(Math.min(meta.width, meta.height) * minGapRatio)
+  );
+  const yProjection = new Uint32Array(meta.height);
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (retained[index]) yProjection[Math.floor(index / meta.width)] += 1;
+  }
+  const rowBands = projectionBands(yProjection, minimumGap);
+  const rects: FrameRect[] = [];
+  const columnCounts: number[] = [];
+
+  for (const [rowStart, rowEnd] of rowBands) {
+    const xProjection = new Uint32Array(meta.width);
+    for (let y = rowStart; y <= rowEnd; y += 1) {
+      for (let x = 0; x < meta.width; x += 1) {
+        if (retained[y * meta.width + x]) xProjection[x] += 1;
+      }
+    }
+    const columnBands = projectionBands(xProjection, minimumGap);
+    columnCounts.push(columnBands.length);
+
+    for (const [columnStart, columnEnd] of columnBands) {
+      let minX = meta.width;
+      let minY = meta.height;
+      let maxX = -1;
+      let maxY = -1;
+      for (let y = rowStart; y <= rowEnd; y += 1) {
+        for (let x = columnStart; x <= columnEnd; x += 1) {
+          if (!retained[y * meta.width + x]) continue;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+      if (maxX < 0) continue;
+      const x = Math.max(0, minX - padding);
+      const y = Math.max(0, minY - padding);
+      const right = Math.min(meta.width, maxX + 1 + padding);
+      const bottom = Math.min(meta.height, maxY + 1 + padding);
+      rects.push({ x, y, w: right - x, h: bottom - y });
+    }
+  }
+
+  const rows = rowBands.length;
+  const cols = columnCounts.length > 0 ? Math.max(...columnCounts) : 0;
+  if (rects.length === 0) return { rects, rows: 0, cols: 0, confidence: 0.3 };
+
+  const regular = columnCounts.every(count => count === cols);
+  const rowMatches = opts.expectedRows === undefined || rows === opts.expectedRows;
+  const columnsMatch =
+    opts.expectedCols === undefined || columnCounts.every(count => count === opts.expectedCols);
+  let confidence: number;
+  if (rowMatches && columnsMatch && regular) {
+    confidence = 1;
+  } else if (
+    opts.expectedRows !== undefined &&
+    opts.expectedCols !== undefined &&
+    rects.length === opts.expectedRows * opts.expectedCols
+  ) {
+    confidence = 0.7;
+  } else if (opts.expectedRows === undefined && opts.expectedCols === undefined && !regular) {
+    confidence = 0.7;
+  } else {
+    confidence = 0.3;
+  }
+
+  return { rects, rows, cols, confidence };
 }
 
 export async function sliceFrames(sheetBuf: Buffer, rects: FrameRect[]): Promise<Buffer[]> {

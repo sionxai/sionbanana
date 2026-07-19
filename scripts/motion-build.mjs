@@ -9,6 +9,7 @@ import {
   analyzeFrame,
   applyMatte,
   computeGrid,
+  detectFrameRects,
   normalizeFrames,
   packSheet,
   sliceFrames
@@ -87,30 +88,67 @@ async function main() {
 
   const inputPath = path.resolve(args.input);
   const outDir = path.resolve(args.out ?? "motion-out");
-  const grid = gridSpecSchema.parse({
+  const requestedGrid = gridSpecSchema.parse({
     cols: parseInteger(args.cols, "cols"),
     rows: parseInteger(args.rows, "rows")
   });
+  const sliceMode = args.slice ?? "auto";
+  if (sliceMode !== "auto" && sliceMode !== "grid") {
+    throw new Error("--slice must be auto or grid.");
+  }
   const mode = args.matte ?? "edgeFlood";
   const matte = matteSpecSchema.parse({
     mode,
     ...(args.key ? { keyColor: args.key } : mode === "keyColor" ? { keyColor: "#FFFFFF" } : {}),
     ...(args.tolerance ? { tolerance: parseInteger(args.tolerance, "tolerance") } : {})
   });
-  const flipRows = parseFlipRows(args["flip-rows"], grid.rows);
   const sheetBuf = await readFile(inputPath);
   const metadata = await sharp(sheetBuf).metadata();
   if (!metadata.width || !metadata.height) {
     throw new Error("Unable to determine input image dimensions.");
   }
 
-  const sourceRects = computeGrid(metadata.width, metadata.height, grid);
-  const sliced = await sliceFrames(sheetBuf, sourceRects);
+  let grid = requestedGrid;
+  let sliceConfidence = 1;
+  let sourceRects;
+  let sliced;
+  if (sliceMode === "auto") {
+    const mattedSheet = await applyMatte(sheetBuf, matte);
+    const decoded = await sharp(mattedSheet)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const detected = detectFrameRects(
+      decoded.data,
+      { width: decoded.info.width, height: decoded.info.height },
+      { expectedCols: requestedGrid.cols, expectedRows: requestedGrid.rows }
+    );
+    if (detected.cols !== requestedGrid.cols || detected.rows !== requestedGrid.rows) {
+      process.stderr.write(
+        `Warning: detected ${detected.cols}x${detected.rows}, requested ${requestedGrid.cols}x${requestedGrid.rows}.\n`
+      );
+    }
+    if (detected.rects.length === 0) {
+      throw new Error("Automatic frame detection found no foreground frames.");
+    }
+    sourceRects = detected.rects;
+    sliceConfidence = detected.confidence;
+    grid = gridSpecSchema.parse({
+      ...requestedGrid,
+      cols: detected.cols,
+      rows: detected.rows
+    });
+    sliced = await sliceFrames(mattedSheet, sourceRects);
+  } else {
+    sourceRects = computeGrid(metadata.width, metadata.height, grid);
+    sliced = await sliceFrames(sheetBuf, sourceRects);
+  }
+  const flipRows = parseFlipRows(args["flip-rows"], grid.rows);
   const prepared = await Promise.all(
     sliced.map(async (buf, index) => {
       const row = Math.floor(index / grid.cols) + 1;
       const oriented = flipRows.has(row) ? await sharp(buf).flop().png().toBuffer() : buf;
-      const matted = await applyMatte(oriented, matte);
+      const matted = sliceMode === "auto" ? oriented : await applyMatte(oriented, matte);
       const analysis = await analyzeFrame(matted);
       return { buf: matted, ...analysis };
     })
@@ -132,6 +170,8 @@ async function main() {
       width: metadata.width,
       height: metadata.height
     },
+    sliceMode,
+    sliceConfidence,
     grid,
     canvas: normalized.canvas,
     matte,

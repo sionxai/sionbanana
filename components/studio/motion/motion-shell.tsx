@@ -19,7 +19,7 @@ type MotionProjectSummary = Pick<MotionProject, "id" | "name" | "createdAtIso"> 
 };
 
 type MotionProjectPatch = Partial<
-  Pick<MotionProject, "grid" | "matte" | "frames" | "animations">
+  Pick<MotionProject, "sliceMode" | "grid" | "matte" | "frames" | "animations">
 >;
 
 function responseReason(body: unknown, fallback: string): string {

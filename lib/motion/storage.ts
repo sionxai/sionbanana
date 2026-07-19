@@ -11,6 +11,7 @@ import {
   analyzeFrame,
   applyMatte,
   computeGrid,
+  detectFrameRects,
   normalizeFrames,
   packSheet,
   sliceFrames
@@ -25,7 +26,8 @@ import {
   type Frame,
   type GridSpec,
   type MatteSpec,
-  type MotionProject
+  type MotionProject,
+  type SliceMode
 } from "@/lib/motion/types";
 
 const PROJECT_ID_RE = /^[A-Za-z0-9-]+$/;
@@ -40,7 +42,7 @@ export type MotionProjectSummary = {
 };
 
 export type MotionProjectPatch = Partial<
-  Pick<MotionProject, "grid" | "matte" | "frames" | "animations">
+  Pick<MotionProject, "sliceMode" | "grid" | "matte" | "frames" | "animations">
 >;
 
 export class MotionStorageError extends Error {
@@ -206,6 +208,7 @@ async function buildArtifacts(input: {
   name: string;
   createdAtIso: string;
   raw: Buffer;
+  sliceMode: SliceMode;
   grid: GridSpec;
   matte: MatteSpec;
   controls: Frame[];
@@ -213,21 +216,49 @@ async function buildArtifacts(input: {
   animations: Animation[];
   animationsExplicit: boolean;
 }): Promise<BuildArtifacts> {
-  const grid = gridSpecSchema.parse(input.grid);
+  const requestedGrid = gridSpecSchema.parse(input.grid);
   const matte = withDefaultKeyColor(input.matte);
   const metadata = await sharp(input.raw).metadata();
   if (!metadata.width || !metadata.height) {
     throw new Error("Unable to determine raw sprite-sheet dimensions.");
   }
 
-  const sourceRects = computeGrid(metadata.width, metadata.height, grid);
+  let grid = requestedGrid;
+  let sliceConfidence = 1;
+  let sourceRects: Frame["source"][];
+  let sliced: Buffer[];
+  if (input.sliceMode === "auto") {
+    const mattedSheet = await applyMatte(input.raw, matte);
+    const decoded = await sharp(mattedSheet)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const detected = detectFrameRects(
+      decoded.data,
+      { width: decoded.info.width, height: decoded.info.height },
+      { expectedCols: requestedGrid.cols, expectedRows: requestedGrid.rows }
+    );
+    if (detected.rects.length === 0) {
+      throw new Error("Automatic frame detection found no foreground frames.");
+    }
+    sourceRects = detected.rects;
+    sliceConfidence = detected.confidence;
+    grid = gridSpecSchema.parse({
+      ...requestedGrid,
+      cols: detected.cols,
+      rows: detected.rows
+    });
+    sliced = await sliceFrames(mattedSheet, sourceRects);
+  } else {
+    sourceRects = computeGrid(metadata.width, metadata.height, grid);
+    sliced = await sliceFrames(input.raw, sourceRects);
+  }
   const controls = frameControls(input.controls, sourceRects.length, input.controlsExplicit);
-  const sliced = await sliceFrames(input.raw, sourceRects);
   const prepared = await Promise.all(
     sliced.map(async (buffer, index) => {
       const control = controls.get(index);
       const oriented = control?.flipX ? await sharp(buffer).flop().png().toBuffer() : buffer;
-      const matted = await applyMatte(oriented, matte);
+      const matted = input.sliceMode === "auto" ? oriented : await applyMatte(oriented, matte);
       const analysis = await analyzeFrame(matted);
       return { buf: matted, ...analysis };
     })
@@ -262,6 +293,8 @@ async function buildArtifacts(input: {
     name: input.name,
     createdAtIso: input.createdAtIso,
     sourceImage: { path: "raw.png", width: metadata.width, height: metadata.height },
+    sliceMode: input.sliceMode,
+    sliceConfidence,
     grid,
     canvas: normalized.canvas,
     matte,
@@ -398,6 +431,7 @@ async function createUniqueProjectDirectory(): Promise<{ id: string; directory: 
 export async function createProject(input: {
   name: string;
   sheetBuffer: Buffer;
+  sliceMode?: SliceMode;
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -411,26 +445,18 @@ export async function createProject(input: {
   const { id, directory } = await createUniqueProjectDirectory();
   try {
     await fs.writeFile(path.join(directory, "raw.png"), input.sheetBuffer, { flag: "wx" });
-    const frameCount = input.grid.cols * input.grid.rows;
-    const animations: Animation[] = [
-      {
-        name,
-        frameIndices: Array.from({ length: frameCount }, (_, index) => index),
-        fps: 12,
-        loop: "loop"
-      }
-    ];
     const artifacts = await buildArtifacts({
       id,
       name,
       createdAtIso: new Date().toISOString(),
       raw: input.sheetBuffer,
+      sliceMode: input.sliceMode ?? "auto",
       grid: input.grid,
       matte: input.matte,
       controls: [],
       controlsExplicit: false,
-      animations,
-      animationsExplicit: true
+      animations: [],
+      animationsExplicit: false
     });
     await installNewProject(directory, artifacts);
     return artifacts.project;
@@ -447,6 +473,7 @@ export async function rebuildProject(
   const current = await readProject(id);
   const directory = await safeExistingProjectDirectory(id);
   const raw = await fs.readFile(await safeProjectFile(directory, "raw.png", id));
+  const sliceMode = patch.sliceMode ?? current.sliceMode;
   const grid = gridSpecSchema.parse(patch.grid ?? current.grid);
   const matte = withDefaultKeyColor(matteSpecSchema.parse(patch.matte ?? current.matte));
   const controls = (patch.frames ?? current.frames).map(frame => frameSchema.parse(frame));
@@ -458,6 +485,7 @@ export async function rebuildProject(
     name: current.name,
     createdAtIso: current.createdAtIso,
     raw,
+    sliceMode,
     grid,
     matte,
     controls,

@@ -6,6 +6,7 @@ import { z } from "zod";
 export const remainderPolicyValues = ["distribute", "crop"] as const;
 export const matteModeValues = ["none", "keyColor", "edgeFlood"] as const;
 export const animationLoopValues = ["loop", "pingpong", "once"] as const;
+export const sliceModeValues = ["auto", "grid"] as const;
 
 const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
 
@@ -89,6 +90,8 @@ export const motionProjectSchema = z
     name: z.string().trim().min(1),
     createdAtIso: z.string().datetime(),
     sourceImage: sourceImageSchema,
+    sliceMode: z.enum(sliceModeValues),
+    sliceConfidence: z.number().finite().min(0).max(1).default(1),
     grid: gridSpecSchema,
     canvas: motionCanvasSchema,
     matte: matteSpecSchema,
@@ -105,7 +108,25 @@ export type MatteSpec = z.infer<typeof matteSpecSchema>;
 export type Frame = z.infer<typeof frameSchema>;
 export type Animation = z.infer<typeof animationSchema>;
 export type MotionProject = z.infer<typeof motionProjectSchema>;
+export type SliceMode = z.infer<typeof motionProjectSchema>["sliceMode"];
 
 export function parseMotionProject(input: unknown): MotionProject {
-  return motionProjectSchema.parse(input);
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return motionProjectSchema.parse(input);
+  }
+  const project = input as Record<string, unknown>;
+  const sliceMode =
+    !Object.prototype.hasOwnProperty.call(project, "sliceMode") || project.sliceMode === undefined
+      ? "grid"
+      : project.sliceMode;
+  const sliceConfidence =
+    !Object.prototype.hasOwnProperty.call(project, "sliceConfidence") ||
+    project.sliceConfidence === undefined
+      ? 1
+      : project.sliceConfidence;
+  return motionProjectSchema.parse({
+    ...project,
+    sliceMode,
+    sliceConfidence
+  });
 }
