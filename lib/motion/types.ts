@@ -41,9 +41,9 @@ export const matteSpecSchema = z
       .string()
       .regex(hexColorPattern, "keyColor must use #RRGGBB format.")
       .optional(),
-    tolerance: z.number().int().min(0).max(100).default(12),
+    tolerance: z.number().int().min(0).max(100).default(45),
     softness: z.number().int().min(0).max(10).default(2),
-    despill: z.boolean().default(true)
+    despill: z.boolean().default(false)
   })
   .strict();
 

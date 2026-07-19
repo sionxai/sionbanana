@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { POST as generateImage } from "@/app/api/generate/route";
 import { readImageById } from "@/lib/local/storage";
-import { buildSheetPrompt } from "@/lib/motion/prompt";
+import { buildSheetPrompt, type MotionActionPreset } from "@/lib/motion/prompt";
 import {
   createProject,
   listProjects,
@@ -18,9 +18,41 @@ export const dynamic = "force-dynamic";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_DATA_URL_CHARS = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 128;
+const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
+const MAX_REFERENCE_DATA_CHARS = Math.ceil((MAX_REFERENCE_BYTES * 4) / 3) + 1024;
+
+const actionSchema = z.enum(["walk", "run", "idle", "jump", "attack", "custom"]);
+const referenceObjectSchema = z
+  .object({
+    data: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional(),
+    mimeType: z.string().min(1).max(80).optional(),
+    url: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional()
+  })
+  .strict()
+  .refine(value => Boolean(value.data || value.url), {
+    message: "reference entry must include data or url"
+  });
+const referenceSourceSchema = z.union([
+  z.string().min(1).max(MAX_REFERENCE_DATA_CHARS),
+  referenceObjectSchema
+]);
 
 const sourceSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("generate"), prompt: z.string().trim().min(1).max(20_000) }).strict(),
+  z
+    .object({
+      type: z.literal("generate"),
+      prompt: z.string().trim().min(1).max(20_000),
+      action: actionSchema.optional()
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("reference"),
+      prompt: z.string().trim().min(1).max(20_000),
+      action: actionSchema.optional(),
+      referenceImage: referenceSourceSchema
+    })
+    .strict(),
   z.object({ type: z.literal("upload"), dataUrl: z.string().min(1).max(MAX_DATA_URL_CHARS) }).strict()
 ]);
 
@@ -116,9 +148,20 @@ async function generateSheet(
   request: NextRequest,
   prompt: string,
   cols: number,
-  rows: number
+  rows: number,
+  options: {
+    action?: MotionActionPreset;
+    referenceImage?: z.infer<typeof referenceSourceSchema>;
+  } = {}
 ): Promise<Buffer> {
-  const sheetPrompt = buildSheetPrompt({ description: prompt, cols, rows });
+  const hasReference = options.referenceImage !== undefined;
+  const sheetPrompt = buildSheetPrompt({
+    description: prompt,
+    cols,
+    rows,
+    hasReference,
+    action: options.action
+  });
   const headers = new Headers(request.headers);
   headers.set("content-type", "application/json");
   headers.delete("content-length");
@@ -128,7 +171,12 @@ async function generateSheet(
     body: JSON.stringify({
       prompt: sheetPrompt,
       mode: "create",
-      options: { outputMimeType: "image/png", format: "png", count: 1 }
+      options: {
+        outputMimeType: "image/png",
+        format: "png",
+        count: 1,
+        ...(hasReference ? { referenceImage: options.referenceImage } : {})
+      }
     })
   });
   const response = await generateImage(generateRequest);
@@ -177,10 +225,26 @@ export async function GET(): Promise<Response> {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const payload = createProjectSchema.parse(await readRequestJson(request));
-    const sheetBuffer =
-      payload.source.type === "upload"
-        ? await normalizeUpload(payload.source.dataUrl)
-        : await generateSheet(request, payload.source.prompt, payload.grid.cols, payload.grid.rows);
+    let sheetBuffer: Buffer;
+    if (payload.source.type === "upload") {
+      sheetBuffer = await normalizeUpload(payload.source.dataUrl);
+    } else if (payload.source.type === "reference") {
+      sheetBuffer = await generateSheet(
+        request,
+        payload.source.prompt,
+        payload.grid.cols,
+        payload.grid.rows,
+        { action: payload.source.action, referenceImage: payload.source.referenceImage }
+      );
+    } else {
+      sheetBuffer = await generateSheet(
+        request,
+        payload.source.prompt,
+        payload.grid.cols,
+        payload.grid.rows,
+        { action: payload.source.action }
+      );
+    }
     const matte = matteSpecSchema.parse(
       payload.matte
         ? {
@@ -189,7 +253,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               ? { keyColor: "#FF00FF" }
               : {})
           }
-        : { mode: "keyColor", keyColor: "#FF00FF", tolerance: 30, softness: 2, despill: true }
+        : { mode: "keyColor", keyColor: "#FF00FF", tolerance: 45, softness: 2, despill: true }
     );
     const project = await createProject({
       name: payload.name,

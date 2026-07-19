@@ -9,6 +9,7 @@ import {
   computeGrid,
   normalizeFrames
 } from "@/lib/motion/engine";
+import { matteSpecSchema } from "@/lib/motion/types";
 
 function assertNoOverlap(rects) {
   for (let first = 0; first < rects.length; first += 1) {
@@ -123,6 +124,90 @@ test("applyMatte edgeFlood removes connected white background but preserves encl
   assert.equal(alphaAt(0, 0), 0);
   assert.equal(alphaAt(3, 3), 255);
   assert.equal(alphaAt(5, 5), 255);
+});
+
+test("applyMatte magenta despill preserves peach skin pixels in the soft alpha band", async () => {
+  const input = await rgbaPng(5, 5, (data, set) => {
+    for (let y = 0; y < 5; y += 1) {
+      for (let x = 0; x < 5; x += 1) set(x, y, 255, 0, 255);
+    }
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 3; x += 1) set(x, y, 240, 190, 170);
+    }
+  });
+
+  const output = await applyMatte(input, {
+    mode: "keyColor",
+    keyColor: "#FF00FF",
+    tolerance: 45,
+    softness: 10,
+    despill: true
+  });
+  const { data } = await sharp(output).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const center = (2 * 5 + 2) * 4;
+  const actual = [data[center], data[center + 1], data[center + 2]];
+  const expected = [240, 190, 170];
+
+  assert.ok(data[center + 3] > 0 && data[center + 3] < 255);
+  assert.ok(actual[1] <= actual[0], `green ${actual[1]} must not exceed red ${actual[0]}`);
+  assert.ok(
+    actual.every((channel, index) => Math.abs(channel - expected[index]) <= 2),
+    `skin channel drift exceeded 2: ${actual.join(",")}`
+  );
+});
+
+test("applyMatte despill leaves fully opaque interior RGB byte-identical", async () => {
+  const input = await rgbaPng(3, 3, (data, set) => {
+    for (let y = 0; y < 3; y += 1) {
+      for (let x = 0; x < 3; x += 1) set(x, y, 255, 0, 255);
+    }
+    set(1, 1, 20, 80, 180);
+  });
+  const matte = {
+    mode: "keyColor",
+    keyColor: "#FF00FF",
+    tolerance: 45,
+    softness: 10
+  };
+
+  const [withDespill, withoutDespill] = await Promise.all([
+    applyMatte(input, { ...matte, despill: true }),
+    applyMatte(input, { ...matte, despill: false })
+  ]);
+  const [withData, withoutData] = await Promise.all([
+    sharp(withDespill).ensureAlpha().raw().toBuffer(),
+    sharp(withoutDespill).ensureAlpha().raw().toBuffer()
+  ]);
+  const center = (1 * 3 + 1) * 4;
+
+  assert.equal(withData[center + 3], 255);
+  assert.deepEqual(
+    [...withData.subarray(center, center + 3)],
+    [...withoutData.subarray(center, center + 3)]
+  );
+});
+
+test("applyMatte derives green despill from the key hue without changing red or blue", async () => {
+  const input = await rgbaPng(1, 1, (data, set) => set(0, 0, 60, 220, 80));
+  const output = await applyMatte(input, {
+    mode: "keyColor",
+    keyColor: "#00FF00",
+    tolerance: 20,
+    softness: 10,
+    despill: true
+  });
+  const data = await sharp(output).ensureAlpha().raw().toBuffer();
+
+  assert.ok(data[3] > 0 && data[3] < 255);
+  assert.equal(data[0], 60);
+  assert.ok(data[1] >= 80 && data[1] < 220);
+  assert.equal(data[2], 80);
+});
+
+test("matteSpecSchema defaults despill off and preserves explicit saved values", () => {
+  assert.equal(matteSpecSchema.parse({ mode: "none" }).despill, false);
+  assert.equal(matteSpecSchema.parse({ mode: "none", despill: true }).despill, true);
+  assert.equal(matteSpecSchema.parse({ mode: "none", despill: false }).despill, false);
 });
 
 test("normalizeFrames aligns three differently sized and positioned frames to one pivot", async () => {

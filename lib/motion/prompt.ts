@@ -1,17 +1,72 @@
 const DEFAULT_STYLE = "detailed hand-painted 2D game asset, clean crisp silhouette";
 
+export type MotionActionPreset = "walk" | "run" | "idle" | "jump" | "attack" | "custom";
+
+const ACTION_PHASES: Record<Exclude<MotionActionPreset, "custom">, readonly string[]> = {
+  walk: [
+    "contact pose with the leading heel touching down and the trailing toe extended",
+    "down pose as the body absorbs weight over the leading foot",
+    "passing pose with the rear foot moving past the planted leg",
+    "up pose with the body lifted and the next heel reaching forward"
+  ],
+  run: [
+    "run contact pose with one foot landing ahead of the body",
+    "compression pose as the landing leg absorbs the impact",
+    "passing pose as the free leg drives forward beneath the body",
+    "airborne pose with both feet clear of the ground"
+  ],
+  idle: [
+    "neutral idle pose at the top of a gentle breath",
+    "subtle settling pose as the torso begins to lower",
+    "lowest breathing pose with relaxed secondary motion",
+    "subtle rising pose returning toward neutral"
+  ],
+  jump: [
+    "anticipation crouch before takeoff",
+    "forceful takeoff with the body extending upward",
+    "airborne ascent approaching the apex",
+    "apex pose followed by the beginning of descent",
+    "descending pose preparing for ground contact",
+    "landing compression absorbing the impact",
+    "recovery pose rising back toward the starting stance"
+  ],
+  attack: [
+    "anticipation pose winding up the attack",
+    "early attack pose accelerating toward the target",
+    "impact pose at the strongest point of the strike",
+    "follow-through pose carrying the attack momentum",
+    "recovery pose returning toward the starting stance"
+  ]
+};
+
 export type BuildSheetPromptInput = {
   description: string;
   cols: number;
   rows: number;
   frames?: string[];
   style?: string;
+  hasReference?: boolean;
+  action?: MotionActionPreset;
 };
 
 function requirePositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new RangeError(`${name} must be a positive integer.`);
   }
+}
+
+function buildPresetSequence(action: Exclude<MotionActionPreset, "custom">, frameCount: number): string {
+  const phases = ACTION_PHASES[action];
+  const isCyclic = action === "walk" || action === "run" || action === "idle";
+  const descriptions = Array.from({ length: frameCount }, (_, index) => {
+    const phaseIndex = isCyclic
+      ? index % phases.length
+      : frameCount === 1
+        ? 0
+        : Math.round((index * (phases.length - 1)) / (frameCount - 1));
+    return `${index + 1}. ${phases[phaseIndex]}`;
+  });
+  return `Render this ${frameCount}-frame ${action} sequence in order: ${descriptions.join(" ")}`;
 }
 
 export function buildSheetPrompt(input: BuildSheetPromptInput): string {
@@ -36,17 +91,19 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
       return `${index + 1}. ${text}`;
     });
     sequence = `Render these ${frameCount} poses in order: ${descriptions.join(" ")}`;
+  } else if (input.action && input.action !== "custom") {
+    sequence = buildPresetSequence(input.action, frameCount);
   } else {
     sequence =
       `Render ${frameCount} consecutive frames of the described action in chronological order. ` +
       "The final frame must flow naturally back into the first frame as a seamless loop.";
   }
-  if (input.frames) {
+  if (input.frames || (input.action && input.action !== "custom")) {
     sequence += " The final frame must flow naturally back into the first frame as a seamless loop.";
   }
 
   const style = input.style?.trim() || DEFAULT_STYLE;
-  return [
+  const directives = [
     `Create a ${input.cols} columns by ${input.rows} rows (${input.cols}x${input.rows}) sprite sheet for: ${description}`,
     `Style: ${style}.`,
     `Background: use a perfectly flat, solid chroma-key magenta #FF00FF across the entire canvas. ` +
@@ -57,5 +114,11 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
     "Direction: every frame must face the same direction, with the head pointing right. Do not mirror any row or any frame.",
     sequence,
     "Identity: show the exact same subject in every frame, preserving colors, proportions, and size; only the pose may change."
-  ].join("\n");
+  ];
+  if (input.hasReference) {
+    directives.unshift(
+      "첨부한 참조 이미지의 캐릭터를 그대로 유지하라 — 동일한 얼굴·헤어·의상·체형·색상. 새로운 인물을 만들지 마라."
+    );
+  }
+  return directives.join("\n");
 }

@@ -186,22 +186,52 @@ function alphaFactor(distance: number, tolerance: number, softness: number): num
   return (distance - tolerance) / softness;
 }
 
+function deriveDespillWeights(key: [number, number, number]): [number, number, number] | null {
+  const neutral = Math.min(...key);
+  const chroma = key.map(channel => channel - neutral) as [number, number, number];
+  const peak = Math.max(...chroma);
+  if (peak === 0) return null;
+  return chroma.map(channel => channel / peak) as [number, number, number];
+}
+
 function applyPixelAlpha(
   data: Buffer,
   offset: number,
   factor: number,
-  key: [number, number, number],
-  despill: boolean
+  despillWeights: [number, number, number] | null
 ): void {
   const originalAlpha = data[offset + 3];
-  if (despill && factor > 0 && factor < 1) {
+  const resultAlpha = Math.round(originalAlpha * factor);
+  if (despillWeights && resultAlpha > 0 && resultAlpha < 255) {
+    let baseline = 0;
     for (let channel = 0; channel < 3; channel += 1) {
-      data[offset + channel] = Math.round(
-        Math.max(0, Math.min(255, (data[offset + channel] - key[channel] * (1 - factor)) / factor))
-      );
+      if (despillWeights[channel] === 0) {
+        baseline = Math.max(baseline, data[offset + channel]);
+      }
+    }
+
+    let spillExcess = Number.POSITIVE_INFINITY;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const weight = despillWeights[channel];
+      if (weight > 0) {
+        spillExcess = Math.min(spillExcess, (data[offset + channel] - baseline) / weight);
+      }
+    }
+
+    const spillStrength = 1 - factor;
+    if (spillExcess > 0 && spillStrength > 0) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        const weight = despillWeights[channel];
+        if (weight > 0) {
+          data[offset + channel] = Math.max(
+            baseline,
+            Math.min(255, Math.round(data[offset + channel] - spillExcess * weight * spillStrength))
+          );
+        }
+      }
     }
   }
-  data[offset + 3] = Math.round(originalAlpha * factor);
+  data[offset + 3] = resultAlpha;
 }
 
 export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Buffer> {
@@ -212,8 +242,9 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
 
   const tolerance = matte.tolerance ?? 12;
   const softness = matte.softness ?? 2;
-  const despill = matte.despill ?? true;
+  const despill = matte.despill ?? false;
   const key = matte.keyColor ? parseHexColor(matte.keyColor) : inferEdgeColor(image);
+  const despillWeights = despill ? deriveDespillWeights(key) : null;
 
   if (matte.mode === "keyColor") {
     if (!matte.keyColor) {
@@ -221,7 +252,7 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
     }
     for (let offset = 0; offset < image.data.length; offset += 4) {
       const factor = alphaFactor(colorDistancePercent(image.data, offset, key), tolerance, softness);
-      applyPixelAlpha(image.data, offset, factor, key, despill);
+      applyPixelAlpha(image.data, offset, factor, despillWeights);
     }
     return encodeRgba(image);
   }
@@ -257,7 +288,7 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
     const y = Math.floor(index / image.width);
     const offset = index * 4;
     const factor = alphaFactor(colorDistancePercent(image.data, offset, key), tolerance, softness);
-    applyPixelAlpha(image.data, offset, factor, key, despill);
+    applyPixelAlpha(image.data, offset, factor, despillWeights);
 
     if (x > 0) enqueue(x - 1, y);
     if (x + 1 < image.width) enqueue(x + 1, y);

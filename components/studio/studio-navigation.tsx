@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BookOpen, Film, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navItems = [
+const navItems: Array<{ href: string; label: string; Icon?: LucideIcon }> = [
   { href: "/studio", label: "단일 생성" },
   { href: "/studio/variations", label: "변형 생성" },
   { href: "/studio/batch", label: "배치 생성" },
   { href: "/studio/presets", label: "프리셋" },
   { href: "/studio/story", label: "스토리" },
+  { href: "/studio/webtoon", label: "웹툰 생성", Icon: BookOpen },
+  { href: "/studio/motion", label: "모션에셋", Icon: Film },
   { href: "/studio/characters", label: "캐릭터" },
   { href: "/studio/history", label: "생성기록" },
   { href: "/usage", label: "사용량" }
@@ -54,16 +57,21 @@ export function StudioNavigation() {
       <div className="mx-auto flex max-w-6xl items-center justify-around px-4 py-2">
         {navItems.map(item => {
           const isActive = pathname === item.href || (pathname?.startsWith(item.href) && item.href !== "/studio");
+          const Icon = item.Icon;
           return (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex flex-col items-center gap-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <span>{item.label}</span>
+              <span className="inline-flex items-center gap-1">
+                {Icon ? <Icon className="h-4 w-4" aria-hidden /> : null}
+                {item.label}
+              </span>
               {item.href === "/usage" && authStatus !== "unknown" ? (
                 <span
                   className={cn(
