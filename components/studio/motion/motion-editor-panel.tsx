@@ -54,6 +54,9 @@ export function MotionEditorPanel({
   const [gridCols, setGridCols] = useState(project.grid.cols);
   const [gridRows, setGridRows] = useState(project.grid.rows);
   const [mattePending, setMattePending] = useState(false);
+  const [includeGif, setIncludeGif] = useState(true);
+  const [gifFps, setGifFps] = useState(project.animations[0]?.fps ?? 12);
+  const [isExporting, setIsExporting] = useState(false);
   const matteDraftRef = useRef(matteDraft);
   const matteDirtyRef = useRef(false);
   const matteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,6 +73,10 @@ export function MotionEditorPanel({
   useEffect(() => {
     isPatchingRef.current = isPatching;
   }, [isPatching]);
+
+  useEffect(() => {
+    setGifFps(project.animations[0]?.fps ?? 12);
+  }, [project.animations, project.id]);
 
   const setMatteDirty = useCallback((dirty: boolean) => {
     if (matteDirtyRef.current === dirty) return;
@@ -243,6 +250,50 @@ export function MotionEditorPanel({
       if (!mountedRef.current) return;
       if (includeMatte) setMatteDirty(true);
       toast.error(error instanceof Error ? error.message : "프레임을 재빌드하지 못했습니다.");
+    }
+  };
+
+  const exportAssets = async () => {
+    if (isExporting) return;
+    if (includeGif && (!Number.isSafeInteger(gifFps) || gifFps < 1)) {
+      toast.error("GIF fps는 1 이상의 정수여야 합니다.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const query = new URLSearchParams({ gif: includeGif ? "1" : "0" });
+      if (includeGif) query.set("fps", String(gifFps));
+      const response = await fetch(
+        `/api/motion/projects/${encodeURIComponent(project.id)}/export?${query.toString()}`
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+        throw new Error(
+          typeof payload?.reason === "string" ? payload.reason : "에셋을 내보내지 못했습니다."
+        );
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      try {
+        const disposition = response.headers.get("Content-Disposition") ?? "";
+        const fileName = disposition.match(/filename="([A-Za-z0-9.-]+)"/)?.[1];
+        const anchor = document.createElement("a");
+        anchor.href = downloadUrl;
+        anchor.download = fileName ?? `${project.id}-motion.zip`;
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      }
+      toast.success("모션 에셋 ZIP을 준비했습니다.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "에셋을 내보내지 못했습니다.");
+    } finally {
+      if (mountedRef.current) setIsExporting(false);
     }
   };
 
@@ -546,6 +597,52 @@ export function MotionEditorPanel({
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">에셋 내보내기</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="motion-export-gif">GIF 포함</Label>
+              <p className="text-xs text-muted-foreground">미리보기·공유용 GIF를 함께 만듭니다.</p>
+            </div>
+            <Switch
+              id="motion-export-gif"
+              checked={includeGif}
+              disabled={disabled || isExporting}
+              onCheckedChange={setIncludeGif}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="motion-export-fps">GIF fps</Label>
+            <Input
+              id="motion-export-fps"
+              type="number"
+              min={1}
+              step={1}
+              value={gifFps}
+              disabled={disabled || isExporting || !includeGif}
+              onChange={event => setGifFps(Number(event.target.value))}
+            />
+          </div>
+          <Button
+            className="w-full"
+            disabled={disabled || isExporting}
+            onClick={() => void exportAssets()}
+          >
+            {isExporting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                ZIP 준비 중
+              </>
+            ) : (
+              "에셋 내보내기(ZIP)"
+            )}
+          </Button>
         </CardContent>
       </Card>
     </div>
