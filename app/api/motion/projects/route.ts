@@ -11,7 +11,12 @@ import {
   listProjects,
   MotionStorageError
 } from "@/lib/motion/storage";
-import { gridSpecSchema, matteSpecSchema, sliceModeValues } from "@/lib/motion/types";
+import {
+  gridSpecSchema,
+  matteSpecSchema,
+  normalizeScaleValues,
+  sliceModeValues
+} from "@/lib/motion/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +65,7 @@ const createProjectSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     sliceMode: z.enum(sliceModeValues).optional(),
+    normalizeScale: z.enum(normalizeScaleValues).optional(),
     grid: gridSpecSchema,
     matte: matteSpecSchema.optional(),
     source: sourceSchema
@@ -260,6 +266,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       name: payload.name,
       sheetBuffer,
       sliceMode: payload.sliceMode ?? "auto",
+      normalizeScale: payload.normalizeScale ?? "area",
       grid: payload.grid,
       matte
     });

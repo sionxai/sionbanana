@@ -16,7 +16,7 @@ import {
   normalizeFrames
 } from "@/lib/motion/engine";
 import { createProject, rebuildProject } from "@/lib/motion/storage";
-import { matteSpecSchema, parseMotionProject } from "@/lib/motion/types";
+import { matteSpecSchema, motionProjectSchema, parseMotionProject } from "@/lib/motion/types";
 
 let routeImportHooksRegistered = false;
 
@@ -111,6 +111,31 @@ async function matteToRaw(input) {
   });
   const decoded = await sharp(matted).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { data: decoded.data, width: decoded.info.width, height: decoded.info.height };
+}
+
+async function alphaBounds(input, threshold = 8) {
+  const decoded = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let minX = decoded.info.width;
+  let minY = decoded.info.height;
+  let maxX = -1;
+  let maxY = -1;
+  let area = 0;
+  for (let y = 0; y < decoded.info.height; y += 1) {
+    for (let x = 0; x < decoded.info.width; x += 1) {
+      const alpha = decoded.data[(y * decoded.info.width + x) * decoded.info.channels + 3];
+      if (alpha <= threshold) continue;
+      area += 1;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  return {
+    area,
+    width: maxX < 0 ? 0 : maxX - minX + 1,
+    height: maxY < 0 ? 0 : maxY - minY + 1
+  };
 }
 
 test("computeGrid distributes 1774x887 remainder pixels without gaps or overlap", () => {
@@ -269,16 +294,40 @@ test("parseMotionProject treats projects without slicing fields as legacy grid m
 
   assert.equal(project.sliceMode, "grid");
   assert.equal(project.sliceConfidence, 1);
+  assert.equal(project.normalizeScale, "none");
+  assert.equal(
+    motionProjectSchema.parse({ ...input, sliceMode: "auto" }).normalizeScale,
+    "area"
+  );
   assert.equal(parseMotionProject({ ...input, sliceMode: undefined }).sliceMode, "grid");
   assert.equal(
     parseMotionProject({ ...input, sliceConfidence: undefined }).sliceConfidence,
     1
   );
+  assert.equal(
+    parseMotionProject({ ...input, normalizeScale: undefined }).normalizeScale,
+    "none"
+  );
+  assert.equal(
+    parseMotionProject({
+      ...input,
+      frames: [
+        {
+          index: 0,
+          source: { x: 0, y: 0, w: 10, h: 10 },
+          trim: { x: 0, y: 0, w: 10, h: 10 },
+          pivot: { x: 5, y: 9 }
+        }
+      ]
+    }).frames[0].appliedScale,
+    1
+  );
   assert.throws(() => parseMotionProject({ ...input, sliceMode: null }));
   assert.throws(() => parseMotionProject({ ...input, sliceConfidence: null }));
+  assert.throws(() => parseMotionProject({ ...input, normalizeScale: null }));
 });
 
-test("new projects default to auto slicing and rebuild patches preserve the mode", async t => {
+test("new projects default to auto slicing and area normalization while rebuild patches preserve both", async t => {
   await useTempMotionData(t, "sionbanana-motion-slice-default-");
   const sheetBuffer = await twoFrameSheet();
   const project = await createProject({
@@ -294,14 +343,16 @@ test("new projects default to auto slicing and rebuild patches preserve the mode
     }
   });
   assert.equal(project.sliceMode, "auto");
+  assert.equal(project.normalizeScale, "area");
 
   const rebuilt = await rebuildProject(project.id, {
     matte: { ...project.matte, tolerance: 1 }
   });
   assert.equal(rebuilt.sliceMode, "auto");
+  assert.equal(rebuilt.normalizeScale, "area");
 });
 
-test("motion projects POST defaults an omitted sliceMode to auto", async t => {
+test("motion projects POST defaults omitted slicing and normalization modes", async t => {
   await useTempMotionData(t, "sionbanana-motion-post-default-");
   const { POST } = await loadMotionRouteHandlers();
   const sheetBuffer = await twoFrameSheet();
@@ -331,6 +382,7 @@ test("motion projects POST defaults an omitted sliceMode to auto", async t => {
   assert.equal(response.status, 201);
   assert.equal(body.ok, true);
   assert.equal(body.project.sliceMode, "auto");
+  assert.equal(body.project.normalizeScale, "area");
 });
 
 test("motion project PATCH preserves grid sliceMode when the body omits sliceMode", async t => {
@@ -339,6 +391,7 @@ test("motion project PATCH preserves grid sliceMode when the body omits sliceMod
     name: "PATCH grid preserve",
     sheetBuffer: await twoFrameSheet(),
     sliceMode: "grid",
+    normalizeScale: "area",
     grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
     matte: {
       mode: "keyColor",
@@ -362,6 +415,7 @@ test("motion project PATCH preserves grid sliceMode when the body omits sliceMod
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.project.sliceMode, "grid");
+  assert.equal(body.project.normalizeScale, "area");
 });
 
 test("analyzeFrame bases pivot on the main silhouette instead of corner noise", async () => {
@@ -511,5 +565,130 @@ test("normalizeFrames aligns three differently sized and positioned frames to on
     assert.ok(frame.trim.x >= 2 && frame.trim.y >= 2);
     assert.ok(frame.trim.x + frame.trim.w <= normalized.canvas.w - 2);
     assert.ok(frame.trim.y + frame.trim.h <= normalized.canvas.h - 2);
+  }
+});
+
+test("normalizeFrames area normalization keeps 90%, 100%, and 110% silhouette areas within 2%", async () => {
+  const heights = [90, 100, 110];
+  const inputs = await Promise.all(
+    heights.map(height =>
+      rgbaPng(90, 130, (data, set) => {
+        const width = Math.round(height * 0.6);
+        const left = Math.floor((90 - width) / 2);
+        const top = 130 - height - 10;
+        for (let y = top; y < top + height; y += 1) {
+          for (let x = left; x < left + width; x += 1) set(x, y, 20, 80, 180);
+        }
+      })
+    )
+  );
+
+  const normalized = await normalizeFrames(inputs, { normalizeScale: "area" });
+  const bounds = await Promise.all(normalized.frames.map(frame => alphaBounds(frame.buf)));
+  const normalizedAreas = bounds.map(bound => bound.area);
+  const average = normalizedAreas.reduce((sum, area) => sum + area, 0) / bounds.length;
+  const maximumDeviation = Math.max(
+    ...normalizedAreas.map(area => Math.abs(area - average) / average)
+  );
+
+  assert.ok(
+    maximumDeviation <= 0.02,
+    `normalized area deviation ${maximumDeviation * 100}% exceeds 2%: ${normalizedAreas.join(",")}`
+  );
+});
+
+test("normalizeFrames scale normalization preserves one canvas pivot y", async () => {
+  const inputs = await Promise.all(
+    [36, 44, 52].map((height, index) =>
+      rgbaPng(70, 70, (data, set) => {
+        const top = 62 - height;
+        for (let y = top; y < 62; y += 1) {
+          for (let x = 12 + index; x < 42 + index; x += 1) set(x, y, 30, 90, 180);
+        }
+      })
+    )
+  );
+
+  const normalized = await normalizeFrames(inputs, { normalizeScale: "height" });
+  assert.equal(new Set(normalized.frames.map(frame => frame.pivot.y)).size, 1);
+});
+
+test("normalizeFrames scaleClamp limits an outlier three times the median height", async () => {
+  const inputs = await Promise.all(
+    [30, 30, 90].map(height =>
+      rgbaPng(100, 100, (data, set) => {
+        for (let y = 5; y < 5 + height; y += 1) {
+          for (let x = 30; x < 60; x += 1) set(x, y, 30, 90, 180);
+        }
+      })
+    )
+  );
+
+  const normalized = await normalizeFrames(inputs, {
+    normalizeScale: "height",
+    scaleClamp: 0.25
+  });
+  assert.ok(normalized.frames.every(frame => frame.appliedScale >= 0.75));
+  assert.ok(normalized.frames.every(frame => frame.appliedScale <= 1.25));
+  assert.equal(normalized.frames[2].appliedScale, 0.75);
+});
+
+test('normalizeFrames "none" preserves legacy geometry and pixels', async () => {
+  const inputs = await Promise.all([
+    rgbaPng(22, 20, (data, set) => {
+      for (let y = 4; y <= 15; y += 1) for (let x = 4; x <= 12; x += 1) set(x, y, 20, 80, 180);
+    }),
+    rgbaPng(28, 24, (data, set) => {
+      for (let y = 2; y <= 19; y += 1) for (let x = 10; x <= 22; x += 1) set(x, y, 20, 80, 180);
+    })
+  ]);
+  const analyses = await Promise.all(inputs.map(input => analyzeFrame(input)));
+  const minLeft = Math.min(...analyses.map(frame => frame.trim.x - frame.pivot.x));
+  const minTop = Math.min(...analyses.map(frame => frame.trim.y - frame.pivot.y));
+  const maxRight = Math.max(
+    ...analyses.map(frame => frame.trim.x + frame.trim.w - frame.pivot.x)
+  );
+  const maxBottom = Math.max(
+    ...analyses.map(frame => frame.trim.y + frame.trim.h - frame.pivot.y)
+  );
+  const expectedCanvas = { w: maxRight - minLeft + 4, h: maxBottom - minTop + 4 };
+  const expectedPivot = { x: 2 - minLeft, y: 2 - minTop };
+  const normalized = await normalizeFrames(inputs, { normalizeScale: "none" });
+
+  assert.deepEqual(normalized.canvas, expectedCanvas);
+  for (let index = 0; index < normalized.frames.length; index += 1) {
+    const frame = normalized.frames[index];
+    const analysis = analyses[index];
+    const expectedTrim = {
+      x: expectedPivot.x + analysis.trim.x - analysis.pivot.x,
+      y: expectedPivot.y + analysis.trim.y - analysis.pivot.y,
+      w: analysis.trim.w,
+      h: analysis.trim.h
+    };
+    const cropped = await sharp(inputs[index])
+      .extract({
+        left: analysis.trim.x,
+        top: analysis.trim.y,
+        width: analysis.trim.w,
+        height: analysis.trim.h
+      })
+      .png()
+      .toBuffer();
+    const expectedBuffer = await sharp({
+      create: {
+        width: expectedCanvas.w,
+        height: expectedCanvas.h,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      }
+    })
+      .composite([{ input: cropped, left: expectedTrim.x, top: expectedTrim.y }])
+      .png()
+      .toBuffer();
+
+    assert.deepEqual(frame.trim, expectedTrim);
+    assert.deepEqual(frame.pivot, expectedPivot);
+    assert.equal(frame.appliedScale, 1);
+    assert.deepEqual(frame.buf, expectedBuffer);
   }
 });

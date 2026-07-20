@@ -27,10 +27,13 @@ export type NormalizeFrameInput = {
 
 export type NormalizedFrame = FrameAnalysis & {
   buf: Buffer;
+  appliedScale: number;
 };
 
 export type NormalizeOptions = {
   margin?: number;
+  normalizeScale?: "none" | "height" | "area";
+  scaleClamp?: number;
 };
 
 export type PackOptions = {
@@ -568,6 +571,14 @@ export async function normalizeFrames(
   }
   const margin = opts.margin ?? 2;
   assertNonnegativeInteger(margin, "opts.margin");
+  const normalizeScale = opts.normalizeScale ?? "height";
+  if (normalizeScale !== "none" && normalizeScale !== "height" && normalizeScale !== "area") {
+    throw new RangeError('opts.normalizeScale must be "none", "height", or "area".');
+  }
+  const scaleClamp = opts.scaleClamp ?? 0.25;
+  if (!Number.isFinite(scaleClamp) || scaleClamp < 0 || scaleClamp >= 1) {
+    throw new RangeError("opts.scaleClamp must be between 0 (inclusive) and 1 (exclusive).");
+  }
 
   const analyzed = await Promise.all(
     frames.map(async frame => {
@@ -581,16 +592,64 @@ export async function normalizeFrames(
     })
   );
 
+  const metrics = await Promise.all(
+    analyzed.map(async frame => {
+      if (frame.trim.w === 0 || frame.trim.h === 0) return 0;
+      if (normalizeScale === "none") return 1;
+      if (normalizeScale === "height") return frame.trim.h;
+
+      const decoded = await sharp(frame.buf)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      let area = 0;
+      for (let offset = 3; offset < decoded.data.length; offset += decoded.info.channels) {
+        if (decoded.data[offset] > ALPHA_THRESHOLD) area += 1;
+      }
+      return Math.sqrt(area);
+    })
+  );
+  const positiveMetrics = metrics.filter(metric => metric > 0).sort((a, b) => a - b);
+  const middle = Math.floor(positiveMetrics.length / 2);
+  const referenceMetric =
+    positiveMetrics.length === 0
+      ? 0
+      : positiveMetrics.length % 2 === 0
+        ? (positiveMetrics[middle - 1] + positiveMetrics[middle]) / 2
+        : positiveMetrics[middle];
+  const scaled = analyzed.map((frame, index) => {
+    const metric = metrics[index];
+    const requestedScale =
+      normalizeScale === "none" || metric <= 0 || referenceMetric <= 0
+        ? 1
+        : referenceMetric / metric;
+    const appliedScale = Math.min(1 + scaleClamp, Math.max(1 - scaleClamp, requestedScale));
+    const width =
+      frame.trim.w === 0 ? 0 : Math.max(1, Math.round(frame.trim.w * appliedScale));
+    const height =
+      frame.trim.h === 0 ? 0 : Math.max(1, Math.round(frame.trim.h * appliedScale));
+    return {
+      ...frame,
+      appliedScale,
+      width,
+      height,
+      pivotOffset: {
+        x: Math.round((frame.pivot.x - frame.trim.x) * appliedScale),
+        y: Math.round((frame.pivot.y - frame.trim.y) * appliedScale)
+      }
+    };
+  });
+
   let minLeft = Infinity;
   let minTop = Infinity;
   let maxRight = -Infinity;
   let maxBottom = -Infinity;
-  for (const frame of analyzed) {
+  for (const frame of scaled) {
     if (frame.trim.w === 0 || frame.trim.h === 0) continue;
-    minLeft = Math.min(minLeft, frame.trim.x - frame.pivot.x);
-    minTop = Math.min(minTop, frame.trim.y - frame.pivot.y);
-    maxRight = Math.max(maxRight, frame.trim.x + frame.trim.w - frame.pivot.x);
-    maxBottom = Math.max(maxBottom, frame.trim.y + frame.trim.h - frame.pivot.y);
+    minLeft = Math.min(minLeft, -frame.pivotOffset.x);
+    minTop = Math.min(minTop, -frame.pivotOffset.y);
+    maxRight = Math.max(maxRight, frame.width - frame.pivotOffset.x);
+    maxBottom = Math.max(maxBottom, frame.height - frame.pivotOffset.y);
   }
 
   if (!Number.isFinite(minLeft)) {
@@ -603,12 +662,12 @@ export async function normalizeFrames(
   const sharedPivot = { x: margin - minLeft, y: margin - minTop };
 
   const normalized = await Promise.all(
-    analyzed.map(async frame => {
+    scaled.map(async frame => {
       const trim = {
-        x: sharedPivot.x + frame.trim.x - frame.pivot.x,
-        y: sharedPivot.y + frame.trim.y - frame.pivot.y,
-        w: frame.trim.w,
-        h: frame.trim.h
+        x: sharedPivot.x - frame.pivotOffset.x,
+        y: sharedPivot.y - frame.pivotOffset.y,
+        w: frame.width,
+        h: frame.height
       };
       const base = sharp({
         create: {
@@ -623,14 +682,27 @@ export async function normalizeFrames(
       if (frame.trim.w === 0 || frame.trim.h === 0) {
         buf = await base.png().toBuffer();
       } else {
-        const cropped = await sharp(frame.buf)
-          .extract({ left: frame.trim.x, top: frame.trim.y, width: frame.trim.w, height: frame.trim.h })
+        let croppedImage = sharp(frame.buf).extract({
+          left: frame.trim.x,
+          top: frame.trim.y,
+          width: frame.trim.w,
+          height: frame.trim.h
+        });
+        if (frame.appliedScale !== 1) {
+          croppedImage = croppedImage.resize({
+            width: frame.width,
+            height: frame.height,
+            fit: "fill",
+            kernel: sharp.kernel.lanczos3
+          });
+        }
+        const cropped = await croppedImage
           .png()
           .toBuffer();
         buf = await base.composite([{ input: cropped, left: trim.x, top: trim.y }]).png().toBuffer();
       }
 
-      return { buf, trim, pivot: { ...sharedPivot } };
+      return { buf, trim, pivot: { ...sharedPivot }, appliedScale: frame.appliedScale };
     })
   );
 

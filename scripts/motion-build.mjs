@@ -96,6 +96,10 @@ async function main() {
   if (sliceMode !== "auto" && sliceMode !== "grid") {
     throw new Error("--slice must be auto or grid.");
   }
+  const normalizeScale = args.scale ?? "area";
+  if (normalizeScale !== "none" && normalizeScale !== "height" && normalizeScale !== "area") {
+    throw new Error("--scale must be none, height, or area.");
+  }
   const mode = args.matte ?? "edgeFlood";
   const matte = matteSpecSchema.parse({
     mode,
@@ -153,7 +157,7 @@ async function main() {
       return { buf: matted, ...analysis };
     })
   );
-  const normalized = await normalizeFrames(prepared);
+  const normalized = await normalizeFrames(prepared, { normalizeScale });
   const packed = await packSheet(normalized.frames, { cols: grid.cols });
   const packedMetadata = await sharp(packed.buf).metadata();
   if (!packedMetadata.width || !packedMetadata.height) {
@@ -172,6 +176,7 @@ async function main() {
     },
     sliceMode,
     sliceConfidence,
+    normalizeScale,
     grid,
     canvas: normalized.canvas,
     matte,
@@ -180,6 +185,7 @@ async function main() {
       source: sourceRects[index],
       trim: frame.trim,
       pivot: frame.pivot,
+      appliedScale: frame.appliedScale,
       flipX: flipRows.has(Math.floor(index / grid.cols) + 1),
       excluded: false,
       durationMs: null

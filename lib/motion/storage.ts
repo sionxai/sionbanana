@@ -27,6 +27,7 @@ import {
   type GridSpec,
   type MatteSpec,
   type MotionProject,
+  type NormalizeScale,
   type SliceMode
 } from "@/lib/motion/types";
 
@@ -42,7 +43,10 @@ export type MotionProjectSummary = {
 };
 
 export type MotionProjectPatch = Partial<
-  Pick<MotionProject, "sliceMode" | "grid" | "matte" | "frames" | "animations">
+  Pick<
+    MotionProject,
+    "sliceMode" | "normalizeScale" | "grid" | "matte" | "frames" | "animations"
+  >
 >;
 
 export class MotionStorageError extends Error {
@@ -209,6 +213,7 @@ async function buildArtifacts(input: {
   createdAtIso: string;
   raw: Buffer;
   sliceMode: SliceMode;
+  normalizeScale: NormalizeScale;
   grid: GridSpec;
   matte: MatteSpec;
   controls: Frame[];
@@ -263,7 +268,7 @@ async function buildArtifacts(input: {
       return { buf: matted, ...analysis };
     })
   );
-  const normalized = await normalizeFrames(prepared);
+  const normalized = await normalizeFrames(prepared, { normalizeScale: input.normalizeScale });
   const packed = await packSheet(normalized.frames, { cols: grid.cols });
   const packedMetadata = await sharp(packed.buf).metadata();
   if (!packedMetadata.width || !packedMetadata.height) {
@@ -277,6 +282,7 @@ async function buildArtifacts(input: {
       source: sourceRects[index],
       trim: frame.trim,
       pivot: frame.pivot,
+      appliedScale: frame.appliedScale,
       flipX: control?.flipX ?? false,
       excluded: control?.excluded ?? false,
       durationMs: control?.durationMs ?? null
@@ -295,6 +301,7 @@ async function buildArtifacts(input: {
     sourceImage: { path: "raw.png", width: metadata.width, height: metadata.height },
     sliceMode: input.sliceMode,
     sliceConfidence,
+    normalizeScale: input.normalizeScale,
     grid,
     canvas: normalized.canvas,
     matte,
@@ -432,6 +439,7 @@ export async function createProject(input: {
   name: string;
   sheetBuffer: Buffer;
   sliceMode?: SliceMode;
+  normalizeScale?: NormalizeScale;
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -451,6 +459,7 @@ export async function createProject(input: {
       createdAtIso: new Date().toISOString(),
       raw: input.sheetBuffer,
       sliceMode: input.sliceMode ?? "auto",
+      normalizeScale: input.normalizeScale ?? "area",
       grid: input.grid,
       matte: input.matte,
       controls: [],
@@ -474,6 +483,7 @@ export async function rebuildProject(
   const directory = await safeExistingProjectDirectory(id);
   const raw = await fs.readFile(await safeProjectFile(directory, "raw.png", id));
   const sliceMode = patch.sliceMode ?? current.sliceMode;
+  const normalizeScale = patch.normalizeScale ?? current.normalizeScale;
   const grid = gridSpecSchema.parse(patch.grid ?? current.grid);
   const matte = withDefaultKeyColor(matteSpecSchema.parse(patch.matte ?? current.matte));
   const controls = (patch.frames ?? current.frames).map(frame => frameSchema.parse(frame));
@@ -486,6 +496,7 @@ export async function rebuildProject(
     createdAtIso: current.createdAtIso,
     raw,
     sliceMode,
+    normalizeScale,
     grid,
     matte,
     controls,

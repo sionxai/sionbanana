@@ -7,6 +7,7 @@ export const remainderPolicyValues = ["distribute", "crop"] as const;
 export const matteModeValues = ["none", "keyColor", "edgeFlood"] as const;
 export const animationLoopValues = ["loop", "pingpong", "once"] as const;
 export const sliceModeValues = ["auto", "grid"] as const;
+export const normalizeScaleValues = ["none", "height", "area"] as const;
 
 const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
 
@@ -54,6 +55,7 @@ export const frameSchema = z
     source: frameRectSchema,
     trim: frameRectSchema,
     pivot: pivotSchema,
+    appliedScale: z.number().finite().positive().default(1),
     flipX: z.boolean().default(false),
     excluded: z.boolean().default(false),
     durationMs: z.number().int().positive().nullable().default(null)
@@ -92,6 +94,7 @@ export const motionProjectSchema = z
     sourceImage: sourceImageSchema,
     sliceMode: z.enum(sliceModeValues),
     sliceConfidence: z.number().finite().min(0).max(1).default(1),
+    normalizeScale: z.enum(normalizeScaleValues).default("area"),
     grid: gridSpecSchema,
     canvas: motionCanvasSchema,
     matte: matteSpecSchema,
@@ -109,6 +112,7 @@ export type Frame = z.infer<typeof frameSchema>;
 export type Animation = z.infer<typeof animationSchema>;
 export type MotionProject = z.infer<typeof motionProjectSchema>;
 export type SliceMode = z.infer<typeof motionProjectSchema>["sliceMode"];
+export type NormalizeScale = z.infer<typeof motionProjectSchema>["normalizeScale"];
 
 export function parseMotionProject(input: unknown): MotionProject {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -124,9 +128,15 @@ export function parseMotionProject(input: unknown): MotionProject {
     project.sliceConfidence === undefined
       ? 1
       : project.sliceConfidence;
+  const normalizeScale =
+    !Object.prototype.hasOwnProperty.call(project, "normalizeScale") ||
+    project.normalizeScale === undefined
+      ? "none"
+      : project.normalizeScale;
   return motionProjectSchema.parse({
     ...project,
     sliceMode,
-    sliceConfidence
+    sliceConfidence,
+    normalizeScale
   });
 }

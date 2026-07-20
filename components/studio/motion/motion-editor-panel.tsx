@@ -27,6 +27,8 @@ type MotionEditorPanelProps = {
   ) => Promise<MotionProject>;
 };
 
+type EditorProjectPatch = Parameters<MotionEditorPanelProps["updateProject"]>[0];
+
 const SLIDER_KEYS = new Set([
   "ArrowLeft",
   "ArrowRight",
@@ -231,6 +233,27 @@ export function MotionEditorPanel({
       if (!mountedRef.current) return;
       if (includeMatte) setMatteDirty(true);
       toast.error(error instanceof Error ? error.message : "슬라이싱 모드를 변경하지 못했습니다.");
+    }
+  };
+
+  const commitNormalizeScale = async (normalizeScale: MotionProject["normalizeScale"]) => {
+    if (normalizeScale === project.normalizeScale) return;
+    const includeMatte = matteDirtyRef.current;
+    clearMatteTimer();
+    if (includeMatte) setMatteDirty(false);
+    const patch: EditorProjectPatch & Pick<MotionProject, "normalizeScale"> = {
+      normalizeScale,
+      sliceMode: project.sliceMode,
+      ...(includeMatte ? { matte: matteDraftRef.current } : {})
+    };
+    try {
+      await updateProject(patch);
+      if (!mountedRef.current) return;
+      toast.success("크기 정규화 기준을 적용했습니다.");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      if (includeMatte) setMatteDirty(true);
+      toast.error(error instanceof Error ? error.message : "크기 정규화를 변경하지 못했습니다.");
     }
   };
 
@@ -539,6 +562,41 @@ export function MotionEditorPanel({
               격자 적용
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-lg">크기 정규화</CardTitle>
+          <Badge variant="secondary">
+            현재 {project.normalizeScale === "none" ? "끄기" : project.normalizeScale === "height" ? "높이 기준" : "면적 기준"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ToggleGroup
+            type="single"
+            value={project.normalizeScale}
+            disabled={disabled}
+            className="grid grid-cols-3 gap-2"
+            onValueChange={value => {
+              if (value === "none" || value === "height" || value === "area") {
+                void commitNormalizeScale(value);
+              }
+            }}
+          >
+            <ToggleGroupItem value="none" disabled={disabled}>
+              끄기
+            </ToggleGroupItem>
+            <ToggleGroupItem value="height" disabled={disabled}>
+              높이 기준
+            </ToggleGroupItem>
+            <ToggleGroupItem value="area" disabled={disabled}>
+              면적 기준
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <p className="text-xs text-muted-foreground">
+            프레임마다 달라진 캐릭터 크기를 중앙값 기준으로 보정합니다.
+          </p>
         </CardContent>
       </Card>
 
