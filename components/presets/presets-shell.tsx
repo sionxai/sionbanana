@@ -42,6 +42,12 @@ import {
   normalizeReferenceHandle,
   createReferenceSlot
 } from "@/components/studio/constants";
+import { PresetGallery } from "@/components/presets/gallery/preset-gallery";
+import {
+  getGalleryCards,
+  type BatchCommandId,
+  type GalleryCard
+} from "@/lib/presets/gallery-catalog";
 import type { ViewSpec } from "@/components/studio/types";
 import {
   REFERENCE_SYNC_EVENT,
@@ -986,6 +992,8 @@ export function PresetsShell() {
   const [batchPending, setBatchPending] = useState(false);
   const [characterSheetPendingCount, setCharacterSheetPendingCount] = useState(0);
   const [cancelRequested, setCancelRequested] = useState(false);
+  // 갤러리에서 실행 중인 배치 프리셋(카드별 진행 표시용)
+  const [runningCommandId, setRunningCommandId] = useState<BatchCommandId | null>(null);
   const [historyVisibleCount, setHistoryVisibleCount] = useState(INITIAL_HISTORY_VISIBLE_COUNT);
   const [imageGenOptions, setImageGenOptions] = useState<GenerationOptionsValue>(DEFAULT_GENERATION_OPTIONS);
   const previewZoom = useImagePanZoom({ min: MIN_IMAGE_ZOOM, max: MAX_IMAGE_ZOOM, wheelRequiresModifier: false });
@@ -2380,6 +2388,62 @@ type ReferenceImageState = {
     }
   };
 
+  // 갤러리 카드의 commandId → 기존 배치 핸들러. 핸들러가 모두 선언된 뒤에 둔다(TDZ).
+  const batchCommandHandlers: Record<BatchCommandId, () => Promise<void>> = {
+    "character-sheet": handlePresetCharacterSet,
+    "view-360": handlePresetView360,
+    "9zoom": handlePreset9Zoom,
+    "9angle": handlePreset9Angle,
+    "9focal": handlePreset9ShotSize,
+    action9: handlePresetAction9,
+    "photo-dump": handlePresetPhotoDump,
+    "photo-dump-dynamic": handlePresetPhotoDumpDynamic,
+    emotion: handlePresetEmotionStudy,
+    "teal-orange": handlePresetTealOrange
+  };
+
+  const promptGalleryCards = useMemo(() => getGalleryCards("insert-prompt"), []);
+  const batchGalleryCards = useMemo(() => getGalleryCards("run-batch"), []);
+
+  const handleGalleryRunBatch = async (card: GalleryCard) => {
+    const commandId = card.batch?.commandId;
+    if (!commandId) {
+      return;
+    }
+    if (!hasReference) {
+      toast.error("기준 이미지를 먼저 등록해주세요.");
+      return;
+    }
+    if (batchPending) {
+      toast.info("이미 배치 생성이 진행 중입니다.");
+      return;
+    }
+    const run = batchCommandHandlers[commandId];
+    if (!run) {
+      toast.error("실행할 수 없는 프리셋입니다.");
+      return;
+    }
+    setRunningCommandId(commandId);
+    try {
+      await run();
+    } finally {
+      setRunningCommandId(null);
+    }
+  };
+
+  const handleGalleryCopyPrompt = async (card: GalleryCard) => {
+    if (!card.prompt) {
+      toast.error("복사할 프롬프트가 없습니다.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(card.prompt);
+      toast.success(`"${card.titleKo}" 프롬프트를 복사했습니다.`);
+    } catch {
+      toast.error("프롬프트 복사에 실패했습니다.");
+    }
+  };
+
   const referenceImageUrl = referenceImageState.url ?? derivedReferenceImageUrl ?? null;
   const cacheBustedReferenceImageUrl = useMemo(() => {
     if (!referenceImageUrl) {
@@ -2627,57 +2691,30 @@ type ReferenceImageState = {
 
         <Card>
           <CardHeader>
-            <CardTitle>프리셋</CardTitle>
+            <CardTitle>프리셋 갤러리</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Button className="h-20 text-lg" onClick={() => void handlePresetCharacterSet()} disabled={batchPending}>
-                <Sparkles className="mr-2 h-5 w-5" />
-                캐릭터 시트
-                {characterSheetPendingCount > 0 ? (
-                  <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs">
-                    {characterSheetPendingCount} 진행 중
-                  </span>
-                ) : null}
+          <CardContent className="space-y-3">
+            <PresetGallery
+              promptCards={promptGalleryCards}
+              batchCards={batchGalleryCards}
+              onApplyPrompt={handleGalleryCopyPrompt}
+              onRunBatch={handleGalleryRunBatch}
+              isReferenceAvailable={hasReference}
+              isBatchBusy={batchPending}
+              pendingCommandId={runningCommandId}
+              promptActionLabel="프롬프트 복사"
+              defaultAction="run-batch"
+            />
+            {batchPending ? (
+              <Button
+                className="h-12 w-full text-sm"
+                variant="destructive"
+                onClick={handleCancelBatch}
+                disabled={cancelRequested}
+              >
+                {cancelRequested ? "중지 요청 처리 중..." : "생성 중지"}
               </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetView360()} disabled={batchPending}>
-                <Stars className="mr-2 h-5 w-5" /> 360도 뷰
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePreset9Zoom()} disabled={batchPending}>
-                <ZoomIn className="mr-2 h-5 w-5" /> 9ZOOM
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePreset9Angle()} disabled={batchPending}>
-                <Stars className="mr-2 h-5 w-5" /> 9앵글
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePreset9ShotSize()} disabled={batchPending}>
-                <ImageIcon className="mr-2 h-5 w-5" /> 9화각
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetAction9()} disabled={batchPending}>
-                <Zap className="mr-2 h-5 w-5" /> 액션9
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetPhotoDump()} disabled={batchPending}>
-                <Zap className="mr-2 h-5 w-5" /> 포토 덤프 (26컷)
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetPhotoDumpDynamic()} disabled={batchPending}>
-                <Zap className="mr-2 h-5 w-5" /> 포토 덤프 12컷 (스타일 변주)
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetEmotionStudy()} disabled={batchPending}>
-                <Sparkles className="mr-2 h-5 w-5" /> 감정 프리셋 12컷
-              </Button>
-              <Button className="h-20 text-lg" onClick={() => void handlePresetTealOrange()} disabled={batchPending}>
-                <Sparkles className="mr-2 h-5 w-5" /> 틸 & 오렌지 컬러그레이딩
-              </Button>
-              {batchPending && (
-                <Button
-                  className="col-span-full h-12 text-sm"
-                  variant="destructive"
-                  onClick={handleCancelBatch}
-                  disabled={cancelRequested}
-                >
-                  {cancelRequested ? "중지 요청 처리 중..." : "생성 중지"}
-                </Button>
-              )}
-            </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>

@@ -21,6 +21,8 @@ interface PresetGalleryProps {
   onApplyPrompt: (card: GalleryCard) => void;
   onRunBatch: (card: GalleryCard) => void;
   isReferenceAvailable: boolean;
+  /** 배치가 이미 실행 중이면 모든 배치 카드를 비활성화한다(동시 실행 방지). */
+  isBatchBusy?: boolean;
   pendingCommandId?: string | null;
   promptActionLabel?: string;
   defaultAction?: GalleryAction;
@@ -32,6 +34,7 @@ export function PresetGallery({
   onApplyPrompt,
   onRunBatch,
   isReferenceAvailable,
+  isBatchBusy = false,
   pendingCommandId,
   promptActionLabel,
   defaultAction = "insert-prompt"
@@ -123,7 +126,7 @@ export function PresetGallery({
                 key={card.id}
                 card={card}
                 onApply={onRunBatch}
-                disabled={!isReferenceAvailable}
+                disabled={!isReferenceAvailable || isBatchBusy}
                 referenceMissing={!isReferenceAvailable}
                 pending={pendingCommandId === card.batch?.commandId}
               />
