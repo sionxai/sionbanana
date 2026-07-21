@@ -496,6 +496,29 @@ export function MotionEditorPanel({
           </div>
 
           <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="motion-choke">가장자리 정리(choke): 0~5</Label>
+            <Input
+              id="motion-choke"
+              type="number"
+              min={0}
+              max={5}
+              step={1}
+              value={matteDraft.choke}
+              disabled={disabled}
+              className="w-24"
+              onChange={event => {
+                const choke = Number(event.target.value);
+                if (Number.isInteger(choke)) {
+                  changeMatte({
+                    ...matteDraftRef.current,
+                    choke: Math.max(0, Math.min(5, choke))
+                  });
+                }
+              }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
             <div className="space-y-1">
               <Label htmlFor="motion-despill">디스필</Label>
               <p className="text-xs text-muted-foreground">피사체 가장자리의 키 컬러를 줄입니다.</p>

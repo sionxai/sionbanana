@@ -244,8 +244,12 @@ async function buildArtifacts(input: {
   let sourceRects: Frame["source"][];
   let sliced: Buffer[];
   if (input.sliceMode === "auto") {
-    const mattedSheet = await applyMatte(input.raw, matte);
-    const decoded = await sharp(mattedSheet)
+    const usesChoke = matte.mode !== "none" && matte.choke > 0;
+    const detectionSheet = await applyMatte(
+      input.raw,
+      usesChoke ? { ...matte, choke: 0 } : matte
+    );
+    const decoded = await sharp(detectionSheet)
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
@@ -264,6 +268,7 @@ async function buildArtifacts(input: {
       cols: detected.cols,
       rows: detected.rows
     });
+    const mattedSheet = usesChoke ? await applyMatte(input.raw, matte) : detectionSheet;
     sliced = await sliceFrames(mattedSheet, sourceRects);
   } else {
     sourceRects = computeGrid(metadata.width, metadata.height, grid);
@@ -480,8 +485,8 @@ export async function createProject(input: {
       raw: input.sheetBuffer,
       sliceMode: input.sliceMode ?? "auto",
       normalizeScale: input.normalizeScale ?? "area",
-      normalizePivotX: input.normalizePivotX ?? "foot",
-      normalizePivotY: input.normalizePivotY ?? "pin",
+      normalizePivotX: input.normalizePivotX ?? "centroid",
+      normalizePivotY: input.normalizePivotY ?? "preserve",
       grid: input.grid,
       matte: input.matte,
       controls: [],

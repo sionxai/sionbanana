@@ -423,6 +423,28 @@ function applyPixelAlpha(
   data[offset + 3] = resultAlpha;
 }
 
+function erodeAlpha(image: ImageInfo, iterations: number): void {
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const source = Buffer.from(image.data);
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        let minimumAlpha = 255;
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          const neighborY = Math.max(0, Math.min(image.height - 1, y + offsetY));
+          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+            const neighborX = Math.max(0, Math.min(image.width - 1, x + offsetX));
+            minimumAlpha = Math.min(
+              minimumAlpha,
+              source[(neighborY * image.width + neighborX) * 4 + 3]
+            );
+          }
+        }
+        image.data[(y * image.width + x) * 4 + 3] = minimumAlpha;
+      }
+    }
+  }
+}
+
 export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Buffer> {
   const image = await decodeRgba(frameBuf);
   if (matte.mode === "none") {
@@ -432,6 +454,7 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
   const tolerance = matte.tolerance ?? 12;
   const softness = matte.softness ?? 2;
   const despill = matte.despill ?? false;
+  const choke = matte.choke ?? 0;
   const key = matte.keyColor ? parseHexColor(matte.keyColor) : inferEdgeColor(image);
   const despillWeights = despill ? deriveDespillWeights(key) : null;
 
@@ -443,6 +466,7 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
       const factor = alphaFactor(colorDistancePercent(image.data, offset, key), tolerance, softness);
       applyPixelAlpha(image.data, offset, factor, despillWeights);
     }
+    if (choke > 0) erodeAlpha(image, choke);
     return encodeRgba(image);
   }
 
@@ -485,6 +509,7 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
     if (y + 1 < image.height) enqueue(x, y + 1);
   }
 
+  if (choke > 0) erodeAlpha(image, choke);
   return encodeRgba(image);
 }
 

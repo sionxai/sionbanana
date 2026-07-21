@@ -64,7 +64,8 @@ function printHelp() {
   process.stdout.write(
     "Usage: motion-build --input FILE --cols N --rows N [options]\n" +
       "  --pivot-x foot|centroid  Horizontal alignment mode (default: foot).\n" +
-      "  --pivot-y pin|preserve  Vertical alignment mode (default: pin).\n"
+      "  --pivot-y pin|preserve  Vertical alignment mode (default: pin).\n" +
+      "  --choke <0-5>  Alpha erosion passes (default: 1).\n"
   );
 }
 
@@ -124,7 +125,8 @@ async function main() {
   const matte = matteSpecSchema.parse({
     mode,
     ...(args.key ? { keyColor: args.key } : mode === "keyColor" ? { keyColor: "#FFFFFF" } : {}),
-    ...(args.tolerance ? { tolerance: parseInteger(args.tolerance, "tolerance") } : {})
+    ...(args.tolerance ? { tolerance: parseInteger(args.tolerance, "tolerance") } : {}),
+    ...(args.choke !== undefined ? { choke: parseInteger(args.choke, "choke") } : {})
   });
   const sheetBuf = await readFile(inputPath);
   const metadata = await sharp(sheetBuf).metadata();

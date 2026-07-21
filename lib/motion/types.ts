@@ -47,7 +47,8 @@ export const matteSpecSchema = z
       .optional(),
     tolerance: z.number().int().min(0).max(100).default(45),
     softness: z.number().int().min(0).max(10).default(2),
-    despill: z.boolean().default(false)
+    despill: z.boolean().default(true),
+    choke: z.number().int().min(0).max(5).default(1)
   })
   .strict();
 
@@ -97,8 +98,8 @@ export const motionProjectSchema = z
     sliceMode: z.enum(sliceModeValues),
     sliceConfidence: z.number().finite().min(0).max(1).default(1),
     normalizeScale: z.enum(normalizeScaleValues).default("area"),
-    normalizePivotX: z.enum(normalizePivotXValues).default("foot"),
-    normalizePivotY: z.enum(normalizePivotYValues).default("pin"),
+    normalizePivotX: z.enum(normalizePivotXValues).default("centroid"),
+    normalizePivotY: z.enum(normalizePivotYValues).default("preserve"),
     grid: gridSpecSchema,
     canvas: motionCanvasSchema,
     matte: matteSpecSchema,

@@ -295,6 +295,8 @@ test("parseMotionProject treats projects without slicing fields as legacy grid m
   assert.equal(project.sliceMode, "grid");
   assert.equal(project.sliceConfidence, 1);
   assert.equal(project.normalizeScale, "none");
+  assert.equal(project.normalizePivotX, "foot");
+  assert.equal(project.normalizePivotY, "pin");
   assert.equal(
     motionProjectSchema.parse({ ...input, sliceMode: "auto" }).normalizeScale,
     "area"
@@ -460,6 +462,77 @@ test("applyMatte edgeFlood removes connected white background but preserves encl
   assert.equal(alphaAt(5, 5), 255);
 });
 
+test("applyMatte choke 1 erodes one opaque pixel around a synthetic square without changing RGB", async () => {
+  const input = await rgbaPng(11, 11, (data, set) => {
+    for (let y = 0; y < 11; y += 1) {
+      for (let x = 0; x < 11; x += 1) set(x, y, 255, 0, 255);
+    }
+    for (let y = 2; y <= 8; y += 1) {
+      for (let x = 2; x <= 8; x += 1) set(x, y, 20, 80, 180);
+    }
+  });
+  const matte = {
+    mode: "keyColor",
+    keyColor: "#FF00FF",
+    tolerance: 0,
+    softness: 0,
+    despill: false
+  };
+  const [withoutChoke, withChoke, source] = await Promise.all([
+    applyMatte(input, { ...matte, choke: 0 }),
+    applyMatte(input, { ...matte, choke: 1 }),
+    sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  ]);
+  const [base, eroded] = await Promise.all(
+    [withoutChoke, withChoke].map(output =>
+      sharp(output).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    )
+  );
+  const opaqueArea = data => {
+    let area = 0;
+    for (let offset = 3; offset < data.length; offset += 4) {
+      if (data[offset] === 255) area += 1;
+    }
+    return area;
+  };
+
+  assert.equal(opaqueArea(base.data), 49);
+  assert.equal(opaqueArea(eroded.data), 25);
+  assert.equal(opaqueArea(base.data) - opaqueArea(eroded.data), 24);
+  for (let offset = 0; offset < eroded.data.length; offset += 4) {
+    assert.deepEqual(
+      [...eroded.data.subarray(offset, offset + 3)],
+      [...source.data.subarray(offset, offset + 3)]
+    );
+  }
+});
+
+test("applyMatte choke 0 preserves the input alpha channel", async () => {
+  const input = await rgbaPng(5, 5, (data, set) => {
+    for (let y = 0; y < 5; y += 1) {
+      for (let x = 0; x < 5; x += 1) set(x, y, 20, 80, 180, (y * 5 + x) * 10);
+    }
+  });
+  const [source, output] = await Promise.all([
+    sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    applyMatte(input, {
+      mode: "keyColor",
+      keyColor: "#FF00FF",
+      tolerance: 0,
+      softness: 0,
+      despill: false,
+      choke: 0
+    }).then(result => sharp(result).ensureAlpha().raw().toBuffer({ resolveWithObject: true }))
+  ]);
+  const alphas = data => {
+    const values = [];
+    for (let offset = 3; offset < data.length; offset += 4) values.push(data[offset]);
+    return values;
+  };
+
+  assert.deepEqual(alphas(output.data), alphas(source.data));
+});
+
 test("applyMatte magenta despill preserves peach skin pixels in the soft alpha band", async () => {
   const input = await rgbaPng(5, 5, (data, set) => {
     for (let y = 0; y < 5; y += 1) {
@@ -538,10 +611,27 @@ test("applyMatte derives green despill from the key hue without changing red or 
   assert.equal(data[2], 80);
 });
 
-test("matteSpecSchema defaults despill off and preserves explicit saved values", () => {
-  assert.equal(matteSpecSchema.parse({ mode: "none" }).despill, false);
+test("motion schemas default new matte cleanup and pivot normalization values", () => {
+  const defaultMatte = matteSpecSchema.parse({ mode: "none" });
+  assert.equal(defaultMatte.despill, true);
+  assert.equal(defaultMatte.choke, 1);
   assert.equal(matteSpecSchema.parse({ mode: "none", despill: true }).despill, true);
   assert.equal(matteSpecSchema.parse({ mode: "none", despill: false }).despill, false);
+
+  const project = motionProjectSchema.parse({
+    id: "new-defaults",
+    name: "New defaults",
+    createdAtIso: "2026-07-21T00:00:00.000Z",
+    sourceImage: { path: "raw.png", width: 10, height: 10 },
+    sliceMode: "auto",
+    grid: { cols: 1, rows: 1 },
+    canvas: { w: 10, h: 10 },
+    matte: { mode: "none" },
+    frames: [],
+    animations: []
+  });
+  assert.equal(project.normalizePivotX, "centroid");
+  assert.equal(project.normalizePivotY, "preserve");
 });
 
 test("normalizeFrames aligns three differently sized and positioned frames to one pivot", async () => {

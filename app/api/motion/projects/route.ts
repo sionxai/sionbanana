@@ -264,15 +264,22 @@ export async function POST(request: NextRequest): Promise<Response> {
               ? { keyColor: "#FF00FF" }
               : {})
           }
-        : { mode: "keyColor", keyColor: "#FF00FF", tolerance: 45, softness: 2, despill: true }
+        : {
+            mode: "keyColor",
+            keyColor: "#FF00FF",
+            tolerance: 45,
+            softness: 2,
+            despill: true,
+            choke: 1
+          }
     );
     const project = await createProject({
       name: payload.name,
       sheetBuffer,
       sliceMode: payload.sliceMode ?? "auto",
       normalizeScale: payload.normalizeScale ?? "area",
-      normalizePivotX: payload.normalizePivotX ?? "foot",
-      normalizePivotY: payload.normalizePivotY ?? "pin",
+      normalizePivotX: payload.normalizePivotX ?? "centroid",
+      normalizePivotY: payload.normalizePivotY ?? "preserve",
       grid: payload.grid,
       matte
     });
