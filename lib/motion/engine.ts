@@ -17,12 +17,15 @@ type ImageInfo = {
 export type FrameAnalysis = {
   trim: FrameRect;
   pivot: Pivot;
+  centroid: { x: number };
 };
 
 export type NormalizeFrameInput = {
   buf: Buffer;
   trim?: FrameRect;
   pivot?: Pivot;
+  centroid?: { x: number };
+  sourceY?: number;
 };
 
 export type NormalizedFrame = FrameAnalysis & {
@@ -33,6 +36,9 @@ export type NormalizedFrame = FrameAnalysis & {
 export type NormalizeOptions = {
   margin?: number;
   normalizeScale?: "none" | "height" | "area";
+  normalizePivotX?: "foot" | "centroid";
+  normalizePivotY?: "pin" | "preserve";
+  rowSize?: number;
   scaleClamp?: number;
 };
 
@@ -502,7 +508,11 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
   }
 
   if (maxX < 0) {
-    return { trim: { x: 0, y: 0, w: 0, h: 0 }, pivot: { x: 0, y: 0 } };
+    return {
+      trim: { x: 0, y: 0, w: 0, h: 0 },
+      pivot: { x: 0, y: 0 },
+      centroid: { x: 0 }
+    };
   }
 
   const visited = new Uint8Array(foreground.length);
@@ -549,6 +559,9 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
 
   if (largestEligible.length > 0) largest = largestEligible;
 
+  const centroidX = Math.round(
+    largest.reduce((sum, index) => sum + (index % image.width), 0) / largest.length
+  );
   const sortedY = largest.map(index => Math.floor(index / image.width)).sort((a, b) => a - b);
   const baseline = sortedY[Math.floor((sortedY.length - 1) * BASELINE_QUANTILE)];
   const baselinePixels = largest.filter(index => Math.floor(index / image.width) >= baseline);
@@ -558,7 +571,8 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
 
   return {
     trim: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
-    pivot: { x: pivotX, y: baseline }
+    pivot: { x: pivotX, y: baseline },
+    centroid: { x: centroidX }
   };
 }
 
@@ -575,6 +589,21 @@ export async function normalizeFrames(
   if (normalizeScale !== "none" && normalizeScale !== "height" && normalizeScale !== "area") {
     throw new RangeError('opts.normalizeScale must be "none", "height", or "area".');
   }
+  const normalizePivotX = opts.normalizePivotX ?? "foot";
+  if (normalizePivotX !== "foot" && normalizePivotX !== "centroid") {
+    throw new RangeError('opts.normalizePivotX must be "foot" or "centroid".');
+  }
+  const normalizePivotY = opts.normalizePivotY ?? "pin";
+  if (normalizePivotY !== "pin" && normalizePivotY !== "preserve") {
+    throw new RangeError('opts.normalizePivotY must be "pin" or "preserve".');
+  }
+  if (opts.rowSize !== undefined && !Number.isInteger(opts.rowSize)) {
+    throw new RangeError("opts.rowSize must be an integer.");
+  }
+  const rowSize =
+    opts.rowSize !== undefined && opts.rowSize > 0 && opts.rowSize <= frames.length
+      ? opts.rowSize
+      : frames.length;
   const scaleClamp = opts.scaleClamp ?? 0.25;
   if (!Number.isFinite(scaleClamp) || scaleClamp < 0 || scaleClamp >= 1) {
     throw new RangeError("opts.scaleClamp must be between 0 (inclusive) and 1 (exclusive).");
@@ -583,14 +612,43 @@ export async function normalizeFrames(
   const analyzed = await Promise.all(
     frames.map(async frame => {
       const input = Buffer.isBuffer(frame) ? { buf: frame } : frame;
-      const analysis = input.trim && input.pivot ? { trim: input.trim, pivot: input.pivot } : await analyzeFrame(input.buf);
+      const analysis =
+        input.trim && input.pivot
+          ? {
+              trim: input.trim,
+              pivot: input.pivot,
+              // Legacy pre-analyzed inputs may omit centroid; centroid mode safely retains foot alignment.
+              centroid:
+                input.centroid ??
+                (normalizePivotX === "centroid" ? { x: input.pivot.x } : undefined)
+            }
+          : await analyzeFrame(input.buf);
       return {
         buf: input.buf,
         trim: analysis.trim,
-        pivot: { x: Math.round(analysis.pivot.x), y: Math.round(analysis.pivot.y) }
+        pivot: { x: Math.round(analysis.pivot.x), y: Math.round(analysis.pivot.y) },
+        centroid: analysis.centroid,
+        sourceY: input.sourceY ?? 0
       };
     })
   );
+
+  const lifts = Array.from({ length: analyzed.length }, () => 0);
+  if (normalizePivotY === "preserve") {
+    for (let rowStart = 0; rowStart < analyzed.length; rowStart += rowSize) {
+      const row = analyzed.slice(rowStart, rowStart + rowSize);
+      const nonempty = row.filter(frame => frame.trim.w > 0 && frame.trim.h > 0);
+      if (nonempty.length === 0) continue;
+      const rowMean =
+        nonempty.reduce((sum, frame) => sum + frame.sourceY + frame.pivot.y, 0) /
+        nonempty.length;
+      for (let offset = 0; offset < row.length; offset += 1) {
+        const frame = row[offset];
+        if (frame.trim.w === 0 || frame.trim.h === 0) continue;
+        lifts[rowStart + offset] = rowMean - (frame.sourceY + frame.pivot.y);
+      }
+    }
+  }
 
   const metrics = await Promise.all(
     analyzed.map(async frame => {
@@ -628,13 +686,18 @@ export async function normalizeFrames(
       frame.trim.w === 0 ? 0 : Math.max(1, Math.round(frame.trim.w * appliedScale));
     const height =
       frame.trim.h === 0 ? 0 : Math.max(1, Math.round(frame.trim.h * appliedScale));
+    const anchorX =
+      normalizePivotX === "centroid" && frame.centroid
+        ? frame.centroid.x
+        : frame.pivot.x;
     return {
       ...frame,
       appliedScale,
       width,
       height,
+      liftScaled: Math.round(lifts[index] * appliedScale),
       pivotOffset: {
-        x: Math.round((frame.pivot.x - frame.trim.x) * appliedScale),
+        x: Math.round((anchorX - frame.trim.x) * appliedScale),
         y: Math.round((frame.pivot.y - frame.trim.y) * appliedScale)
       }
     };
@@ -647,9 +710,12 @@ export async function normalizeFrames(
   for (const frame of scaled) {
     if (frame.trim.w === 0 || frame.trim.h === 0) continue;
     minLeft = Math.min(minLeft, -frame.pivotOffset.x);
-    minTop = Math.min(minTop, -frame.pivotOffset.y);
+    minTop = Math.min(minTop, -frame.pivotOffset.y - frame.liftScaled);
     maxRight = Math.max(maxRight, frame.width - frame.pivotOffset.x);
-    maxBottom = Math.max(maxBottom, frame.height - frame.pivotOffset.y);
+    maxBottom = Math.max(
+      maxBottom,
+      frame.height - frame.pivotOffset.y - frame.liftScaled
+    );
   }
 
   if (!Number.isFinite(minLeft)) {
@@ -665,7 +731,7 @@ export async function normalizeFrames(
     scaled.map(async frame => {
       const trim = {
         x: sharedPivot.x - frame.pivotOffset.x,
-        y: sharedPivot.y - frame.pivotOffset.y,
+        y: sharedPivot.y - frame.pivotOffset.y - frame.liftScaled,
         w: frame.width,
         h: frame.height
       };
@@ -702,7 +768,19 @@ export async function normalizeFrames(
         buf = await base.composite([{ input: cropped, left: trim.x, top: trim.y }]).png().toBuffer();
       }
 
-      return { buf, trim, pivot: { ...sharedPivot }, appliedScale: frame.appliedScale };
+      return {
+        buf,
+        trim,
+        pivot: { x: sharedPivot.x, y: sharedPivot.y - frame.liftScaled },
+        centroid: {
+          x:
+            trim.x +
+            Math.round(
+              ((frame.centroid?.x ?? frame.pivot.x) - frame.trim.x) * frame.appliedScale
+            )
+        },
+        appliedScale: frame.appliedScale
+      };
     })
   );
 

@@ -27,6 +27,8 @@ import {
   type GridSpec,
   type MatteSpec,
   type MotionProject,
+  type NormalizePivotX,
+  type NormalizePivotY,
   type NormalizeScale,
   type SliceMode
 } from "@/lib/motion/types";
@@ -45,7 +47,14 @@ export type MotionProjectSummary = {
 export type MotionProjectPatch = Partial<
   Pick<
     MotionProject,
-    "sliceMode" | "normalizeScale" | "grid" | "matte" | "frames" | "animations"
+    | "sliceMode"
+    | "normalizeScale"
+    | "normalizePivotX"
+    | "normalizePivotY"
+    | "grid"
+    | "matte"
+    | "frames"
+    | "animations"
   >
 >;
 
@@ -214,6 +223,8 @@ async function buildArtifacts(input: {
   raw: Buffer;
   sliceMode: SliceMode;
   normalizeScale: NormalizeScale;
+  normalizePivotX: NormalizePivotX;
+  normalizePivotY: NormalizePivotY;
   grid: GridSpec;
   matte: MatteSpec;
   controls: Frame[];
@@ -265,10 +276,15 @@ async function buildArtifacts(input: {
       const oriented = control?.flipX ? await sharp(buffer).flop().png().toBuffer() : buffer;
       const matted = input.sliceMode === "auto" ? oriented : await applyMatte(oriented, matte);
       const analysis = await analyzeFrame(matted);
-      return { buf: matted, ...analysis };
+      return { buf: matted, ...analysis, sourceY: sourceRects[index].y };
     })
   );
-  const normalized = await normalizeFrames(prepared, { normalizeScale: input.normalizeScale });
+  const normalized = await normalizeFrames(prepared, {
+    normalizeScale: input.normalizeScale,
+    normalizePivotX: input.normalizePivotX,
+    normalizePivotY: input.normalizePivotY,
+    rowSize: grid.cols
+  });
   const packed = await packSheet(normalized.frames, { cols: grid.cols });
   const packedMetadata = await sharp(packed.buf).metadata();
   if (!packedMetadata.width || !packedMetadata.height) {
@@ -302,6 +318,8 @@ async function buildArtifacts(input: {
     sliceMode: input.sliceMode,
     sliceConfidence,
     normalizeScale: input.normalizeScale,
+    normalizePivotX: input.normalizePivotX,
+    normalizePivotY: input.normalizePivotY,
     grid,
     canvas: normalized.canvas,
     matte,
@@ -440,6 +458,8 @@ export async function createProject(input: {
   sheetBuffer: Buffer;
   sliceMode?: SliceMode;
   normalizeScale?: NormalizeScale;
+  normalizePivotX?: NormalizePivotX;
+  normalizePivotY?: NormalizePivotY;
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -460,6 +480,8 @@ export async function createProject(input: {
       raw: input.sheetBuffer,
       sliceMode: input.sliceMode ?? "auto",
       normalizeScale: input.normalizeScale ?? "area",
+      normalizePivotX: input.normalizePivotX ?? "foot",
+      normalizePivotY: input.normalizePivotY ?? "pin",
       grid: input.grid,
       matte: input.matte,
       controls: [],
@@ -484,6 +506,8 @@ export async function rebuildProject(
   const raw = await fs.readFile(await safeProjectFile(directory, "raw.png", id));
   const sliceMode = patch.sliceMode ?? current.sliceMode;
   const normalizeScale = patch.normalizeScale ?? current.normalizeScale;
+  const normalizePivotX = patch.normalizePivotX ?? current.normalizePivotX;
+  const normalizePivotY = patch.normalizePivotY ?? current.normalizePivotY;
   const grid = gridSpecSchema.parse(patch.grid ?? current.grid);
   const matte = withDefaultKeyColor(matteSpecSchema.parse(patch.matte ?? current.matte));
   const controls = (patch.frames ?? current.frames).map(frame => frameSchema.parse(frame));
@@ -497,6 +521,8 @@ export async function rebuildProject(
     raw,
     sliceMode,
     normalizeScale,
+    normalizePivotX,
+    normalizePivotY,
     grid,
     matte,
     controls,

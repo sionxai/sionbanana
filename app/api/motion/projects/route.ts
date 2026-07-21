@@ -14,6 +14,8 @@ import {
 import {
   gridSpecSchema,
   matteSpecSchema,
+  normalizePivotXValues,
+  normalizePivotYValues,
   normalizeScaleValues,
   sliceModeValues
 } from "@/lib/motion/types";
@@ -66,6 +68,8 @@ const createProjectSchema = z
     name: z.string().trim().min(1).max(200),
     sliceMode: z.enum(sliceModeValues).optional(),
     normalizeScale: z.enum(normalizeScaleValues).optional(),
+    normalizePivotX: z.enum(normalizePivotXValues).optional(),
+    normalizePivotY: z.enum(normalizePivotYValues).optional(),
     grid: gridSpecSchema,
     matte: matteSpecSchema.optional(),
     source: sourceSchema
@@ -267,6 +271,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       sheetBuffer,
       sliceMode: payload.sliceMode ?? "auto",
       normalizeScale: payload.normalizeScale ?? "area",
+      normalizePivotX: payload.normalizePivotX ?? "foot",
+      normalizePivotY: payload.normalizePivotY ?? "pin",
       grid: payload.grid,
       matte
     });

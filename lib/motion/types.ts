@@ -8,6 +8,8 @@ export const matteModeValues = ["none", "keyColor", "edgeFlood"] as const;
 export const animationLoopValues = ["loop", "pingpong", "once"] as const;
 export const sliceModeValues = ["auto", "grid"] as const;
 export const normalizeScaleValues = ["none", "height", "area"] as const;
+export const normalizePivotXValues = ["foot", "centroid"] as const;
+export const normalizePivotYValues = ["pin", "preserve"] as const;
 
 const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
 
@@ -95,6 +97,8 @@ export const motionProjectSchema = z
     sliceMode: z.enum(sliceModeValues),
     sliceConfidence: z.number().finite().min(0).max(1).default(1),
     normalizeScale: z.enum(normalizeScaleValues).default("area"),
+    normalizePivotX: z.enum(normalizePivotXValues).default("foot"),
+    normalizePivotY: z.enum(normalizePivotYValues).default("pin"),
     grid: gridSpecSchema,
     canvas: motionCanvasSchema,
     matte: matteSpecSchema,
@@ -113,6 +117,8 @@ export type Animation = z.infer<typeof animationSchema>;
 export type MotionProject = z.infer<typeof motionProjectSchema>;
 export type SliceMode = z.infer<typeof motionProjectSchema>["sliceMode"];
 export type NormalizeScale = z.infer<typeof motionProjectSchema>["normalizeScale"];
+export type NormalizePivotX = z.infer<typeof motionProjectSchema>["normalizePivotX"];
+export type NormalizePivotY = z.infer<typeof motionProjectSchema>["normalizePivotY"];
 
 export function parseMotionProject(input: unknown): MotionProject {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -133,10 +139,22 @@ export function parseMotionProject(input: unknown): MotionProject {
     project.normalizeScale === undefined
       ? "none"
       : project.normalizeScale;
+  const normalizePivotX =
+    !Object.prototype.hasOwnProperty.call(project, "normalizePivotX") ||
+    project.normalizePivotX === undefined
+      ? "foot"
+      : project.normalizePivotX;
+  const normalizePivotY =
+    !Object.prototype.hasOwnProperty.call(project, "normalizePivotY") ||
+    project.normalizePivotY === undefined
+      ? "pin"
+      : project.normalizePivotY;
   return motionProjectSchema.parse({
     ...project,
     sliceMode,
     sliceConfidence,
-    normalizeScale
+    normalizeScale,
+    normalizePivotX,
+    normalizePivotY
   });
 }

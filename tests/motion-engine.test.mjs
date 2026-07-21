@@ -692,3 +692,161 @@ test('normalizeFrames "none" preserves legacy geometry and pixels', async () => 
     assert.deepEqual(frame.buf, expectedBuffer);
   }
 });
+
+test('normalizeFrames defaults normalizePivotY to "pin" and preserves pinned pivots', async () => {
+  const inputs = await Promise.all(
+    [4, 12, 20].map(async (top, index) => {
+      const buf = await rgbaPng(24, 30, (data, set) => {
+        for (let y = top; y < top + 8; y += 1) {
+          for (let x = 6; x < 18; x += 1) set(x, y, 20, 80, 180);
+        }
+      });
+      const analysis = await analyzeFrame(buf);
+      return { buf, ...analysis, sourceY: index * 40 };
+    })
+  );
+
+  const [defaults, explicit] = await Promise.all([
+    normalizeFrames(inputs, { normalizeScale: "none" }),
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotY: "pin", rowSize: 2 })
+  ]);
+
+  assert.equal(new Set(defaults.frames.map(frame => frame.pivot.y)).size, 1);
+  assert.deepEqual(defaults.canvas, explicit.canvas);
+  for (let index = 0; index < defaults.frames.length; index += 1) {
+    assert.deepEqual(defaults.frames[index].trim, explicit.frames[index].trim);
+    assert.deepEqual(defaults.frames[index].pivot, explicit.frames[index].pivot);
+    assert.deepEqual(defaults.frames[index].buf, explicit.frames[index].buf);
+  }
+});
+
+test('normalizeFrames "preserve" removes row offsets and retains within-row variation', async () => {
+  const buf = await rgbaPng(20, 40, (data, set) => {
+    for (let y = 4; y < 36; y += 1) {
+      for (let x = 5; x < 15; x += 1) set(x, y, 30, 90, 180);
+    }
+  });
+  const inputs = [
+    { buf, trim: { x: 5, y: 4, w: 10, h: 32 }, pivot: { x: 10, y: 20 }, sourceY: 0 },
+    { buf, trim: { x: 5, y: 4, w: 10, h: 32 }, pivot: { x: 10, y: 30 }, sourceY: 0 },
+    { buf, trim: { x: 5, y: 4, w: 10, h: 32 }, pivot: { x: 10, y: 20 }, sourceY: 100 },
+    { buf, trim: { x: 5, y: 4, w: 10, h: 32 }, pivot: { x: 10, y: 30 }, sourceY: 100 }
+  ];
+
+  const normalized = await normalizeFrames(inputs, {
+    normalizeScale: "none",
+    normalizePivotY: "preserve",
+    rowSize: 2
+  });
+  const pivotYs = normalized.frames.map(frame => frame.pivot.y);
+
+  assert.equal(pivotYs[0], pivotYs[2]);
+  assert.equal(pivotYs[1], pivotYs[3]);
+  assert.equal(pivotYs[1] - pivotYs[0], 10);
+});
+
+test('normalizeFrames "preserve" expands the canvas so lifted frames are not clipped', async () => {
+  const buf = await rgbaPng(24, 28, (data, set) => {
+    for (let y = 3; y < 25; y += 1) {
+      for (let x = 5; x < 19; x += 1) set(x, y, 30, 90, 180);
+    }
+  });
+  const analysis = await analyzeFrame(buf);
+  const inputs = [
+    { buf, ...analysis, sourceY: 0 },
+    { buf, ...analysis, sourceY: 20 }
+  ];
+  const [pinned, preserved] = await Promise.all([
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotY: "pin" }),
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotY: "preserve", rowSize: 2 })
+  ]);
+
+  assert.ok(preserved.canvas.h > pinned.canvas.h);
+  for (const frame of preserved.frames) {
+    const decoded = await sharp(frame.buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height, channels } = decoded.info;
+    const alphaAt = (x, y) => decoded.data[(y * width + x) * channels + 3];
+    assert.ok(Array.from({ length: width }, (_, x) => alphaAt(x, 0)).every(alpha => alpha === 0));
+    assert.ok(
+      Array.from({ length: width }, (_, x) => alphaAt(x, height - 1)).every(alpha => alpha === 0)
+    );
+    assert.ok(Array.from({ length: height }, (_, y) => alphaAt(0, y)).every(alpha => alpha === 0));
+    assert.ok(
+      Array.from({ length: height }, (_, y) => alphaAt(width - 1, y)).every(alpha => alpha === 0)
+    );
+    assert.equal((await alphaBounds(frame.buf)).area, analysis.trim.w * analysis.trim.h);
+  }
+});
+
+test("analyzeFrame returns a centroid x distinct from the foot pivot for an asymmetric frame", async () => {
+  const input = await rgbaPng(64, 40, (_data, set) => {
+    for (let y = 5; y <= 24; y += 1) {
+      for (let x = 20; x <= 39; x += 1) set(x, y, 200, 30, 30);
+    }
+    for (let y = 25; y <= 34; y += 1) {
+      set(20 - (y - 24), y, 30, 90, 180);
+    }
+    for (let x = 5; x <= 15; x += 1) set(x, 35, 30, 90, 180);
+    for (let x = 40; x <= 59; x += 1) set(x, 10, 30, 90, 180);
+  });
+
+  const analysis = await analyzeFrame(input);
+
+  assert.equal(analysis.centroid.x, 30);
+  assert.notEqual(analysis.centroid.x, analysis.pivot.x);
+});
+
+test('normalizeFrames "centroid" aligns body centers better than foot pivots', async () => {
+  const makeFrame = async side =>
+    rgbaPng(64, 40, (_data, set) => {
+      for (let y = 5; y <= 24; y += 1) {
+        for (let x = 20; x <= 39; x += 1) set(x, y, 200, 30, 30);
+      }
+      for (let y = 25; y <= 34; y += 1) {
+        const distance = y - 24;
+        set(side === "left" ? 20 - distance : 39 + distance, y, 30, 90, 180);
+      }
+      const footStart = side === "left" ? 5 : 44;
+      for (let x = footStart; x <= footStart + 10; x += 1) {
+        set(x, 35, 30, 90, 180);
+      }
+      if (side === "left") {
+        for (let x = 40; x <= 59; x += 1) set(x, 10, 30, 90, 180);
+      }
+    });
+  const inputs = await Promise.all([makeFrame("left"), makeFrame("right")]);
+  const analyses = await Promise.all(inputs.map(input => analyzeFrame(input)));
+  assert.deepEqual(analyses.map(analysis => analysis.centroid.x), [30, 30]);
+  assert.notEqual(analyses[0].pivot.x, analyses[1].pivot.x);
+
+  const [footAligned, centroidAligned] = await Promise.all([
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotX: "foot" }),
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotX: "centroid" })
+  ]);
+  const bodyCenterX = async buffer => {
+    const { data, info } = await sharp(buffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let sumX = 0;
+    let count = 0;
+    for (let pixel = 0, offset = 0; offset < data.length; pixel += 1, offset += info.channels) {
+      if (data[offset] <= 150 || data[offset + 1] >= 50 || data[offset + 3] <= 8) continue;
+      sumX += pixel % info.width;
+      count += 1;
+    }
+    assert.ok(count > 0);
+    return sumX / count;
+  };
+  const footCenters = await Promise.all(footAligned.frames.map(frame => bodyCenterX(frame.buf)));
+  const centroidCenters = await Promise.all(
+    centroidAligned.frames.map(frame => bodyCenterX(frame.buf))
+  );
+  const footDeviation = Math.abs(footCenters[0] - footCenters[1]);
+  const centroidDeviation = Math.abs(centroidCenters[0] - centroidCenters[1]);
+
+  assert.ok(
+    centroidDeviation < footDeviation,
+    `centroid deviation ${centroidDeviation} must be smaller than foot deviation ${footDeviation}`
+  );
+});

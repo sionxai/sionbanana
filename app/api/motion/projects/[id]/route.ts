@@ -12,6 +12,8 @@ import {
   frameSchema,
   gridSpecSchema,
   matteSpecSchema,
+  normalizePivotXValues,
+  normalizePivotYValues,
   normalizeScaleValues,
   sliceModeValues
 } from "@/lib/motion/types";
@@ -27,6 +29,8 @@ const patchSchema = z
   .object({
     sliceMode: z.enum(sliceModeValues).optional(),
     normalizeScale: z.enum(normalizeScaleValues).optional(),
+    normalizePivotX: z.enum(normalizePivotXValues).optional(),
+    normalizePivotY: z.enum(normalizePivotYValues).optional(),
     grid: gridSpecSchema.optional(),
     matte: matteSpecSchema.optional(),
     frames: z.array(frameSchema).optional(),

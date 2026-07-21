@@ -257,6 +257,48 @@ export function MotionEditorPanel({
     }
   };
 
+  const commitNormalizePivotX = async (normalizePivotX: MotionProject["normalizePivotX"]) => {
+    if (normalizePivotX === project.normalizePivotX) return;
+    const includeMatte = matteDirtyRef.current;
+    clearMatteTimer();
+    if (includeMatte) setMatteDirty(false);
+    const patch: EditorProjectPatch & Pick<MotionProject, "normalizePivotX"> = {
+      normalizePivotX,
+      sliceMode: project.sliceMode,
+      ...(includeMatte ? { matte: matteDraftRef.current } : {})
+    };
+    try {
+      await updateProject(patch);
+      if (!mountedRef.current) return;
+      toast.success("가로 정렬 기준을 적용했습니다.");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      if (includeMatte) setMatteDirty(true);
+      toast.error(error instanceof Error ? error.message : "가로 정렬을 변경하지 못했습니다.");
+    }
+  };
+
+  const commitNormalizePivotY = async (normalizePivotY: MotionProject["normalizePivotY"]) => {
+    if (normalizePivotY === project.normalizePivotY) return;
+    const includeMatte = matteDirtyRef.current;
+    clearMatteTimer();
+    if (includeMatte) setMatteDirty(false);
+    const patch: EditorProjectPatch & Pick<MotionProject, "normalizePivotY"> = {
+      normalizePivotY,
+      sliceMode: project.sliceMode,
+      ...(includeMatte ? { matte: matteDraftRef.current } : {})
+    };
+    try {
+      await updateProject(patch);
+      if (!mountedRef.current) return;
+      toast.success("수직 정렬 기준을 적용했습니다.");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      if (includeMatte) setMatteDirty(true);
+      toast.error(error instanceof Error ? error.message : "수직 정렬을 변경하지 못했습니다.");
+    }
+  };
+
   const patchFrame = async (frameIndex: number, field: "excluded" | "flipX", value: boolean) => {
     const includeMatte = matteDirtyRef.current;
     clearMatteTimer();
@@ -467,6 +509,58 @@ export function MotionEditorPanel({
               }
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">가로 정렬</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ToggleGroup
+            type="single"
+            value={project.normalizePivotX}
+            disabled={disabled}
+            className="grid grid-cols-2 gap-2"
+            onValueChange={value => {
+              if (value === "foot" || value === "centroid") {
+                void commitNormalizePivotX(value);
+              }
+            }}
+          >
+            <ToggleGroupItem value="foot" disabled={disabled}>
+              발 기준
+            </ToggleGroupItem>
+            <ToggleGroupItem value="centroid" disabled={disabled}>
+              몸통 중심
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">수직 정렬</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ToggleGroup
+            type="single"
+            value={project.normalizePivotY}
+            disabled={disabled}
+            className="grid grid-cols-2 gap-2"
+            onValueChange={value => {
+              if (value === "pin" || value === "preserve") {
+                void commitNormalizePivotY(value);
+              }
+            }}
+          >
+            <ToggleGroupItem value="pin" disabled={disabled}>
+              발 고정
+            </ToggleGroupItem>
+            <ToggleGroupItem value="preserve" disabled={disabled}>
+              반동 보존
+            </ToggleGroupItem>
+          </ToggleGroup>
         </CardContent>
       </Card>
 

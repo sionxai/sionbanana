@@ -60,6 +60,14 @@ function parseFlipRows(value, rowCount) {
   return rows;
 }
 
+function printHelp() {
+  process.stdout.write(
+    "Usage: motion-build --input FILE --cols N --rows N [options]\n" +
+      "  --pivot-x foot|centroid  Horizontal alignment mode (default: foot).\n" +
+      "  --pivot-y pin|preserve  Vertical alignment mode (default: pin).\n"
+  );
+}
+
 function makeDebugOverlay(width, height, packedRects, frames) {
   const lines = [];
   for (let index = 0; index < frames.length; index += 1) {
@@ -81,6 +89,10 @@ function makeDebugOverlay(width, height, packedRects, frames) {
 }
 
 async function main() {
+  if (process.argv.slice(2).includes("--help")) {
+    printHelp();
+    return;
+  }
   const args = readArgs(process.argv.slice(2));
   for (const required of ["input", "cols", "rows"]) {
     if (!args[required]) throw new Error(`--${required} is required.`);
@@ -99,6 +111,14 @@ async function main() {
   const normalizeScale = args.scale ?? "area";
   if (normalizeScale !== "none" && normalizeScale !== "height" && normalizeScale !== "area") {
     throw new Error("--scale must be none, height, or area.");
+  }
+  const normalizePivotX = args["pivot-x"] ?? "foot";
+  if (normalizePivotX !== "foot" && normalizePivotX !== "centroid") {
+    throw new Error("--pivot-x must be foot or centroid.");
+  }
+  const normalizePivotY = args["pivot-y"] ?? "pin";
+  if (normalizePivotY !== "pin" && normalizePivotY !== "preserve") {
+    throw new Error("--pivot-y must be pin or preserve.");
   }
   const mode = args.matte ?? "edgeFlood";
   const matte = matteSpecSchema.parse({
@@ -154,10 +174,15 @@ async function main() {
       const oriented = flipRows.has(row) ? await sharp(buf).flop().png().toBuffer() : buf;
       const matted = sliceMode === "auto" ? oriented : await applyMatte(oriented, matte);
       const analysis = await analyzeFrame(matted);
-      return { buf: matted, ...analysis };
+      return { buf: matted, ...analysis, sourceY: sourceRects[index].y };
     })
   );
-  const normalized = await normalizeFrames(prepared, { normalizeScale });
+  const normalized = await normalizeFrames(prepared, {
+    normalizeScale,
+    normalizePivotX,
+    normalizePivotY,
+    rowSize: grid.cols
+  });
   const packed = await packSheet(normalized.frames, { cols: grid.cols });
   const packedMetadata = await sharp(packed.buf).metadata();
   if (!packedMetadata.width || !packedMetadata.height) {
@@ -177,6 +202,8 @@ async function main() {
     sliceMode,
     sliceConfidence,
     normalizeScale,
+    normalizePivotX,
+    normalizePivotY,
     grid,
     canvas: normalized.canvas,
     matte,
