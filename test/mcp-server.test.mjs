@@ -17,7 +17,10 @@ const EXPECTED_TOOLS = [
   "build_index",
   "list_runs",
   "read_manifest",
-  "list_images"
+  "list_images",
+  "create_motion",
+  "get_motion",
+  "list_motion"
 ];
 
 test("MCP stdio server starts and lists the MVP tools", async () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,14 @@ const REPO_ROOT = path.resolve(path.dirname(SERVER_FILE), "..");
 const AGENT_GENERATE_SCRIPT = path.join(REPO_ROOT, "scripts", "agent-generate.mjs");
 const DEFAULT_HEALTH_PORT = 3002;
 const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_MOTION_GENERATION_TIMEOUT_MS = 180_000;
+const DEFAULT_MOTION_RETRY_COUNT = 2;
+const MOTION_DEADLINE_BUFFER_MS = 30_000;
+const MOTION_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
+const MOTION_UPLOAD_MAX_BASE64_CHARS = 4 * Math.ceil(MOTION_UPLOAD_MAX_BYTES / 3);
+const MOTION_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MOTION_POLL_INTERVAL_MS = 500;
+const MOTION_ID_RE = /^[A-Za-z0-9._-]+$/;
 const MOCK_MODE = process.env.SIONBANANA_MCP_MOCK === "1";
 
 const optionalText = () => z.string().trim().min(1).optional();
@@ -38,6 +47,62 @@ const generateManyJobSchema = z.object({
   referenceSlug: optionalText(),
   referenceGallerySlugs: stringListSchema
 });
+const motionActionSchema = z.enum(["walk", "run", "idle", "jump", "attack", "custom"]);
+const motionUploadSourceSchema = z
+  .object({
+    type: z.literal("upload"),
+    dataUrl: z.string().trim().min(1).optional(),
+    imagePath: z.string().trim().min(1).optional()
+  })
+  .strict();
+const motionSourceSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("generate"),
+        prompt: z.string().trim().min(1),
+        subjectType: z.enum(["character", "object"]).default("character"),
+        action: motionActionSchema.optional()
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("reference"),
+        prompt: z.string().trim().min(1),
+        subjectType: z.enum(["character", "object"]).default("character"),
+        referenceImage: z.string().trim().min(1),
+        action: motionActionSchema.optional()
+      })
+      .strict(),
+    motionUploadSourceSchema
+  ])
+  .superRefine((source, issueContext) => {
+    if (source.type === "upload" && !source.dataUrl && !source.imagePath) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "upload source must include dataUrl or imagePath"
+      });
+    }
+  });
+const motionMatteSchema = z
+  .object({
+    mode: z.enum(["none", "keyColor", "edgeFlood"]),
+    keyColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+    tolerance: z.number().int().min(0).max(100).optional(),
+    softness: z.number().int().min(0).max(10).optional(),
+    despill: z.boolean().optional(),
+    choke: z.number().int().min(0).max(5).optional()
+  })
+  .strict();
+const motionAdvancedSchema = z
+  .object({
+    sliceMode: z.enum(["auto", "grid"]).optional(),
+    normalizeScale: z.enum(["none", "height", "area"]).optional(),
+    normalizePivotX: z.enum(["foot", "centroid"]).optional(),
+    normalizePivotY: z.enum(["pin", "preserve"]).optional(),
+    matte: motionMatteSchema.optional()
+  })
+  .strict();
 
 const TOOL_NAMES = [
   "health_check",
@@ -47,7 +112,10 @@ const TOOL_NAMES = [
   "build_index",
   "list_runs",
   "read_manifest",
-  "list_images"
+  "list_images",
+  "create_motion",
+  "get_motion",
+  "list_motion"
 ];
 
 export function createSionBananaMcpServer(options = {}) {
@@ -236,6 +304,72 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => listImages(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "create_motion",
+    {
+      title: "Create Motion",
+      description:
+        "Starts motion-project generation in a detached worker and immediately returns a pollable job id.",
+      inputSchema: {
+        name: z.string().trim().min(1),
+        grid: z
+          .object({
+            cols: z.number().int().min(1).max(12),
+            rows: z.number().int().min(1).max(12)
+          })
+          .strict(),
+        source: motionSourceSchema,
+        advanced: motionAdvancedSchema.optional(),
+        waitMs: z.number().int().min(0).max(30_000).default(0)
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => createMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "get_motion",
+    {
+      title: "Get Motion",
+      description: "Polls a motion job and returns generated project paths when it is ready.",
+      inputSchema: {
+        jobId: z.string().min(1),
+        waitMs: z.number().int().min(0).max(30_000).default(0)
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => getMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "list_motion",
+    {
+      title: "List Motion",
+      description: "Lists recent motion jobs and locally stored motion projects.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).default(20),
+        status: z.enum(["running", "ready", "failed"]).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => listMotion(input, context)
   );
 
   return server;
@@ -531,6 +665,528 @@ async function listImages(input, context) {
     imagesDir,
     images
   };
+}
+
+export async function createMotion(input, context) {
+  const jobId = `motion-job-${Date.now()}-${randomUUID()}`;
+  if (context.mock) {
+    return {
+      ok: true,
+      jobId,
+      status: "running",
+      mocked: true
+    };
+  }
+
+  let jobPath;
+  let job;
+  try {
+    const source = await normalizeMotionSource(input.source, context);
+    const createdAt = Date.now();
+    const createdAtIso = new Date(createdAt).toISOString();
+    const deadlineIso = new Date(
+      createdAt +
+        motionGenerationTimeoutMs() * (DEFAULT_MOTION_RETRY_COUNT + 1) +
+        MOTION_DEADLINE_BUFFER_MS
+    ).toISOString();
+    const request = {
+      name: input.name,
+      grid: input.grid,
+      source,
+      ...(input.advanced ?? {})
+    };
+    const jobsRoot = await motionDirectory(context, "motion-jobs", true);
+    jobPath = motionIdPath(jobsRoot, jobId, ".json");
+    job = {
+      status: "running",
+      createdAtIso,
+      deadlineIso,
+      request
+    };
+    await atomicWriteJson(jobPath, job);
+
+    try {
+      const workerScript = path.join(context.repoRoot, "scripts", "motion-worker.mjs");
+      const worker = spawn(process.execPath, [workerScript, jobId], {
+        cwd: context.repoRoot,
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          SIONBANANA_DATA_DIR: path.resolve(context.dataRoot)
+        }
+      });
+      worker.once("error", error => {
+        const failed = {
+          ...job,
+          status: "failed",
+          reason: `generation-error: unable to start motion worker: ${error.message}`,
+          finishedAtIso: new Date().toISOString()
+        };
+        atomicWriteJson(jobPath, failed).catch(() => {});
+      });
+      worker.unref();
+    } catch (error) {
+      job = {
+        ...job,
+        status: "failed",
+        reason: `generation-error: unable to start motion worker: ${errorMessage(error)}`,
+        finishedAtIso: new Date().toISOString()
+      };
+      await atomicWriteJson(jobPath, job).catch(() => {});
+    }
+
+    if ((input.waitMs ?? 0) > 0 && job.status === "running") {
+      const polled = await getMotion({ jobId, waitMs: input.waitMs }, context);
+      return {
+        ok: polled.ok,
+        jobId,
+        ...(typeof polled.status === "string" ? { status: polled.status } : {}),
+        ...(isMotionId(polled.projectId) ? { projectId: polled.projectId } : {}),
+        ...(typeof polled.reason === "string" ? { reason: polled.reason } : {})
+      };
+    }
+    return motionJobResult(jobId, job);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+}
+
+export async function getMotion(input, context) {
+  if (!isMotionId(input.jobId)) {
+    return {
+      ok: false,
+      reason: "invalid jobId"
+    };
+  }
+
+  try {
+    const waitUntil = Date.now() + (input.waitMs ?? 0);
+    let record = await readMotionJob(input.jobId, context);
+    if (!record) {
+      return {
+        ok: false,
+        reason: "unknown jobId"
+      };
+    }
+    record.job = await applyMotionDeadline(record.job, record.path);
+
+    while (record.job.status === "running" && Date.now() < waitUntil) {
+      const deadline = Date.parse(record.job.deadlineIso || "");
+      const now = Date.now();
+      const untilDeadline = Number.isFinite(deadline) ? Math.max(1, deadline - now + 1) : Infinity;
+      const sleepMs = Math.min(MOTION_POLL_INTERVAL_MS, waitUntil - now, untilDeadline);
+      if (sleepMs <= 0) {
+        break;
+      }
+      await delay(sleepMs);
+
+      record = await readMotionJob(input.jobId, context);
+      if (!record) {
+        return {
+          ok: false,
+          reason: "unknown jobId"
+        };
+      }
+      record.job = await applyMotionDeadline(record.job, record.path);
+    }
+
+    if (record.job.status !== "ready") {
+      return motionJobResult(input.jobId, record.job);
+    }
+    return await readyMotionResult(input.jobId, record.job, context);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+}
+
+export async function listMotion(input, context) {
+  try {
+    const jobs = [];
+    const jobsRoot = await motionDirectory(context, "motion-jobs", false);
+    if (jobsRoot) {
+      const entries = await fs.readdir(jobsRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".json")) {
+          continue;
+        }
+        const jobId = entry.name.slice(0, -".json".length);
+        if (!isMotionId(jobId)) {
+          continue;
+        }
+        const jobPath = motionIdPath(jobsRoot, jobId, ".json");
+        try {
+          const stat = await fs.lstat(jobPath);
+          if (!stat.isFile() || stat.isSymbolicLink()) {
+            continue;
+          }
+          let job = await readJsonFile(jobPath);
+          job = await applyMotionDeadline(job, jobPath);
+          const createdAt = Date.parse(job.createdAtIso || "");
+          const terminal = job.status === "ready" || job.status === "failed";
+          if (terminal && Number.isFinite(createdAt) && Date.now() - createdAt > MOTION_JOB_RETENTION_MS) {
+            await fs.unlink(jobPath).catch(() => {});
+            continue;
+          }
+          if (input.status && job.status !== input.status) {
+            continue;
+          }
+          jobs.push({
+            jobId,
+            status: job.status,
+            ...(isMotionId(job.projectId) ? { projectId: job.projectId } : {}),
+            createdAtIso: asString(job.createdAtIso) || null
+          });
+        } catch {
+          // A malformed or concurrently replaced job must not prevent listing other jobs.
+        }
+      }
+    }
+
+    jobs.sort((left, right) => compareIsoDesc(left.createdAtIso, right.createdAtIso));
+    const projects = await listMotionProjects(context);
+    return {
+      ok: true,
+      jobs: jobs.slice(0, input.limit ?? 20),
+      projects
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+}
+
+async function normalizeMotionSource(source, context) {
+  if (!source || source.type !== "upload") {
+    return source;
+  }
+  if (source.dataUrl) {
+    assertMotionDataUrlSize(source.dataUrl);
+    return { type: "upload", dataUrl: source.dataUrl };
+  }
+
+  const imagePath = await resolveMotionUploadPath(source.imagePath, context);
+  const stat = await fs.lstat(imagePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("source.imagePath must be a regular, non-symbolic-link file");
+  }
+  if (stat.size > MOTION_UPLOAD_MAX_BYTES) {
+    throw new Error("source.imagePath exceeds the 8MB limit");
+  }
+  const buffer = await fs.readFile(imagePath);
+  if (buffer.byteLength > MOTION_UPLOAD_MAX_BYTES) {
+    throw new Error("source.imagePath exceeds the 8MB limit");
+  }
+  const mimeType = detectMotionImageMime(buffer);
+  if (!mimeType) {
+    throw new Error("source.imagePath must contain a PNG or JPEG image");
+  }
+  return {
+    type: "upload",
+    dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`
+  };
+}
+
+async function resolveMotionUploadPath(imagePath, context) {
+  if (!asString(imagePath)) {
+    throw new Error("upload source must include dataUrl or imagePath");
+  }
+  const candidate = path.isAbsolute(imagePath)
+    ? path.resolve(imagePath)
+    : path.resolve(context.repoRoot, imagePath);
+  const candidateStat = await fs.lstat(candidate);
+  if (!candidateStat.isFile() || candidateStat.isSymbolicLink()) {
+    throw new Error("source.imagePath must be a regular, non-symbolic-link file");
+  }
+  const realPath = await fs.realpath(candidate);
+  if (!path.isAbsolute(imagePath)) {
+    const realRepoRoot = await fs.realpath(context.repoRoot);
+    assertPathInside(realRepoRoot, realPath, "source.imagePath must stay inside repoRoot");
+  }
+  return realPath;
+}
+
+function assertMotionDataUrlSize(dataUrl) {
+  if (dataUrl.length > MOTION_UPLOAD_MAX_BASE64_CHARS + 32) {
+    throw new Error("source.dataUrl exceeds the 8MB limit");
+  }
+  const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]*={0,2})$/.exec(dataUrl);
+  if (!match || !match[2] || match[2].length % 4 !== 0) {
+    throw new Error("source.dataUrl must be a base64 PNG or JPEG data URL");
+  }
+  const decoded = Buffer.from(match[2], "base64");
+  if (decoded.byteLength > MOTION_UPLOAD_MAX_BYTES) {
+    throw new Error("source.dataUrl exceeds the 8MB limit");
+  }
+}
+
+function detectMotionImageMime(buffer) {
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  return null;
+}
+
+async function readMotionJob(jobId, context) {
+  const jobsRoot = await motionDirectory(context, "motion-jobs", false);
+  if (!jobsRoot) {
+    return null;
+  }
+  const jobPath = motionIdPath(jobsRoot, jobId, ".json");
+  let stat;
+  try {
+    stat = await fs.lstat(jobPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("motion job file must be a regular, non-symbolic-link file");
+  }
+  return {
+    path: jobPath,
+    job: await readJsonFile(jobPath)
+  };
+}
+
+async function applyMotionDeadline(job, jobPath) {
+  const deadline = Date.parse(job?.deadlineIso || "");
+  if (job?.status !== "running") {
+    return job;
+  }
+  if (!Number.isFinite(deadline)) {
+    return await failMotionJobDeadline(
+      job,
+      jobPath,
+      "timed out (invalid or missing deadlineIso); refusing to leave job running"
+    );
+  }
+  if (Date.now() <= deadline) {
+    return job;
+  }
+  return await failMotionJobDeadline(
+    job,
+    jobPath,
+    "timed out (deadline exceeded); worker may have died — retry create_motion"
+  );
+}
+
+async function failMotionJobDeadline(job, jobPath, reason) {
+  const failed = {
+    ...job,
+    status: "failed",
+    reason,
+    finishedAtIso: new Date().toISOString()
+  };
+  await atomicWriteJson(jobPath, failed).catch(() => {});
+  return failed;
+}
+
+function motionJobResult(jobId, job) {
+  return {
+    ok: true,
+    jobId,
+    status: job.status,
+    ...(isMotionId(job.projectId) ? { projectId: job.projectId } : {}),
+    ...(typeof job.reason === "string" ? { reason: job.reason } : {})
+  };
+}
+
+async function readyMotionResult(jobId, job, context) {
+  if (!isMotionId(job.projectId)) {
+    throw new Error("ready motion job has an invalid projectId");
+  }
+  const assetsRoot = await motionDirectory(context, "motion-assets", false);
+  if (!assetsRoot) {
+    throw new Error("motion-assets directory does not exist");
+  }
+  const directory = motionIdPath(assetsRoot, job.projectId);
+  const directoryStat = await fs.lstat(directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("motion project directory must be a regular, non-symbolic-link directory");
+  }
+  const projectPath = path.join(directory, "project.json");
+  const projectStat = await fs.lstat(projectPath);
+  if (!projectStat.isFile() || projectStat.isSymbolicLink()) {
+    throw new Error("motion project file must be a regular, non-symbolic-link file");
+  }
+  const project = await readJsonFile(projectPath);
+  if (project.id !== job.projectId) {
+    throw new Error("motion project id does not match its directory");
+  }
+  const frameCount = Array.isArray(project.frames) ? project.frames.length : 0;
+  const frames = Array.from({ length: frameCount }, (_, index) =>
+    path.join(directory, "derived", "frames", `f${String(index + 1).padStart(2, "0")}.png`)
+  );
+  return {
+    ok: true,
+    jobId,
+    status: "ready",
+    projectId: job.projectId,
+    project,
+    paths: {
+      dir: directory,
+      sheet: path.join(directory, "derived", "sheet.png"),
+      frames,
+      project: projectPath
+    },
+    ...(typeof job.sliceConfidence === "number"
+      ? { sliceConfidence: job.sliceConfidence }
+      : typeof project.sliceConfidence === "number"
+        ? { sliceConfidence: project.sliceConfidence }
+        : {})
+  };
+}
+
+async function listMotionProjects(context) {
+  const assetsRoot = await motionDirectory(context, "motion-assets", false);
+  if (!assetsRoot) {
+    return [];
+  }
+  const entries = await fs.readdir(assetsRoot, { withFileTypes: true });
+  const projects = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || !isMotionId(entry.name)) {
+      continue;
+    }
+    try {
+      const directory = motionIdPath(assetsRoot, entry.name);
+      const directoryStat = await fs.lstat(directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+        continue;
+      }
+      const projectPath = path.join(directory, "project.json");
+      const projectStat = await fs.lstat(projectPath);
+      if (!projectStat.isFile() || projectStat.isSymbolicLink()) {
+        continue;
+      }
+      const project = await readJsonFile(projectPath);
+      if (project.id !== entry.name) {
+        continue;
+      }
+      projects.push({
+        id: project.id,
+        name: asString(project.name) || project.id,
+        createdAtIso: asString(project.createdAtIso) || null,
+        dir: directory
+      });
+    } catch {
+      // A malformed project must not prevent listing other projects.
+    }
+  }
+  return projects.sort((left, right) => compareIsoDesc(left.createdAtIso, right.createdAtIso));
+}
+
+async function motionDirectory(context, name, create) {
+  const dataRoot = path.resolve(context.dataRoot);
+  const directory = path.resolve(dataRoot, name);
+  assertPathInside(dataRoot, directory, "motion data path must stay inside dataRoot");
+  if (create) {
+    await fs.mkdir(dataRoot, { recursive: true });
+    await assertDirectoryNotSymlink(dataRoot);
+    await fs.mkdir(directory, { recursive: true });
+  } else {
+    try {
+      await fs.access(directory);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+  await assertDirectoryNotSymlink(dataRoot);
+  await assertDirectoryNotSymlink(directory);
+  const realDataRoot = await fs.realpath(dataRoot);
+  const realDirectory = await fs.realpath(directory);
+  assertPathInside(realDataRoot, realDirectory, "motion data symlink escapes dataRoot");
+  return directory;
+}
+
+async function assertDirectoryNotSymlink(directory) {
+  const stat = await fs.lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`${directory} must be a regular, non-symbolic-link directory`);
+  }
+}
+
+function motionIdPath(root, id, suffix = "") {
+  if (!isMotionId(id)) {
+    throw new Error("motion id must contain only letters, numbers, dots, underscores, and hyphens");
+  }
+  const candidate = path.resolve(root, `${id}${suffix}`);
+  if (path.dirname(candidate) !== path.resolve(root)) {
+    throw new Error("motion path must stay inside its storage directory");
+  }
+  return candidate;
+}
+
+function isMotionId(value) {
+  return typeof value === "string" && MOTION_ID_RE.test(value);
+}
+
+function assertPathInside(root, candidate, message) {
+  const relative = path.relative(root, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(message);
+  }
+}
+
+async function atomicWriteJson(target, value) {
+  const directory = path.dirname(target);
+  await assertDirectoryNotSymlink(directory);
+  const temp = path.join(directory, `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    await fs.rename(temp, target);
+  } finally {
+    await fs.unlink(temp).catch(() => {});
+  }
+}
+
+function motionGenerationTimeoutMs() {
+  const parsed = Number(process.env.SIONBANANA_GEN_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MOTION_GENERATION_TIMEOUT_MS;
+}
+
+function compareIsoDesc(left, right) {
+  const leftTime = Date.parse(left || "");
+  const rightTime = Date.parse(right || "");
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  return String(left || "").localeCompare(String(right || ""));
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function delay(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
 function getDataRoot() {
