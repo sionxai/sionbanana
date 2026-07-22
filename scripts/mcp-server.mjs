@@ -2,8 +2,9 @@
 
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,6 +12,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { runJobs } from "./agent-generate.mjs";
+import { findMotionServer } from "./motion-server-discovery.mjs";
 
 const SERVER_FILE = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SERVER_FILE), "..");
@@ -22,6 +24,7 @@ const DEFAULT_MOTION_RETRY_COUNT = 2;
 const MOTION_DEADLINE_BUFFER_MS = 30_000;
 const MOTION_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 const MOTION_UPLOAD_MAX_BASE64_CHARS = 4 * Math.ceil(MOTION_UPLOAD_MAX_BYTES / 3);
+const MOTION_EXPORT_BASE64_MAX_BYTES = 12 * 1024 * 1024;
 const MOTION_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MOTION_POLL_INTERVAL_MS = 500;
 const MOTION_ID_RE = /^[A-Za-z0-9._-]+$/;
@@ -115,6 +118,7 @@ const TOOL_NAMES = [
   "list_images",
   "create_motion",
   "get_motion",
+  "export_motion",
   "list_motion"
 ];
 
@@ -126,7 +130,7 @@ export function createSionBananaMcpServer(options = {}) {
     },
     {
       instructions:
-        "Experimental beta MCP wrapper for Sion Banana local automation. Tools wrap existing repo-local helpers."
+        "Experimental beta MCP wrapper for Sion Banana local automation. Tools wrap existing repo-local helpers. create_motion/get_motion build sprite-sheet motion assets (async job then poll); export_motion packages a ready project as a retrievable ZIP. For characters with skin pass subjectType 'character' (default) so the chroma background is green and the face is not keyed out."
     }
   );
 
@@ -351,6 +355,28 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => getMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "export_motion",
+    {
+      title: "Export Motion",
+      description: "Packages a ready motion project as a persistent ZIP file.",
+      inputSchema: {
+        projectId: z.string().min(1).regex(MOTION_ID_RE),
+        includeGif: z.boolean().default(true),
+        fps: z.number().int().min(1).optional(),
+        asBase64: z.boolean().default(false),
+        destPath: optionalText()
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => exportMotion(input, context)
   );
 
   registerJsonTool(
@@ -803,6 +829,215 @@ export async function getMotion(input, context) {
       ok: false,
       reason: errorMessage(error)
     };
+  }
+}
+
+export async function exportMotion(input, context) {
+  if (!isMotionId(input.projectId)) {
+    return {
+      ok: false,
+      reason: "invalid projectId"
+    };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      mocked: true,
+      projectId: input.projectId
+    };
+  }
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+
+  const includeGif = input.includeGif ?? true;
+  const searchParams = new URLSearchParams({ gif: includeGif ? "1" : "0" });
+  if (input.fps !== undefined) {
+    searchParams.set("fps", String(input.fps));
+  }
+  const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(input.projectId)}/export-file?${searchParams}`;
+
+  let body;
+  let response;
+  try {
+    response = await context.fetchImpl(url, { method: "GET" });
+    const text = await response.text();
+    body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason: typeof body?.reason === "string"
+        ? body.reason
+        : `${response.status} ${response.statusText || "motion export failed"}`
+    };
+  }
+  if (
+    body?.ok !== true ||
+    typeof body.zipPath !== "string" ||
+    typeof body.bytes !== "number" ||
+    typeof body.sha256 !== "string" ||
+    typeof body.gifIncluded !== "boolean"
+  ) {
+    return {
+      ok: false,
+      reason: "motion export response was incomplete"
+    };
+  }
+
+  try {
+    const { handle } = await openRegularMotionExport(body.zipPath);
+    await handle.close();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+
+  const result = {
+    ok: true,
+    projectId: input.projectId,
+    zipPath: body.zipPath,
+    bytes: body.bytes,
+    sha256: body.sha256,
+    gifIncluded: body.gifIncluded
+  };
+
+  if (input.asBase64) {
+    try {
+      const encoded = await readMotionExportBase64(body.zipPath);
+      if (encoded.base64) result.base64 = encoded.base64;
+      else result.base64Skipped = encoded.base64Skipped;
+    } catch (error) {
+      result.base64Skipped = errorMessage(error);
+    }
+  }
+
+  if (input.destPath) {
+    try {
+      result.copiedTo = await copyMotionExport(body.zipPath, input.destPath, context);
+    } catch (error) {
+      result.destPathRejected = errorMessage(error);
+    }
+  }
+
+  return result;
+}
+
+async function openRegularMotionExport(zipPath) {
+  if (!path.isAbsolute(zipPath)) {
+    throw new Error("export zipPath must be absolute");
+  }
+  let handle;
+  try {
+    handle = await fs.open(zipPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error("export zipPath must be a regular, non-symbolic-link file");
+    }
+    return { handle, stat };
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    if (error?.code === "ELOOP") {
+      throw new Error("export zipPath must be a regular, non-symbolic-link file");
+    }
+    throw error;
+  }
+}
+
+async function readMotionExportBase64(zipPath) {
+  const { handle, stat } = await openRegularMotionExport(zipPath);
+  try {
+    if (stat.size > MOTION_EXPORT_BASE64_MAX_BYTES) {
+      return { base64Skipped: "too large" };
+    }
+    const buffer = await handle.readFile();
+    if (buffer.byteLength > MOTION_EXPORT_BASE64_MAX_BYTES) {
+      return { base64Skipped: "too large" };
+    }
+    return { base64: buffer.toString("base64") };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function copyMotionExport(zipPath, requestedPath, context) {
+  if (requestedPath.replaceAll("\\", "/").split("/").includes("..")) {
+    throw new Error("destPath must not contain '..' path segments");
+  }
+  const destination = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(context.repoRoot, requestedPath);
+  await assertNoSymlinkDirectories(path.dirname(destination));
+
+  try {
+    const destinationStat = await fs.lstat(destination);
+    if (destinationStat.isSymbolicLink()) {
+      throw new Error("destPath must not be a symbolic link");
+    }
+    throw new Error("destPath already exists");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  const { handle: sourceHandle } = await openRegularMotionExport(zipPath);
+  let destinationHandle;
+  let created = false;
+  try {
+    destinationHandle = await fs.open(
+      destination,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600
+    );
+    created = true;
+    await pipeline(
+      sourceHandle.createReadStream({ autoClose: true }),
+      destinationHandle.createWriteStream({ autoClose: true })
+    );
+    return destination;
+  } catch (error) {
+    if (created) await fs.unlink(destination).catch(() => {});
+    throw error;
+  } finally {
+    await sourceHandle.close().catch(() => {});
+    await destinationHandle?.close().catch(() => {});
+  }
+}
+
+async function assertNoSymlinkDirectories(directory) {
+  const parsed = path.parse(directory);
+  const relativeSegments = directory.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  let current = parsed.root;
+  for (const segment of relativeSegments) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = await fs.lstat(current);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw new Error("destPath parent directory does not exist");
+      }
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error("destPath parent must contain only regular, non-symbolic-link directories");
+    }
   }
 }
 

@@ -5,7 +5,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { findHealthyServer } from "./agent-generate.mjs";
+import { findMotionServer } from "./motion-server-discovery.mjs";
 
 const WORKER_FILE = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(WORKER_FILE), "..");
@@ -43,13 +43,10 @@ async function main() {
     return;
   }
 
-  let baseUrl;
+  let serverBaseUrl;
   try {
-    const server = await findHealthyServer(undefined, false);
-    baseUrl = normalizeBaseUrl(server);
-    if (!baseUrl) {
-      throw new Error("healthy server lookup returned no usable URL");
-    }
+    const { baseUrl } = await findMotionServer();
+    serverBaseUrl = baseUrl;
   } catch (error) {
     await failJob(
       jobPath,
@@ -69,7 +66,7 @@ async function main() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `${baseUrl.replace(/\/+$/, "")}/api/motion/projects`;
+    const url = `${serverBaseUrl.replace(/\/+$/, "")}/api/motion/projects`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -166,32 +163,6 @@ async function failJob(jobPath, job, reason) {
     console.error(`motion worker: unable to record failure for ${path.basename(jobPath)}: ${errorMessage(error)}`);
   }
   console.error(`motion worker: ${reason}`);
-}
-
-function normalizeBaseUrl(server) {
-  if (typeof server === "string") {
-    if (/^https?:\/\//.test(server)) {
-      return server;
-    }
-    if (/^[0-9]+$/.test(server)) {
-      return `http://localhost:${server}`;
-    }
-  }
-  if (typeof server === "number" && Number.isInteger(server)) {
-    return `http://localhost:${server}`;
-  }
-  if (server && typeof server === "object") {
-    if (typeof server.baseUrl === "string") {
-      return server.baseUrl;
-    }
-    if (typeof server.url === "string") {
-      return server.url;
-    }
-    if (Number.isInteger(server.port)) {
-      return `http://localhost:${server.port}`;
-    }
-  }
-  return null;
 }
 
 function parseResponseJson(raw) {

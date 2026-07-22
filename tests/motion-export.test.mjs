@@ -10,6 +10,8 @@ import sharp from "sharp";
 
 import { buildExportBundle, sanitizeExportFilename } from "@/lib/motion/export";
 import { createProject, projectDir, rebuildProject } from "@/lib/motion/storage";
+import { exportMotion } from "../scripts/mcp-server.mjs";
+import { findMotionServer } from "../scripts/motion-server-discovery.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -128,6 +130,161 @@ async function unzipEntries(zipPath) {
   const { stdout } = await execFileAsync("/usr/bin/unzip", ["-Z1", zipPath]);
   return stdout.trim().split("\n");
 }
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}
+
+test("findMotionServer returns the preferred healthy 3002 server", async () => {
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(String(url));
+    if (String(url).includes(":3002/")) return jsonResponse({ ok: true });
+    if (String(url).includes(":3000/")) return jsonResponse({ ok: false }, 503);
+    throw new Error(`unexpected URL: ${url}`);
+  };
+
+  assert.deepEqual(await findMotionServer(fetchImpl), {
+    port: 3002,
+    baseUrl: "http://localhost:3002"
+  });
+  assert.deepEqual(calls, ["http://localhost:3002/api/health"]);
+});
+
+test("findMotionServer scans from 3002 to 3000 in order", async () => {
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(String(url));
+    return String(url).includes(":3000/")
+      ? jsonResponse({ ok: true })
+      : jsonResponse({ ok: false }, 503);
+  };
+
+  assert.deepEqual(await findMotionServer(fetchImpl), {
+    port: 3000,
+    baseUrl: "http://localhost:3000"
+  });
+  assert.deepEqual(calls, [
+    "http://localhost:3002/api/health",
+    "http://localhost:3000/api/health"
+  ]);
+});
+
+test("findMotionServer throws with every failed port", async () => {
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(String(url));
+    throw new Error("connection refused");
+  };
+
+  await assert.rejects(
+    findMotionServer(fetchImpl),
+    error => {
+      assert.match(error.message, /^No healthy sionbanana server\. Tried /);
+      assert.match(error.message, /3002: connection refused/);
+      assert.match(error.message, /3005: connection refused/);
+      return true;
+    }
+  );
+  assert.equal(calls.length, 6);
+});
+
+test("exportMotion mock mode returns the documented shape", async () => {
+  assert.deepEqual(
+    await exportMotion({ projectId: "motion-project-1" }, { mock: true }),
+    { ok: true, mocked: true, projectId: "motion-project-1" }
+  );
+});
+
+test("exportMotion rejects a destPath containing traversal without copying", async t => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "sionbanana-motion-export-mcp-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.join(root, "source.zip");
+  const destination = path.join(root, "copied.zip");
+  await fs.writeFile(source, "fixture zip bytes");
+
+  const fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.includes("/export-file?")) {
+      return jsonResponse({
+        ok: true,
+        zipPath: source,
+        bytes: 17,
+        sha256: "fixture-sha256",
+        gifIncluded: false
+      });
+    }
+    throw new Error(`unexpected URL: ${url}`);
+  };
+  const result = await exportMotion(
+    {
+      projectId: "motion-project-1",
+      includeGif: false,
+      asBase64: false,
+      destPath: "nested/../copied.zip"
+    },
+    { mock: false, fetchImpl, repoRoot: root }
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.destPathRejected, /must not contain '\.\.'/);
+  assert.equal(Object.hasOwn(result, "copiedTo"), false);
+  await assert.rejects(fs.stat(destination), error => error?.code === "ENOENT");
+});
+
+test("exportMotion copies a fixture ZIP to a safe destPath without hanging", async t => {
+  const realTempRoot = await fs.realpath(tmpdir());
+  const root = await fs.mkdtemp(path.join(realTempRoot, "sionbanana-motion-export-copy-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.join(root, "source.zip");
+  const destination = path.join(root, "copied.zip");
+  const fixture = Buffer.from("small fixture zip bytes for safe copy");
+  await fs.writeFile(source, fixture);
+
+  const fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.includes("/export-file?")) {
+      return jsonResponse({
+        ok: true,
+        zipPath: source,
+        bytes: fixture.byteLength,
+        sha256: "fixture-sha256",
+        gifIncluded: false
+      });
+    }
+    throw new Error(`unexpected URL: ${url}`);
+  };
+
+  let timeout;
+  try {
+    const result = await Promise.race([
+      exportMotion(
+        {
+          projectId: "motion-project-1",
+          includeGif: false,
+          asBase64: false,
+          destPath: destination
+        },
+        { mock: false, fetchImpl, repoRoot: root }
+      ),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("exportMotion safe copy timed out")), 500);
+      })
+    ]);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.copiedTo, destination);
+    assert.equal(Object.hasOwn(result, "destPathRejected"), false);
+    assert.deepEqual(await fs.readFile(destination), fixture);
+  } finally {
+    clearTimeout(timeout);
+  }
+});
 
 test("animation.json uses the export schema and valid remapped frame indices", async t => {
   let project = await createFixture(t, "Schema animation");
