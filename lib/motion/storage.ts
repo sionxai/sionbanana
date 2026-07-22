@@ -112,6 +112,7 @@ export function projectDir(id: string): string {
 }
 
 function withDefaultKeyColor(matte: MatteSpec): MatteSpec {
+  // route는 keyColor를 항상 명시. 이 폴백은 keyColor 미지정 직접 호출용 레거시 최후 수단.
   return matteSpecSchema.parse({
     ...matte,
     ...(matte.mode === "keyColor" && !matte.keyColor ? { keyColor: "#FF00FF" } : {})

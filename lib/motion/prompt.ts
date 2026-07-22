@@ -1,3 +1,5 @@
+import { keyColorForSubject, type SubjectType } from "@/lib/motion/matte-color";
+
 const DEFAULT_STYLE = "detailed hand-painted 2D game asset, clean crisp silhouette";
 
 export type MotionActionPreset = "walk" | "run" | "idle" | "jump" | "attack" | "custom";
@@ -47,6 +49,7 @@ export type BuildSheetPromptInput = {
   style?: string;
   hasReference?: boolean;
   action?: MotionActionPreset;
+  subjectType?: SubjectType; // Defaults to character.
 };
 
 function requirePositiveInteger(value: number, name: string): void {
@@ -76,6 +79,7 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
   }
   requirePositiveInteger(input.cols, "cols");
   requirePositiveInteger(input.rows, "rows");
+  const { hex, name } = keyColorForSubject(input.subjectType ?? "character");
 
   const frameCount = input.cols * input.rows;
   let sequence: string;
@@ -106,9 +110,9 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
   const directives = [
     `Create a ${input.cols} columns by ${input.rows} rows (${input.cols}x${input.rows}) sprite sheet for: ${description}`,
     `Style: ${style}.`,
-    `Background: use a perfectly flat, solid chroma-key magenta #FF00FF across the entire canvas. ` +
-      "Every gap between the legs, beneath the torso, and around the tail must also be filled with #FF00FF. " +
-      "No gradients, shadows, texture, lighting variation, or anti-background decoration. The subject itself must contain no magenta.",
+    `Background: use a perfectly flat, solid chroma-key ${name} ${hex} across the entire canvas. ` +
+      `Every gap between the legs, beneath the torso, and around the tail must also be filled with ${hex}. ` +
+      `No gradients, shadows, texture, lighting variation, or anti-background decoration. The subject itself must contain no ${name}.`,
     `Layout: exactly ${input.cols}x${input.rows} equal cells with one complete subject per cell and the same scale in every cell. ` +
       "No grid lines, borders, labels, numbers, captions, or other text.",
     "Direction: every frame must face the same direction, with the head pointing right. Do not mirror any row or any frame.",

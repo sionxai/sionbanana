@@ -5,6 +5,11 @@ import { z } from "zod";
 
 import { POST as generateImage } from "@/app/api/generate/route";
 import { readImageById } from "@/lib/local/storage";
+import {
+  keyColorForSubject,
+  subjectTypeValues,
+  type SubjectType
+} from "@/lib/motion/matte-color";
 import { buildSheetPrompt, type MotionActionPreset } from "@/lib/motion/prompt";
 import {
   createProject,
@@ -49,7 +54,8 @@ const sourceSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("generate"),
       prompt: z.string().trim().min(1).max(20_000),
-      action: actionSchema.optional()
+      action: actionSchema.optional(),
+      subjectType: z.enum(subjectTypeValues).default("character")
     })
     .strict(),
   z
@@ -57,6 +63,7 @@ const sourceSchema = z.discriminatedUnion("type", [
       type: z.literal("reference"),
       prompt: z.string().trim().min(1).max(20_000),
       action: actionSchema.optional(),
+      subjectType: z.enum(subjectTypeValues).default("character"),
       referenceImage: referenceSourceSchema
     })
     .strict(),
@@ -162,6 +169,7 @@ async function generateSheet(
   rows: number,
   options: {
     action?: MotionActionPreset;
+    subjectType?: SubjectType;
     referenceImage?: z.infer<typeof referenceSourceSchema>;
   } = {}
 ): Promise<Buffer> {
@@ -171,7 +179,8 @@ async function generateSheet(
     cols,
     rows,
     hasReference,
-    action: options.action
+    action: options.action,
+    subjectType: options.subjectType
   });
   const headers = new Headers(request.headers);
   headers.set("content-type", "application/json");
@@ -236,6 +245,10 @@ export async function GET(): Promise<Response> {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const payload = createProjectSchema.parse(await readRequestJson(request));
+    const defaultKeyColor =
+      payload.source.type === "upload"
+        ? "#FF00FF"
+        : keyColorForSubject(payload.source.subjectType).hex;
     let sheetBuffer: Buffer;
     if (payload.source.type === "upload") {
       sheetBuffer = await normalizeUpload(payload.source.dataUrl);
@@ -245,7 +258,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         payload.source.prompt,
         payload.grid.cols,
         payload.grid.rows,
-        { action: payload.source.action, referenceImage: payload.source.referenceImage }
+        {
+          action: payload.source.action,
+          subjectType: payload.source.subjectType,
+          referenceImage: payload.source.referenceImage
+        }
       );
     } else {
       sheetBuffer = await generateSheet(
@@ -253,7 +270,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         payload.source.prompt,
         payload.grid.cols,
         payload.grid.rows,
-        { action: payload.source.action }
+        { action: payload.source.action, subjectType: payload.source.subjectType }
       );
     }
     const matte = matteSpecSchema.parse(
@@ -261,12 +278,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         ? {
             ...payload.matte,
             ...(payload.matte.mode === "keyColor" && !payload.matte.keyColor
-              ? { keyColor: "#FF00FF" }
+              ? { keyColor: defaultKeyColor }
               : {})
           }
         : {
             mode: "keyColor",
-            keyColor: "#FF00FF",
+            keyColor: defaultKeyColor,
             tolerance: 45,
             softness: 2,
             despill: true,

@@ -106,7 +106,8 @@ test("buildSheetPrompt includes chroma key, grid dimensions, and one direction",
     cols: 4,
     rows: 2
   });
-  assert.match(prompt, /#FF00FF/);
+  assert.match(prompt, /#00FF00/);
+  assert.doesNotMatch(prompt, /#FF00FF/);
   assert.match(prompt, /4 columns by 2 rows/);
   assert.match(prompt, /same direction/i);
   assert.match(prompt, /Do not mirror/i);

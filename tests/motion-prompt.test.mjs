@@ -23,6 +23,32 @@ test("reference directive is prepended only when hasReference is true", () => {
   assert.doesNotMatch(generated, /참조 이미지/);
 });
 
+test("character subject explicitly uses green chroma key", () => {
+  const prompt = buildSheetPrompt({
+    description: "a running hero",
+    cols: 4,
+    rows: 2,
+    subjectType: "character"
+  });
+
+  assert.match(prompt, /#00FF00/);
+  assert.match(prompt, /green/);
+  assert.doesNotMatch(prompt, /#FF00FF|magenta/);
+});
+
+test("object subject explicitly uses magenta chroma key", () => {
+  const prompt = buildSheetPrompt({
+    description: "a spinning umbrella",
+    cols: 4,
+    rows: 2,
+    subjectType: "object"
+  });
+
+  assert.match(prompt, /#FF00FF/);
+  assert.match(prompt, /magenta/);
+  assert.doesNotMatch(prompt, /#00FF00|green/);
+});
+
 test("walk preset describes exactly eight phased frames and a seamless loop", () => {
   const prompt = buildSheetPrompt({
     description: "walk slowly",
@@ -52,7 +78,7 @@ test("custom action keeps the description generic instead of forcing preset phas
   assert.doesNotMatch(prompt, /contact pose|compression pose|anticipation crouch|impact pose/i);
 });
 
-test("all prompt modes retain chroma-key and unified direction requirements", () => {
+test("all prompt modes default to character green and retain unified direction requirements", () => {
   const prompts = [
     buildSheetPrompt({ description: "walk", cols: 4, rows: 2, action: "walk" }),
     buildSheetPrompt({ description: "custom pose", cols: 2, rows: 2, action: "custom" }),
@@ -66,7 +92,9 @@ test("all prompt modes retain chroma-key and unified direction requirements", ()
   ];
 
   for (const prompt of prompts) {
-    assert.match(prompt, /#FF00FF/);
+    assert.match(prompt, /#00FF00/);
+    assert.match(prompt, /green/);
+    assert.doesNotMatch(prompt, /#FF00FF|magenta/);
     assert.match(prompt, /same direction/i);
     assert.match(prompt, /Do not mirror/i);
   }
