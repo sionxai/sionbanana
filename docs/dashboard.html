@@ -97,33 +97,33 @@
         <h1>시온바나나 경영 현황</h1>
       </div>
       <div class="chips">
-        <span>정본 v0.1.2</span>
-        <span>현재 날짜 2026-08-15</span>
-        <span>보고 갱신 2026-08-15 09:22 KST</span>
-        <span>원천 관측 2026-08-15 08:57:28 KST</span>
-        <span>feature 5af8de94</span>
+        <span>정본 0.1.3-candidate · Checker 대기</span>
+        <span>현재 날짜 2026-08-16</span>
+        <span>보고 갱신 2026-08-16 20:54 KST</span>
+        <span>로컬 관측 2026-08-16 20:52:56 KST</span>
+        <span>코드 통합 기준 f90b8751</span>
       </div>
     </div>
-    <p class="mission">1인 제작자를 위한 로컬 AI 프리프로덕션 스튜디오 — 캐릭터·장소·소품의 일관성을 유지한 다중 컷 콘텐츠를 레퍼런스 → 스토리보드 → 검수 → 내보내기 흐름으로 완성한다. <span class="note">(현재 날짜는 2026-08-15, 원천 관측시각은 <code>2026-08-14T23:57:28.289Z</code> / 2026-08-15 08:57:28 KST)</span></p>
+    <p class="mission">1인 제작자를 위한 로컬 AI 프리프로덕션 스튜디오 — 캐릭터·장소·소품의 일관성을 유지한 다중 컷 콘텐츠를 레퍼런스 → 스토리보드 → 검수 → 내보내기 흐름으로 완성한다. <span class="note">(로컬 원천 관측 <code>2026-08-16T11:52:56.461Z</code> / 2026-08-16 20:52:56 KST · 외부 분석 마지막 관측 2026-08-15 08:57:28 KST)</span></p>
   </section>
 
   <section>
-    <div class="section-heading"><div><span class="eyebrow">Status</span><h2>현재 단계와 진척</h2></div><p>2026-08-15 08:57:28 KST 원천 관측 기준 · 확인되지 않은 값은 수치로 추정하지 않음</p></div>
+    <div class="section-heading"><div><span class="eyebrow">Status</span><h2>현재 단계와 진척</h2></div><p>2026-08-16 local read-only 관측 기준 · 확인되지 않은 값은 수치로 추정하지 않음</p></div>
     <div class="kpi-grid">
       <div class="card stat-tile"><span class="stat-label">제품 단계</span><strong>소유자 운영형 로컬 제품</strong><small>수익화 이전 제품 검증</small></div>
-      <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>1/5 완료 · 20%</strong><small>NOW-001 완료, 나머지 대기·검수·착수</small></div>
+      <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>1/5 완료 · 20%</strong><small>NOW-002는 canonical 후보 검수, 완료 아님</small></div>
       <div class="card stat-tile"><span class="stat-label">공개 배포</span><strong>not_deployed</strong><small>공개 URL·호스팅 설정 미확인</small></div>
       <div class="card stat-tile"><span class="stat-label">웹 분석 계측</span><strong>not_instrumented</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
-      <div class="card stat-tile"><span class="stat-label">최신 정본 갱신</span><strong>SB WO-002 · 완료</strong><small>Checker PASS · CEO ACCEPT WITH FOLLOW-UP</small></div>
+      <div class="card stat-tile"><span class="stat-label">최신 정본 후보</span><strong>SB WO-003 · 검수</strong><small>Maker 표적 검증 관찰 수집 · 독립 Checker 대기</small></div>
     </div>
   </section>
 
   <section class="executive">
     <h2>CEO 판단 및 대표 승인 필요사항</h2>
-    <p class="note">발행된 정식 작업지시는 <code>SB WO-001</code>, <code>SB WO-002</code> 두 건이다. 아래 T-01~T-05는 대표 승인 대기 제안이며 정식 작업지시가 아니다.</p>
+    <p class="note">발행된 정식 작업지시는 <code>SB WO-001</code>~<code>SB WO-003</code> 세 건이다. 아래 T-01~T-05는 대표 승인 대기 제안이며 정식 작업지시가 아니다.</p>
     <ul class="task-list">
-      <li class="task-item"><span class="task-id">T-01</span><span><strong>미션 확장 개정안(v0.2.0) 승인 여부 결정</strong><em>AI 고품질 미디어 제작 전반으로의 미션 확장 제안 유지</em></span></li>
-      <li class="task-item"><span class="task-id">T-02</span><span><strong>워크트리·브랜치 정리안 승인 여부 결정</strong><em>worktree 3개 정리와 main ↔ feature 통합 방향 확정 필요</em></span></li>
+      <li class="task-item"><span class="task-id">T-01</span><span><strong>UNAPPROVED — implement 금지 · 미션 확장안</strong><em>대표가 별도 승인하기 전 v0.2.0 제안은 구현 범위가 아니다</em></span></li>
+      <li class="task-item"><span class="task-id">T-02</span><span><strong>worktree·branch 삭제/정리안 승인 여부 결정</strong><em>WO-003의 비파괴 로컬 보존·main 병합과 별개로 삭제·prune·push는 미승인</em></span></li>
       <li class="task-item"><span class="task-id">T-03</span><span><strong>자격증명 노출 대응안 승인 여부 결정</strong><em>사용처와 필요한 교체 범위를 먼저 확정해야 한다</em></span></li>
       <li class="task-item"><span class="task-id">T-04</span><span><strong>모션에셋 결함 수정안 승인 여부 결정</strong><em>4위상 프롬프트 중복과 2행 시트 미러링의 수정·회귀 범위 확정 필요</em></span></li>
       <li class="task-item"><span class="task-id">T-05</span><span><strong>웹 유입 추진 여부 결정</strong><em>현재 로컬·미배포 방침을 유지하면 보류. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인해야 한다</em></span></li>
@@ -134,17 +134,17 @@
     <div class="section-heading"><div><span class="eyebrow">Agenda</span><h2>결정 대기 안건</h2></div><p>승인 전까지는 제안 상태이며 정본 방향은 바꾸지 않음</p></div>
     <div class="grid-2">
       <div class="card agenda-card">
-        <h3>T-01 · 미션 확장 개정안 (COMPANY.md v0.2.0)</h3>
+        <h3>T-01 · UNAPPROVED — implement 금지 (COMPANY.md v0.2.0 제안)</h3>
         <p>대표자가 밝힌 방향(2026-08-07): 이 프로젝트는 AI를 통한 고품질 미디어 제작이다 — 이미지·영상·영화·CF·PPT, 그리고 그 전 단계의 스토리·시나리오까지.</p>
-        <div class="proposal"><b>제안 문구</b> — 미션에 다음을 추가: "산출물은 단일 이미지에 그치지 않는다. 이미지·영상·영화·CF·프레젠테이션(PPT) 등 고품질 미디어 완성품과, 그 전 단계인 스토리·시나리오·스토리보드 제작까지를 하나의 로컬 워크플로우로 포괄한다."</div>
+        <div class="proposal"><b>미승인 제안문 · 구현 금지</b> — 미션에 다음을 추가: "산출물은 단일 이미지에 그치지 않는다. 이미지·영상·영화·CF·프레젠테이션(PPT) 등 고품질 미디어 완성품과, 그 전 단계인 스토리·시나리오·스토리보드 제작까지를 하나의 로컬 워크플로우로 포괄한다."</div>
       </div>
       <div class="card agenda-card">
         <h3>T-02 · 워크트리·브랜치 정리안</h3>
         <ol>
-          <li><b>PPT 노하우 회수</b> — arduino worktree의 관련 변경은 기존 스냅샷이므로 정리 전 최신 상태를 재검증한다.</li>
-          <li><b>worktree 3개 정리</b> — 회수 후 제거·브랜치 삭제.</li>
-          <li><b>정본 일원화</b> — main과 feature 사이 정본 문서 보존 위치를 하나로 확정.</li>
-          <li><b>2단계 분리 결정</b> — feature/webtoon-studio의 미커밋 Webtoon 변경 보존 범위와 통합 전략 확정.</li>
+          <li><b>PPT 노하우 보존 완료</b> — Arduino 39파일을 <code>b273f7db</code>에 보존하고 root에는 38자산과 PPT routing만 통합했다.</li>
+          <li><b>local main 이력 보존 완료</b> — 세 skill 경로만 merge commit <code>55eabb0c</code>로 통합했다.</li>
+          <li><b>삭제는 미승인</b> — worktree 3개와 source branch는 제거·prune하지 않았다.</li>
+          <li><b>Webtoon은 별도</b> — untracked 16파일은 WIP로 유지하며 이번 canonical 후보에 stage하지 않았다.</li>
         </ol>
       </div>
       <div class="card agenda-card">
@@ -156,8 +156,12 @@
   </section>
 
   <section>
-    <div class="section-heading"><div><span class="eyebrow">Completed</span><h2>최근 완료</h2></div><p>완료 근거와 검증 한계를 함께 기록</p></div>
+    <div class="section-heading"><div><span class="eyebrow">Delivery</span><h2>최근 보존·완료 이력</h2></div><p>검수 후보와 승인 완료를 구분</p></div>
     <div class="grid-2">
+      <div class="card agenda-card">
+        <h3>SB WO-003 · canonical 후보 <span class="badge b-review" style="margin-left:4px">검수</span></h3>
+        <p>WO-002 스냅샷, local main skill 이력, Arduino PPT 자산, CEO 문서 출처를 로컬 커밋으로 보존하고 Maker 표적 검증 관찰을 수집했다. 독립 Checker 판정이 남아 있으므로 완료·정본 승격이 아니다.</p>
+      </div>
       <div class="card agenda-card">
         <h3>SB WO-002 · 2026-08-15 현황판·유입 통계 최신화</h3>
         <p>독립 Checker가 DoD 1~6 전부 PASS로 판정했고 CEO가 <code>ACCEPT WITH FOLLOW-UP</code>으로 완료했다. 외부 분석 미연결과 staged·미커밋 상태는 후속 한계이며, 로컬 원시 기록은 방문자·전환·매출과 합산하지 않는다.</p>
@@ -167,8 +171,8 @@
         <p>2026-08-13 독립 Checker PASS와 CEO <code>ACCEPT WITH FOLLOW-UP</code>으로 완료됐다. 당시 후속 한계는 로컬 실물 렌더 미확인과 untracked 정본 보존 위험이었다.</p>
       </div>
       <div class="card agenda-card">
-        <h3>회사 정본 v0.1.2 · 대장 · 현황판 부트스트랩</h3>
-        <p>정본 4종과 CEO 현황판 기준은 유지된다. 이번 대상 3파일은 canonical root에서 staged했지만 <code>COMPANY.md</code>·<code>CLAUDE.md</code> 등 다른 정본 사본은 여전히 untracked이므로 통합 전까지 보존에 주의한다.</p>
+        <h3>회사 정본 v0.1.2 · CEO 문서 출처 보존</h3>
+        <p>승인 기준 v0.1.2와 CEO 4 doc commits(<code>aab16778</code>~<code>597bde4d</code>)를 보존했다. <code>0.1.3-candidate</code>는 이 출처를 root에 정합화한 검수 후보이며 PRD는 보조·비정본이다.</p>
       </div>
       <div class="card agenda-card">
         <h3>모션 결함 원인 진단 2건</h3>
@@ -186,9 +190,9 @@
         <div class="proposal"><b>수정 방향</b> — 위상표를 8개로 확장하거나, frameCount가 위상 수보다 클 때 중간 포즈 문구를 생성한다.</div>
       </div>
       <div class="card agenda-card">
-        <h3>원인 B · 2행 시트의 아랫줄이 좌우 반전된다 <span class="badge b-review" style="margin-left:4px">재현됨</span></h3>
-        <p>재현 실행에서 원본 생성 이미지부터 아랫줄 4컷이 미러링되어 나왔다. 슬라이스가 아니라 이미지 모델 단계 문제이며, 현재는 감지·교정 로직이 없다.</p>
-        <div class="proposal"><b>수정 방향</b> — 8프레임을 8열×1행으로 생성해 행 미러링 여지를 줄이고, 후속으로 <code>flipX</code> 감지·교정 로직을 추가한다.</div>
+        <h3>원인 B · 2행 시트의 아랫줄이 좌우 반전된다 <span class="badge b-review" style="margin-left:4px">수동 보정 있음 · 자동 없음</span></h3>
+        <p>재현 실행에서 원본 생성 이미지부터 아랫줄 4컷이 미러링되어 나왔다. 현재 에디터에는 프레임별 <code>flipX</code> 수동 토글과 preview·저장·export 반영이 이미 있지만, 반전을 자동 감지하거나 자동 교정하는 로직은 없다.</p>
+        <div class="proposal"><b>미승인 수정 제안 · 구현 금지</b> — 8프레임을 8열×1행으로 생성하거나 자동 감지·교정을 추가하는 범위는 T-04 승인 후 별도 작업지시로 다룬다.</div>
       </div>
     </div>
   </section>
@@ -205,12 +209,12 @@
   </section>
 
   <section>
-    <div class="section-heading"><div><span class="eyebrow">Acquisition</span><h2>유입 지표 · GA4</h2></div><p><code>projectId=sionbanana</code> · provider: GA4 · 단위: visitors · 품질: 자료 없음 · 관측 2026-08-15 08:57:28 KST</p></div>
+    <div class="section-heading"><div><span class="eyebrow">Acquisition</span><h2>유입 지표 · GA4</h2></div><p><code>projectId=sionbanana</code> · provider: GA4 · 단위: visitors · 품질: 자료 없음 · 마지막 관측 2026-08-15 08:57:28 KST</p></div>
     <div class="kpi-grid">
       <div class="card stat-tile"><span class="stat-label">오늘 방문자</span><strong>미연결</strong><small>GA4 실제 수집 원천 미확인</small></div>
-      <div class="card stat-tile"><span class="stat-label">최근 7일 방문</span><strong>미연결</strong><small>08-09~08-15 · 숫자 추정 금지</small></div>
-      <div class="card stat-tile"><span class="stat-label">직전 7일 방문</span><strong>미연결</strong><small>08-02~08-08 · 숫자 추정 금지</small></div>
-      <div class="card stat-tile"><span class="stat-label">최근 30일 방문</span><strong>미연결</strong><small>07-17~08-15 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">최근 7일 방문</span><strong>미연결</strong><small>08-10~08-16 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">직전 7일 방문</span><strong>미연결</strong><small>08-03~08-09 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">최근 30일 방문</span><strong>미연결</strong><small>07-18~08-16 · 숫자 추정 금지</small></div>
       <div class="card stat-tile"><span class="stat-label">인기 페이지/유입경로</span><strong>자료 없음</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
       <div class="card stat-tile"><span class="stat-label">핵심 CTA/문의</span><strong>자료 없음</strong><small>확인 가능한 전환 원장 없음</small></div>
     </div>
@@ -220,7 +224,7 @@
         <tbody>
           <tr><td>GA4 / <code>ga4</code></td><td>visitors · 자료 없음</td><td><span class="badge b-hold">not_instrumented</span> 계측 코드·실제 수집 증거 미확인. 환경변수 이름 형태는 수집 증거가 아님</td><td>오늘·7일·30일 방문, 인기 페이지, 유입경로, CTA를 숫자로 보고할 수 없음</td></tr>
           <tr><td>Search Console / <code>google_search_console</code></td><td>queries·impressions · 자료 없음</td><td><span class="badge b-hold">미연결</span> 속성·읽기 권한·검색어·노출 원천 미확인</td><td>검색 유입을 방문이나 전환으로 추정하지 않음</td></tr>
-          <tr><td>Firebase RTDB / <code>firebase_rtdb</code></td><td>product records · 확인 불가</td><td><span class="badge b-hold">권한/환경 경계로 확인 불가</span> safe shallow GET이 실행환경 DNS 경계에서 응답 미수신</td><td>연결·데이터 유무·권한을 미연결로 단정하거나 RTDB 값을 제품 사용 지표로 보고하지 않음</td></tr>
+          <tr><td>Firebase RTDB / <code>firebase_rtdb</code></td><td>product records · 확인 불가</td><td><span class="badge b-hold">권한/환경 경계로 확인 불가</span> 2026-08-15 safe shallow GET은 DNS 경계에서 응답 미수신. WO-003은 network 금지로 새 조회 없음</td><td>마지막 원천 관측시각을 보존하며 연결·데이터 유무·권한을 임의 판정하지 않음</td></tr>
           <tr><td>문의·예약·구매 / <code>business_ledger</code></td><td>confirmed business events · 자료 없음</td><td><span class="badge b-hold">미연결</span> 확인 가능한 원장 없음</td><td>CTA 클릭·외부 예약·전화 클릭을 실제 전환이나 매출로 간주하지 않음</td></tr>
           <tr><td>공개 배포</td><td>URL · 자료 없음</td><td><span class="badge b-hold">not_deployed</span> 공개 URL·운영 배포 설정 미확인</td><td>실제 외부 방문 수집 여부를 확인할 수 없음</td></tr>
         </tbody>
@@ -229,38 +233,38 @@
   </section>
 
   <section>
-    <div class="section-heading"><div><span class="eyebrow">Usage</span><h2>제품 사용 원시 지표 · 로컬 파일시스템</h2></div><p>provider: filesystem_json · 단위: 원천별 records · 품질: 정확 · 관측 2026-08-15 08:57:28 KST</p></div>
+    <div class="section-heading"><div><span class="eyebrow">Usage</span><h2>제품 사용 원시 지표 · 로컬 파일시스템</h2></div><p>provider: filesystem_json · 단위: 원천별 records · 품질: 정확 · 관측 2026-08-16 20:52:56 KST</p></div>
     <div class="kpi-grid">
-      <div class="card stat-tile"><span class="stat-label">이미지 메타 · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 4,818 · 7일 78 · 직전7일 312 · 30일 2,200</small></div>
+      <div class="card stat-tile"><span class="stat-label">이미지 메타 · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 4,818 · 7일 15 · 직전7일 366 · 30일 2,191</small></div>
       <div class="card stat-tile"><span class="stat-label">영상 메타 · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 83 · 7일 0 · 직전7일 4 · 30일 4</small></div>
-      <div class="card stat-tile"><span class="stat-label">agent run · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 2,469 · 7일 36 · 직전7일 290 · 30일 1,596</small></div>
+      <div class="card stat-tile"><span class="stat-label">agent run · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 2,469 · 7일 0 · 직전7일 317 · 30일 1,587</small></div>
       <div class="card stat-tile"><span class="stat-label">motion project · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 27 · 7일 5 · 직전7일 0 · 30일 27</small></div>
       <div class="card stat-tile"><span class="stat-label">webtoon project · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 1 · 7일 0 · 직전7일 0 · 30일 0</small></div>
-      <div class="card stat-tile"><span class="stat-label">인기 기능(최근 30일 agent run category)</span><strong>debate-comic</strong><small>218회 · debate-topic 156회 · unknown 122회</small></div>
+      <div class="card stat-tile"><span class="stat-label">인기 기능(최근 30일 agent run category)</span><strong>debate-comic</strong><small>218회 · debate-topic 156회 · unknown 113회</small></div>
     </div>
     <div class="card table-wrap" style="margin-top:10px">
       <table>
         <thead><tr><th>원천</th><th>총량</th><th>오늘</th><th>최근 7일</th><th>직전 7일</th><th>최근 30일</th><th>최근 활동</th></tr></thead>
         <tbody>
-          <tr><td>이미지 메타 JSON</td><td>4,818</td><td>0</td><td>78</td><td>312</td><td>2,200</td><td>2026-08-12 08:40:11 KST</td></tr>
+          <tr><td>이미지 메타 JSON</td><td>4,818</td><td>0</td><td>15</td><td>366</td><td>2,191</td><td>2026-08-12 08:40:11 KST</td></tr>
           <tr><td>영상 메타 JSON</td><td>83</td><td>0</td><td>0</td><td>4</td><td>4</td><td>2026-08-06 15:30:56 KST</td></tr>
-          <tr><td>agent run manifest</td><td>2,469</td><td>0</td><td>36</td><td>290</td><td>1,596</td><td>2026-08-09 22:06:51 KST</td></tr>
+          <tr><td>agent run manifest</td><td>2,469</td><td>0</td><td>0</td><td>317</td><td>1,587</td><td>2026-08-09 22:06:51 KST</td></tr>
           <tr><td>motion project</td><td>27</td><td>0</td><td>5</td><td>0</td><td>27</td><td>2026-08-12 08:40:12 KST</td></tr>
           <tr><td>webtoon project</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>2026-06-05 21:51:03 KST</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note" style="margin-top:8px">기간은 KST 달력일 기준(today 08-15, 최근7일 08-09~15, 직전7일 08-02~08, 최근30일 07-17~08-15)이다. 파싱 오류·시간 누락·mtime 대체·미래 레코드는 모두 0건이다. 각 원천의 단위가 달라 서로 합산하지 않으며 관리자·개발·자동화·테스트 분리와 원천 간 중복 제거는 불가능하다. 방문자·고유 사용자·완료 워크플로우·매출을 대체하지 않는다.</p>
+    <p class="note" style="margin-top:8px">기간은 KST 달력일 기준(today 08-16, 최근7일 08-10~16, 직전7일 08-03~09, 최근30일 07-18~08-16)이다. motion project는 <code>project.json</code> mtime을 활동시각으로 쓰며, 나머지 원천의 mtime fallback은 0건이다. 파싱 오류·시간 누락·미래 레코드도 모두 0건이다. 각 원천의 단위가 달라 서로 합산하지 않으며 관리자·개발·자동화·테스트 분리와 원천 간 중복 제거는 불가능하다. 방문자·고유 사용자·완료 워크플로우·매출을 대체하지 않는다.</p>
   </section>
 
   <section>
     <div class="section-heading"><div><span class="eyebrow">Roadmap</span><h2>진행 중 업무</h2></div><p>NOW 진척 1/5 완료(20%) · 상태는 정본 §6의 뷰어</p></div>
     <div class="card table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>항목</th><th>상태</th><th>비고 (2026-08-15 KST 실측)</th></tr></thead>
+        <thead><tr><th>ID</th><th>항목</th><th>상태</th><th>비고 (2026-08-16 KST 실측)</th></tr></thead>
         <tbody>
-          <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>정본 v0.1.2와 작업지시 대장 유지</td></tr>
-          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-wait">대기</span></td><td>T-02 승인 전 정리 금지</td></tr>
+          <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>승인 기준 v0.1.2 유지 · 0.1.3-candidate는 Checker 대기</td></tr>
+          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-review">검수</span></td><td>WO-003 canonical 후보 작성 · worktree/branch 삭제는 미실행</td></tr>
           <tr><td>NOW-003</td><td>핵심 경로 검증 (인증→생성→저장→스토리보드)</td><td><span class="badge b-wait">대기</span></td><td>전체 경로의 최신 실물 검증 증거 없음</td></tr>
           <tr><td>NOW-004</td><td>프리셋·모션 구현 실물 검수</td><td><span class="badge b-review">검수</span></td><td>결함 원인 2건 진단 완료, 수정·회귀 판정 미완료</td></tr>
           <tr><td>NOW-005</td><td>Webtoon Studio 변경 보존·범위 확정</td><td><span class="badge b-wip">착수</span></td><td>미커밋 Webtoon 관련 변경과 산출물 보존 범위 확정 필요</td></tr>
@@ -273,18 +277,18 @@
   <section class="grid-2">
     <div class="card panel">
       <h3 style="margin-bottom:8px">작업지시 현황 (SB WO)</h3>
-      <p class="note"><code>SB WO-001</code>과 <code>SB WO-002</code>는 완료됐다. SB WO-002 독립 Checker 판정은 PASS, CEO 판정은 <code>ACCEPT WITH FOLLOW-UP</code>이다. 두 작업 모두 현황판·정본 문서 범위에 한정되며 제품 전체 회귀 PASS를 뜻하지 않는다.</p>
+      <p class="note"><code>SB WO-001</code>과 <code>SB WO-002</code>는 완료됐다. <code>SB WO-003</code>은 canonical 후보를 독립 Checker에게 인계하는 <b>검수</b> 상태다. 이전 작업의 PASS는 제품 전체 회귀 PASS나 이번 후보 판정을 뜻하지 않는다.</p>
     </div>
     <div class="card panel">
       <h3 style="margin-bottom:8px">저장소 스냅샷</h3>
       <div class="table-wrap"><table>
         <thead><tr><th>항목</th><th>상태</th><th>비고</th></tr></thead>
         <tbody>
-          <tr><td>HEAD</td><td><code>5af8de94</code></td><td><code>feature/webtoon-studio</code></td></tr>
-          <tr><td>tracked dirty</td><td>5 files</td><td><code>AGENTS.md</code>, storyboard/agent 관련 파일 수정 존재</td></tr>
-          <tr><td>SB WO-002 대상 3파일</td><td>staged · 미커밋</td><td><code>WORK_ORDERS.md</code>, <code>dashboard.html</code>, <code>analytics-status.json</code>만 추적 대상으로 추가</td></tr>
-          <tr><td>기타 untracked 정본</td><td>유지</td><td><code>CLAUDE.md</code>, <code>docs/COMPANY.md</code>, <code>docs/PRD-sionbanana.md</code> 등은 이번 범위 밖</td></tr>
-          <tr><td>동시 worktree</td><td>3개</td><td>arduino, friendly-pasteur, key-visual-work</td></tr>
+          <tr><td>코드 통합 기준</td><td><code>f90b8751</code></td><td><code>feature/webtoon-studio</code> · canonical 문서 후보는 이 뒤 단일 로컬 커밋</td></tr>
+          <tr><td>제외 tracked dirty</td><td>4 files</td><td>agent/storyboard 스크립트 3 + 표적 테스트 1, byte-identical·unstaged 유지</td></tr>
+          <tr><td>canonical 후보</td><td><span class="badge b-review">검수</span></td><td>COMPANY·WO·CLAUDE·AGENTS·dashboard·analytics·README·보조 PRD만 단일 로컬 커밋</td></tr>
+          <tr><td>제외 untracked</td><td>37 files</td><td>Webtoon WIP 16, 생성물·도구·문서 20, 필요성 미충족 <code>.codex/config.toml</code> 1</td></tr>
+          <tr><td>추가 worktree</td><td>3개</td><td>Arduino 보존 branch, friendly-pasteur detached, CEO source branch · 삭제 미실행</td></tr>
         </tbody>
       </table></div>
     </div>
@@ -293,14 +297,15 @@
   <section>
     <div class="section-heading"><div><span class="eyebrow">Risks</span><h2>위험·막힘</h2></div><p>확인된 사실과 미확인 영역을 분리</p></div>
     <ul class="risk-list">
-      <li><b>브랜치 분산</b> — main, feature, 별도 CEO 보존 브랜치 흔적이 분리되어 있다. 정본 사본을 승인 없이 정리하지 않는다.</li>
+      <li><b>후보 판정 대기</b> — local main 이력과 PPT는 feature에 보존됐지만 canonical 후보는 Checker 전이다. 완료·정본 승격을 선언하지 않는다.</li>
       <li><b>NOW-005 산출물 보존 위험</b> — Webtoon 관련 미커밋 변경과 산출물이 존재한다. 정리·이동·삭제 전 보존 범위 확정이 필요하다.</li>
       <li><b>분석·배포 원천 부족</b> — 공개 URL과 GA4·Search Console·문의/예약/구매 실제 원천을 확인하지 못했다. 미수집 상태를 방문자나 매출 숫자로 바꿀 수 없다.</li>
-      <li><b>RTDB 확인 차단</b> — safe shallow GET은 실행환경 DNS 경계로 응답을 받지 못했다. 연결·데이터 유무·권한을 임의로 판정하지 않는다.</li>
+      <li><b>RTDB 확인 차단</b> — 마지막 2026-08-15 safe shallow GET은 DNS 경계로 응답을 받지 못했고 WO-003은 network 금지로 새 조회가 없다. 연결·데이터 유무·권한을 임의 판정하지 않는다.</li>
       <li><b>로컬 기록 해석 한계</b> — 관리자·개발·자동화·테스트 활동을 분리할 수 없고 원천 간 중복 가능성이 있다. 서로 다른 레코드 단위를 합산하지 않는다.</li>
       <li><b>제품 전체 실물·회귀는 별도</b> — 이번 최신화는 정본 현황판과 분석 상태 갱신이며, dirty worktree 전체 기능 회귀 판정이 아니다.</li>
-      <li><b>커밋·push 미실행</b> — 이번 대상 3파일은 canonical root에서 staged했지만 대표 지시대로 커밋·push하지 않았다. 영구 보존과 브랜치 통합은 별도 결정이 필요하다.</li>
-      <li><b>PPT 노하우 미회수</b> — arduino worktree 관련 내용은 기존 스냅샷이다. 정리 전 최신 상태 재검증과 회수가 필요하다.</li>
+      <li><b>외부 반영 없음</b> — 모든 보존·병합·candidate는 로컬 commit뿐이다. push·deploy·worktree 삭제는 실행하지 않았다.</li>
+      <li><b>원본 공백 관찰</b> — 보존된 PPT 원본에는 Markdown hard-break와 갤러리 빈 줄의 후행 공백 37건이 있다. 바이트 보존 때문에 정규화하지 않았으며 Checker가 수용 여부를 판단한다.</li>
+      <li><b>T-01 미승인</b> — 광범위 미션 확장은 <code>UNAPPROVED — implement 금지</code>다.</li>
       <li><b>자격증명 노출 대응 미결정</b> — 저장소 유출 여부보다 사용처·교체 범위 판단이 남아 있다.</li>
       <li><b>모션 결함 수정 미승인</b> — 원인 진단은 끝났지만 수정·회귀 범위는 승인 전이다.</li>
     </ul>
@@ -310,8 +315,8 @@
     <div class="section-heading"><div><span class="eyebrow">Next</span><h2>다음 행동</h2></div><p>증거 확보 후에만 상태 변경</p></div>
     <div class="grid-2">
       <div class="card agenda-card">
-        <h3>1. SB WO-002 후속 보존</h3>
-        <p>대상 3파일은 canonical root에서 staged했지만 커밋·push하지 않았다. T-02 통합 방향이 결정될 때까지 다른 변경과 섞거나 삭제하지 않는다.</p>
+        <h3>1. SB WO-003 독립 Checker</h3>
+        <p>보존 커밋·canonical 문서·2026-08-16 수치·제외 인벤토리를 같은 SourceRefs로 재검증하고 PASS/FAIL/INCONCLUSIVE를 판정한다.</p>
       </div>
       <div class="card agenda-card">
         <h3>2. T-05 웹 유입 추진 여부 결정</h3>
@@ -322,8 +327,8 @@
         <p>모션 결함 수정 범위를 승인받은 뒤 실물과 경계 사례를 별도 작업지시로 검증한다.</p>
       </div>
       <div class="card agenda-card">
-        <h3>4. NOW-005 보존·범위 확정</h3>
-        <p>Webtoon 산출물을 파괴적으로 정리하지 말고 보존·통합 범위를 먼저 확정한다.</p>
+        <h3>4. NOW-005 별도 Webtoon 작업지시</h3>
+        <p>untracked 16파일을 계속 보존하고, clean checkout 편입 여부·P0 범위·테스트를 별도 WO로 확정한다.</p>
       </div>
     </div>
   </section>
@@ -337,6 +342,10 @@
       <li>2026-08-15 08:57:28 KST — 로컬 파일시스템 원천별 exact 집계 반영: images 4,818, videos 83, agent runs 2,469, motion 27, webtoon 1. 마지막 활동은 2026-08-12 08:40:12 KST이며 서로 다른 단위는 합산하지 않음.</li>
       <li>2026-08-15 09:19 KST — 독립 Checker 1차 FAIL의 추적·공백검사 결함을 보완하기 위해 대상 3파일만 staged하고 실제 staged diff 공백검사를 통과. 커밋·push·배포는 미실행.</li>
       <li>2026-08-15 09:21 KST — 독립 Checker 재판정 DoD 1~6 전부 PASS. CEO가 <code>ACCEPT WITH FOLLOW-UP</code>으로 <code>SB WO-002</code> 완료 판정.</li>
+      <li>2026-08-16 — <code>SB WO-003</code> 시작 기준 48 entries, Arduino skill·38자산 해시를 재확인하고 고유 산출물을 로컬 커밋으로 분리 보존.</li>
+      <li>2026-08-16 — local main 10개 skill 이력을 merge commit으로 보존하고 Arduino PPT routing + 38자산을 root에 통합. worktree·branch 삭제와 push·deploy는 미실행.</li>
+      <li>2026-08-16 20:52:56 KST — 로컬 원천 5종을 재집계. 외부 분석은 새 조회 없이 마지막 관측시각과 <code>미연결/자료 없음</code>을 유지.</li>
+      <li>2026-08-16 — <code>0.1.3-candidate</code>를 <code>검수</code>로 인계. 독립 Checker와 CEO 최종 판정 전이며 완료 아님.</li>
     </ul>
   </footer>
 </main>

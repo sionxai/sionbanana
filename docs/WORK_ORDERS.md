@@ -8,8 +8,8 @@
 
 ## 대표자 할 일
 
-- [ ] T-01 미션 확장 개정안(v0.2.0) 승인 여부 결정 — "AI 고품질 미디어 제작 전반(이미지·영상·영화·CF·PPT + 스토리·시나리오)" 반영. CEO 제안문 참조.
-- [ ] T-02 워크트리·브랜치 정리안 승인 여부 결정 — 1단계(잔여 워크트리 3개 정리) + 2단계(main ↔ feature/webtoon-studio 통합 방향). CEO 제안문 참조.
+- [ ] T-01 **UNAPPROVED — implement 금지.** 미션 확장 개정안(v0.2.0) 승인 여부 결정 — "AI 고품질 미디어 제작 전반(이미지·영상·영화·CF·PPT + 스토리·시나리오)" 반영은 대표가 별도 승인하기 전 제안일 뿐이며 구현 범위가 아니다.
+- [ ] T-02 워크트리·브랜치 **삭제·정리안은 미승인** — SB WO-003은 고유 산출물의 비파괴 로컬 보존과 local main 병합만 승인했다. 잔여 worktree/branch 삭제·prune·push는 계속 금지한다.
 - [ ] T-03 자격증명 노출 대응안 승인 여부 결정 — 사용처 확인 및 필요한 교체 범위를 먼저 확정한다.
 - [ ] T-04 모션에셋 결함 수정안 승인 여부 결정 — 4위상 프롬프트 중복과 2행 시트 미러링 진단을 바탕으로 수정 범위를 확정한다.
 - [ ] T-05 웹 유입 추진 여부 결정 — 현재 로컬·미배포 방침을 유지하면 보류한다. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.
@@ -21,7 +21,7 @@
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-002 완료 · 대표 안건 T-01~T-05 결정 대기 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 canonical 후보 · 독립 Checker 대기 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -29,6 +29,7 @@
 |---|---|---|---|---|---|---|---|
 | SB WO-001 | 2026-08-13 | CEO 현황판·AIDE 분석 상태 정본 갱신 | CEO(Sol) / 문서 Maker(Luna) | P0 | 2026-08-13 | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
+| SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 검수 | Checker 대기 · 완료 아님 |
 
 ## 지시서
 
@@ -157,6 +158,126 @@
 - 2026-08-15 00:21 UTC (2026-08-15 09:21 KST) — 독립 Checker 재판정에서 DoD 1~6 전부
   PASS, 최소 재작업 없음으로 확인했다. CEO가 `ACCEPT WITH FOLLOW-UP`으로 판정해 `완료`로
   이동했다.
+
+### SB WO-003 — 저장소·맥락 1차 안정화
+
+- **ID:** `SB WO-003`
+- **우선순위:** P0
+- **담당:** CEO(Sol, 계약·최종 판정) / Terra(Maker, 유일 writer) / 독립 Checker(읽기 전용)
+- **목표일:** 2026-08-16 KST
+- **상태:** `검수` — canonical 후보 작성 후 Checker 대기. 완료·정본 승격 아님.
+- **위험등급:** R2 — 다중 브랜치 이력·정본·분석 상태 계약을 한 후보로 통합하므로 독립
+  Checker가 필수다. 런타임 인증·권한·배포·운영 데이터는 변경하지 않는다.
+- **목표:** 고유 산출물을 잃지 않으면서 canonical root
+  `/Users/nohshinhee/Documents/2. coding/sionbanana`의 `feature/webtoon-studio`에 추적 가능한
+  단일 로컬 후보를 만들고, 제외된 사용자·WIP·생성 파일은 바이트 그대로 보존한다.
+- **배경:** WO-002 문서 3파일은 staged 상태였고, CEO 문서는 별도 보존 브랜치에, 최신
+  image-gen 교훈은 local `main`에, PPT skill·스타일 38파일은 Arduino worktree에,
+  Webtoon Studio 구현은 root untracked 상태로 분산돼 있었다. 삭제·stash·강제 checkout
+  없이 각 소유권을 분리해야 canonical 검수가 가능하다.
+
+#### SourceRefs와 규범 계약
+
+| ID | 출처·버전·위치 | 핵심 규범 |
+|---|---|---|
+| SRC-USER-20260816 | 대표 지시 `저장소·맥락 1차 안정화`, 2026-08-16 | 모든 고유 작업 보존, WO/feature별 분리, canonical 6종 정합화, 충돌 없는 것만 통합, 좁은 검증, 삭제·push·deploy·network·install 금지 |
+| SRC-AGENTS | root `AGENTS.md`, 2026-08-16 시작본 SHA256 `974eb75e…299` | 기존 dirty·사용자·타 에이전트 변경을 보존하고 증거 없이 완료를 선언하지 않음 |
+| SRC-COMPANY-WO | `docs/COMPANY.md` v0.1.2와 `docs/WORK_ORDERS.md` WO-002 스냅샷 | 정본 결정·상태 기록은 실제 HEAD와 검수 상태를 반영하고, 코드 흔적만으로 완료 승격 금지 |
+| SRC-AIDE-STANDARD | AIDE `docs/ANALYTICS_STANDARD_V1.md` v1 §8, `data/analytics-contract.json` schemaVersion 1 | 미배포=`not_deployed`, 미계측=`not_instrumented`; unavailable은 0이 아니며 공급자·단위를 합산하지 않음 |
+
+#### 시작 기준과 출처 이력
+
+- root base: `feature/webtoon-studio` @
+  `5af8de946c8ca56ac15a49daf1ed804e78c072a6`.
+- root status: `--untracked-files=all` 48 entries, newline status stream SHA256
+  `186f40589e1e6020a963168b255eb761e961a6280f7b27c291e4c0ef82b95539`.
+- 시작 staged 3: `docs/WORK_ORDERS.md`, `docs/dashboard.html`,
+  `docs/analytics-status.json`.
+- Arduino: `claude/arduino-environment-data-project-1cc604` @
+  `0bd298af18d09d0a539b59c879ace78712a2f85e`; dirty skill SHA256
+  `c14d65c0efbf791b4d0f92e9831497512ec9535b07a8a18e2ec5dd936eb838a4`.
+- Arduino `data/styles`: 38 files, 상대경로+파일 SHA 집계
+  `f35a18dd2423f0a2dc4db917ce7f89fdd55d1e614fb983afdd9cddd3ce700989`.
+- local `main`: merge-base `0bd298af…` 이후 10 commits, 최종
+  `9751b62a4456bbc2b19d5a04177afd2ef9844286`; 고유 변경은 image-gen skill,
+  `references/LESSONS.md`, thumbnail skill 세 경로다.
+- CEO source: `claude/ceo-skill-check-e77efc`의 4 doc commits
+  `aab16778` → `324a14fd` → `b7f4c5d3` → `597bde4d`; 시작 `COMPANY.md`,
+  `CLAUDE.md`, `PRD-sionbanana.md`는 해당 브랜치와 byte-identical이었다.
+
+#### 인벤토리와 소유권
+
+| 인벤토리 | 조치·소유권 |
+|---|---|
+| Arduino skill 1 + `data/styles` 38 | Arduino 보존 커밋 1개 후 root에는 PPT routing만 신형 skill에 적용, 자산은 byte-identical 복사 |
+| WO-002 staged 문서 3 | 편집 전 독립 스냅샷 커밋으로 보존 |
+| local main skill 이력 10 commits | 두 부모를 유지한 local merge commit. root skill과 main 첫 고유 커밋의 전체 SHA 동일성을 근거로 main 후속판 채택 |
+| CEO 문서 `COMPANY`, `CLAUDE`, `PRD`, 대장·현황판 | source commits를 기록하고 canonical 후보에 정합화. PRD는 보조·비정본으로 명시 |
+| root Webtoon WIP 16 files | untracked·미완료로 유지. clean checkout 기능으로 서술하거나 stage하지 않음 |
+| 기타 제외 dirty/untracked 40 files | canonical 편집 직전 경로+내용 집계 SHA256 `c68dfcf6a4fa371a4ca8983a3ccb1da4dcce7501bbbe3f000f090d241b5524e7`; byte-identical·unstaged 유지 |
+| `.codex/config.toml` | SHA256 `fdcfc227…ec1e`, secret-like 값 없음. AGENTS 안전 규칙으로 재현 가능해 필요성 미충족; untracked·unstaged 유지 |
+
+#### 정확한 변경 범위
+
+1. Arduino 보존: `.claude/skills/sionbanana-image-gen/SKILL.md`, 기존
+   `data/styles/**` 38파일과 해당 branch index/commit.
+2. root skill 통합: image-gen skill, `references/LESSONS.md`, thumbnail skill,
+   `data/styles/**` 38파일.
+3. canonical/context 후보: `docs/COMPANY.md`, `docs/WORK_ORDERS.md`, `CLAUDE.md`,
+   `AGENTS.md`, `docs/dashboard.html`, `docs/analytics-status.json`, `README.md`, 보조·비정본
+   표기를 추가한 `docs/PRD-sionbanana.md`.
+4. 위 목록 밖 root dirty/untracked/generated 파일은 읽기 전용이며 stage하지 않는다.
+
+#### 완료 기준(Checker 판정 전 Maker DoD)
+
+1. 시작 root/Arduino SHA·상태·38자산 집계가 고정 기준과 일치한다.
+2. Arduino 39경로만 비밀 패턴 검사·stage하고 로컬 보존 커밋을 만든다.
+3. WO-002 staged 3파일을 편집 전 JSON·HTML·공백 검사 후 별도 로컬 커밋한다.
+4. local main 고유 변경이 세 skill 경로뿐임을 merge-tree/diff로 확인하고 두 이력을 merge
+   commit으로 보존한다. 의미 선택이 필요한 충돌이면 중단한다.
+5. Arduino 자산 38파일을 byte-identical로 복사하고 PPT routing만 최신 merged skill에
+   적용한다. 스타일 ID·spec cut·HTML 참조·PNG 33개가 1:1이고 누락이 없어야 한다.
+6. COMPANY·WORK_ORDERS·CLAUDE·AGENTS·dashboard·analytics-status를 실제 후보 상태와
+   정합화한다. Webtoon은 WIP, T-01은 `UNAPPROVED — implement 금지`, SB WO-003은 `검수`다.
+7. README는 확인된 모델·인증·저장·route만 갱신하고, PRD는 보조·비정본으로 명시한다.
+8. 2026-08-16 로컬 원천 5종을 읽기 전용으로 재집계하고 source별 관측시각·단위를
+   분리한다. 외부 GA4·Search Console·전환은 `미연결/자료 없음`을 유지한다.
+9. JSON/AIDE 계약, HTML parse, canonical pointer/content, asset count/digest/reference,
+   diff 공백과 제외 인벤토리 무변경을 좁게 검증한다. 실행 동작을 바꾸지 않았으므로 전체
+   build/test는 수행하지 않는다.
+
+#### 금지 사항
+
+- `reset --hard`, 내용 폐기 checkout/restore, force push·push, stash·삭제, worktree/branch
+  create/delete/prune, 파일 삭제·이동, 배포, fetch/network, dependency install, 외부·운영 쓰기.
+- 광범위 `git add`, 미승인 T-01 구현, 미수집 분석값 0 대체, 서로 다른 레코드 단위 합산,
+  Webtoon WIP를 clean checkout 구현으로 표현, Maker의 PASS·회귀 없음·완료 자기 판정.
+
+#### 보존 커밋과 롤백
+
+- Arduino 보존: `b273f7db8ef82ccb30e37fc0dd067386b4fd8a84`.
+- WO-002 스냅샷: `661bc1c5b6c06d91db0c98127c88b4f8c74c99df`.
+- local main merge: `55eabb0ca036c8064aa304dfa504cdfbd225b2fc`.
+- PPT root 통합: `f90b87513f566c532e6335f86ab514fcf88ca6a6`.
+- canonical 후보 커밋 SHA는 이 문서를 포함해 생성되므로 Maker 인계 보고에서 확정한다.
+- 모든 보존점은 local commit이며 외부 push가 없다. 롤백이 필요하면 Checker가 지정한 후보
+  변경만 새 작업으로 되돌리고, 기존 사용자·WIP 파일이나 보존 branch를 삭제하지 않는다.
+
+#### 보고 형식
+
+- 기준 HEAD, 산출물 commit SHA와 commit별 정확한 파일, 보존/제외 인벤토리, 명령·작업
+  디렉터리·exit code·수집/통과/실패/skip 수, 가정, 한계, 최종 해시를 기록한다.
+- Maker는 관찰 사실만 반환하고 `PASS`를 선언하지 않는다. Checker는 독립 위험등급,
+  DoD별 충족표, 경계 사례, `PASS/FAIL/INCONCLUSIVE`, 최소 재작업을 반환한다.
+
+#### 상태 이력
+
+- 2026-08-16 KST — 대표 안정화 지시로 `발행`, Sol이 R2·직렬 실행·유일 writer 계약을 확정.
+- 2026-08-16 KST — 시작 48-entry status와 Arduino skill/38자산 해시 일치 후 `진행`.
+- 2026-08-16 KST — Arduino, WO-002, local main, PPT를 네 로컬 보존점으로 분리하고 canonical
+  문서 후보 작성에 착수. 삭제·push·deploy·network 없음.
+- 2026-08-16 KST — Maker가 좁은 검증과 최종 인벤토리 대조 후 독립 Checker 단계인
+  `검수`로 인계한다. 최종 판정과 정본 승격은 대기한다.
 
 ## 검수 로그
 
