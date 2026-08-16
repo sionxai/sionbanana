@@ -1,0 +1,219 @@
+{
+  "title": "스타일 네비게이터 샘플 33종",
+  "outDir": "data/styles/samples",
+  "defaults": {
+    "size": "2k-16:9",
+    "quality": "high",
+    "count": 1,
+    "category": "style-samples"
+  },
+  "concurrency": 3,
+  "retry": 3,
+  "retryBaseDelayMs": 2000,
+  "scenes": [
+    {
+      "n": 1,
+      "title": "style samples",
+      "cuts": [
+        {
+          "slug": "ppt-steady-01",
+          "story": "PPT 코퍼레이트 블루",
+          "prompt": "스타일: 순백(#FFFFFF) 배경에 상단 풀폭 네이비(#1B3A6B) 제목 바를 얹은 신뢰감 있는 기업·공공 프레젠테이션 레이아웃. 제목 바 안에는 한글 세미볼드~볼드 산세리프 제목을 흰색으로, 자간을 약간 좁혀 견고하고 단정하게 배치한다. 제목 위 또는 옆에는 영문 섹션 라벨을 올캡스 스몰캡·넓은 자간·미디엄 웨이트의 중립적 지오메트릭 산세리프로 로열블루(#2E6FD6) 소형 처리해 한글 주(主)·영문 종(從)의 위계 대비를 만든다. 본문은 진회색(#333333) 산세리프 레귤러, 균일한 획과 열린 카운터, 표준~약간 넉넉한 자간으로 가독성을 확보한다. 숫자·데이터는 고정폭 라이닝 숫자로 로열블루 포인트를 준다. 얇은 1px 라인 아이콘, 넉넉한 여백, 그림자 최소의 플랫 처리. 크기 위계는 제목 : 부제 : 본문이 뚜렷하게 대비되고 좌측 정렬을 기본으로 한다. 세리프·장식은 배제하며, 신뢰감은 균일한 획과 정연한 정렬·절제된 로열블루 강조로 완성한다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-steady-02",
+          "story": "PPT 미니멀 모노",
+          "prompt": "스타일: 순백 배경에 차콜(#222)과 미드그레이 단색, 포인트는 오직 머스터드(#E1A100) 한 색만 쓰는 극단적 미니멀 편집 디자인. 화면 절반 이상을 빈 여백으로 두고, 요소를 좌측 정렬로 성기게 배치한다. 그림자·그라데이션·질감 없는 완전 평면, 구분은 머리카락처럼 얇은 실선 한 줄로만. 타이포는 한글 지오메트릭 산세리프 — 제목은 중간~약간 굵은 굵기에 자간을 넓혀 크고 단정하게, 본문·부제는 얇은 굵기로 물러나 굵기 대비만으로 위계를 만든다(세리프·장식 없음, 저대비의 곧은 획). 영문은 모노스페이스 느낌 등폭 대문자를 아주 작게, 자간을 크게 벌려 머스터드 색 킥커·라벨·페이지 번호로만 얹고, 큰 숫자·연도는 얇은 지오메트릭 그로테스크로 받는다. 큰 한글 제목(내용) 대 작고 넓게 벌린 영문 대문자 라벨(인덱스)의 대비가 핵심. 절제되고 집중된, 기계적이면서 고요한 인상.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-steady-03",
+          "story": "PPT 에디토리얼 세리프",
+          "prompt": "스타일: 따뜻한 아이보리(#F6F1E7) 매트 종이 배경의 잡지형 에디토리얼 레이아웃. 머리카락처럼 얇은 헤어라인 괘선과 넉넉한 여백으로 멀티컬럼 그리드를 구성하고, 딥그린(#1F4D3A)은 괘선·스몰캡스 라벨·핵심 숫자에만 절제해 포인트로 쓴다. 본문 텍스트는 잉크빛 웜 차콜(#2B2A26). 영문과 숫자는 고대비 디스플레이 세리프 — 얇은 헤어라인 세리프와 굵은 세로획의 뚜렷한 두께 대비로 클래식한 잡지 마스트헤드 인상, 헤드라인은 대형에 타이트한 자간, 부분 이탤릭 강조. 한글은 세리프 폰트에 의존하지 않고 정갈한 산세리프로 렌더하되, 자간을 넓게 열고 획을 얇고 균일하게, 폭은 표준~약간 좁게 하여 편집 지면 특유의 차분하고 우아한 인상을 만든다. 배열은 영문 대형 세리프 디스플레이가 시각 정점을 잡고, 그 아래 한 급 작은 미디엄 굵기의 넓은 자간 한글 제목이 병기되며, 상단에는 영문 스몰캡스 라벨(자간을 크게 벌린 딥그린)이 헤어라인 괘선과 함께 키커로 놓인다. 본문은 한글 레귤러 산세리프 멀티컬럼, 큰 딥그린 세리프 숫자가 지면의 리듬을 만든다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-steady-04",
+          "story": "PPT 그리드 인포",
+          "prompt": "스타일: 아주 옅은 회색(#F7F9FA) 배경의 플랫 벡터 데이터 슬라이드. 상단에 폭 넓은 청록(#00979D) 제목 바를 두고 그 안에 흰색 굵은 한글 제목(휴머니스트 산세리프, semibold, 자간 살짝 좁게)을 넣고, 제목 위에 영문 소형 대문자 라벨을 넓은 자간으로 킥커처럼 얹는다. 본문은 카드 그리드와 표 중심으로 구성하되 얇은 회색(#E3E8EA) 구분선과 넉넉한 여백으로 밀도를 낮춘다. 표·카드 헤더는 영문 스몰캡스 라벨(청록)과 한글 중간굵기 항목명을 짝지어 쓰고, 수치는 고정폭 라이닝 숫자로 자릿수가 세로로 정렬되게 크게, 단위는 작은 한글로 붙인다. 한글은 세리프 없이 획이 균일하고 속공간이 열린 산세리프로 작은 글자도 또렷하게, 영문은 지오메트릭·네오그로테스크 산세리프로 라벨은 대문자·숫자는 tabular. 청록은 제목바·헤더·핵심 수치에, 주황(#F2994A)은 증감 표시나 하이라이트 같은 소량 강조에만 절제해 쓰고 그림자는 거의 없이 평평하게 유지한다. 위계는 큰 한글 제목과 작고 자간 넓은 영문 캡스의 크기·굵기·대소문자 3중 대비로 만든다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-steady-05",
+          "story": "PPT 어스 뉴트럴",
+          "prompt": "스타일: 웜베이지(#EFE7DA) 배경에 세이지그린(#8AA07C)·테라코타(#C1704A) 포인트와 머드브라운(#5B4A3A) 본문색을 얹은 유기적·친환경 인문 톤, 부드러운 저대비와 매트한 마감, 손으로 찢은 종이결과 잎사귀 실루엣 같은 완만한 곡선 형태를 여백에 은은히 배치. 타이포는 영문 대형 헤드라인을 따뜻한 올드스타일 세리프(중간 굵기, 둥근 브래킷 세리프, 중간 정도의 획대비, 첫 글자만 대문자인 타이틀케이스)로 크게 앉히고, 그 아래 한글 부제는 획대비 낮고 속공간이 열린 휴머니스트 산세리프를 중간 굵기·넉넉한 자간·여유로운 행간으로 차분하게 배치한다. 헤드라인 위에는 테라코타색 영문 소형 캡스(전부 대문자, 넓은 자간)로 짧은 아이브로 라벨을 얹고, 숫자는 올드스타일(텍스트) 숫자로 베이스라인이 오르내리는 유기적 리듬을 살린다. 전체적으로 왼쪽 정렬 혹은 약간 비대칭의 여백 넉넉한 구성, 은은하고 따뜻한 자연물 감성.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-best-01",
+          "story": "PPT 틸&오렌지 플랫",
+          "prompt": "스타일: 옅은 쿨 그레이(#EDF1F2) 배경 위에 채도 높은 청록(#0FB6AE)과 선명한 주황(#FF6A2C)을 주역으로 쓰는 플랫 벡터 마케팅 레이아웃. 그라디언트·그림자·질감 없이 순색 면으로만 채우고, 순백 카드와 넓은 여백으로 호흡을 준다. 깊이와 본문 잉크는 짙은 청록(#0B6E6A)과 차콜 그린(#16292C)으로 잡고, 청록이 면적을 주도하며 주황은 CTA·숫자·강조에만 쏜다. 최상단에는 영문 올대문자 아이브로 라벨을 소형 지오메트릭 산세리프에 넓은 자간으로 청록 포인트를 준다. 그 아래 헤드라인은 굵은(엑스트라볼드) 넓은-폭 지오메트릭 한글 산세리프로 자간을 타이트하게 좁혀 화면을 압도할 만큼 크게. 부제는 중간 굵기 한글 산세리프에 정상 자간으로 차분하게 받친다. 숫자·통계·퍼센트는 영문 볼드 지오메트릭 산세리프를 크게 키워 주황으로 그래픽 강조. 세리프는 전혀 쓰지 않고 전부 깔끔한 산세리프로 통일하며, 큰 타이포와 여백 리듬, 강한 청록·주황 색면 대비로 마케팅 임팩트를 만든다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-best-02",
+          "story": "PPT 바이브런트 듀오톤",
+          "prompt": "스타일: 강렬한 2색 듀오톤 편집 포스터. 배경은 일렉트릭 코발트블루(#1D34E8)와 애시드 옐로(#FFE600)를 하드하게 대비시키고 보조로 near-black 잉크(#0A0E2A)·오프화이트(#F5F5EF)만 쓴다, 그라데이션 없이 채도 최대. 사진은 두 색으로 매핑한 듀오톤(그림자=코발트, 하이라이트=옐로)에 미세 하프톤 그레인. 타이포는 초굵게 밀어붙인다: 화면을 지배하는 초대형 영문 숫자와 헤드라인은 세리프 없는 블랙 웨이트의 넓은 그로테스크 산세리프로, 옐로 바탕엔 코발트/블랙, 코발트 바탕엔 옐로/화이트로 녹아웃. 한글 헤드라인은 폭이 좁고 세로로 긴 블랙~엑스트라볼드 산세리프에 자간을 바짝 좁혀 한 덩어리로 뭉치고, 부제는 미디엄 굵기 산세리프로 위계를 확 낮춘다. 최상단엔 전부 대문자에 자간을 크게 벌린 소형 영문 라벨. 거대한 숫자를 앵커로 두고 그 옆·아래에 한글 굵은 제목을 절반 크기로 스택해 극단적 크기 위계와 강한 대비 임팩트를 완성한다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-best-03",
+          "story": "PPT 소프트 파스텔 카드",
+          "prompt": "스타일: 아주 옅은 라벤더빛 화이트 배경(#F6F4FB) 위에 순백 카드들이 12~20px 둥근 모서리와 넓고 부드러운 저채도 그림자(불투명도 8~12%, 검은 테두리 없음)로 살짝 떠 있는 소프트 파스텔 카드 레이아웃. 카드 배경·태그·아이콘 자리에는 소프트 민트(#B6E3D4)·라이트 라벤더(#D4C7F0)·웜 피치(#FFCDB2)를 채도 20~30%로 낮춰 번갈아 쓰고, 텍스트는 순검정 대신 딥 슬레이트(#41414F), 보조 텍스트는 뮤트 그레이(#8B8896)로 부드럽게 처리. 타이포는 획 대비가 거의 없는 둥글고 친근한 산세리프가 기본으로, 한글은 semibold 제목 + regular 부제로 굵기만으로 위계를 만들고 자간은 살짝 여유 있게 준다. 영문은 둥근 지오메트릭 산세리프로, 카드 상단 카테고리는 소형 대문자(all-caps)에 넓은 자간(+10%)을 준 조용한 눈썹 라벨, 통계는 크고 둥근 숫자로 강조한다. 한글이 의미 전달의 주역이고 영문은 라벨·숫자 보조 역할이며, 좌측 정렬에 넉넉한 여백. 강한 대비·네온·검은 테두리·세리프·콘덴스드는 배제한, 채도 낮고 명도 높은 친근한 교육 톤. 손그림 일러스트·블롭 장식 없이 깔끔한 카드 UI로 유지해 프렌들리 라운드와 구분한다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-best-04",
+          "story": "PPT 볼드 인포그래픽",
+          "prompt": "스타일: 밝은 순백 바탕(#FFFFFF, 옵션으로 옅은 웜그레이 #F5F5F2) 위에 고채도 플랫 컬러 블록을 배치한 볼드 인포그래픽. 코발트블루(#1E5BFF)·코랄레드(#FF4A2E)·골든옐로(#FFC01E)·프레시그린(#12B886)을 4대 기둥색으로, 마젠타퍼플(#7B2FF7)을 소량 강조로 쓰고, 텍스트와 아이콘 외곽선은 잉크블랙(#0E1116). 그래디언트 없이 하드엣지 솔리드 색면, 두꺼운 스트로크, 꽉 찬 볼드 아이콘, 굵은 화살표와 스텝·플로우 커넥터, 통짜 막대·도넛 차트로 스텝/플로우/데이터를 강조한다. 타이포는 한글=엑스트라볼드~블랙의 넓은 지오메트릭 고딕(세리프 없음, 획 대비 없이 균일하게 두껍고, 제목은 자간을 살짝 좁혀 덩어리감)으로 대제목을 세우고, 영문=헤비 그로테스크 산세리프를 전부 대문자·넓은 자간으로 스텝/섹션 라벨(STEP 01, DATA)에, 핵심 수치는 초대형 콘덴스드 블랙 디스플레이 숫자로 화면을 압도한다. 시각 위계는 초대형 숫자 > 한글 블랙 제목 > 한글 미디엄 본문 > 영문 소형 올캡스 라벨 순. 전체 인상은 채도 높은 색 대비와 굵은 획으로 밀어붙이는 강한 에너지의 정보 강조형 인포그래픽. 검정 테두리·오프셋 섀도·깨진 그리드는 쓰지 않아 브루탈리즘과 구분된다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-best-05",
+          "story": "PPT 프렌들리 라운드",
+          "prompt": "스타일: 밝고 따뜻한 크림 아이보리(#FFF6EA) 배경에 코랄 오렌지·머스터드 옐로·프레시 민트·소프트 스카이 블루의 중간 채도 4색 팔레트, 텍스트와 외곽선은 짙은 웜 브라운(#4A3A30). 크고 둥근 라운드 코너, 두꺼운 둥근 라인, 말랑한 블롭 도형, 크레용·마커 질감의 손그림 일러스트와 도트·물결·별 장식으로 화면을 채운다. 타이포는 세리프 없는 둥근 고딕이 주역 — 한글 대형 제목은 볼드에 넉넉한 폭, 크고 열린 속공간, 동그랗게 마감된 획 끝, 살짝 여유 있는 자간으로 배치하고, 부제·본문은 미디엄으로 굵기 위계를 준다. 영문과 숫자는 지오메트릭 라운드 산세리프 볼드로 처리하고, 섹션 라벨·키워드는 소형 대문자(캡스)를 코랄/민트 알약형 배경 위 흰색으로 얹어 악센트를 준다. 한글 제목 대 영문 라벨 크기비는 약 4:1, 한글은 웜 브라운, 영문 캡스는 컬러 뱃지 위 흰색으로 대비. 전체적으로 초중등·워크숍에 어울리는 친근하고 말랑한 인상. 크레용·블롭·알약 뱃지의 손그림 질감이 깔끔한 카드 UI의 소프트 파스텔·3D 아이소메트릭과 갈린다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-trend-01",
+          "story": "PPT 글래스모피즘",
+          "prompt": "스타일: 라벤더 바이올렛(#8B7CF6)에서 소프트 시안(#6FD6E8)으로 흐르는 절제된 쿨 2색 메시 그라데이션 배경(하단에 로즈핑크가 아주 옅게만 번짐) 위에 큼직한 프로스티드 유리 카드 하나를 정돈되게 얹은 라이트 글래스모피즘. 카드는 흰색 12~20% 불투명도에 강한 배경 블러, 테두리는 흰색 40~60% 얇은 하이라이트로 빛을 머금고, 부드러운 확산 그림자로 떠 있는 구조적 UI 깊이감. 타이포는 세리프 없는 지오메트릭 산세리프로 통일하되 영문은 전부 대문자(ALL CAPS)로 간다 — 영문 디스플레이 헤드라인은 씬~라이트 굵기에 아주 넓은 트래킹의 대문자로 건축적이고 정돈된 UI 간판처럼 크게, 그 아래 한글 부제는 미디엄~세미볼드 산세리프에 살짝 넓은 폭과 넉넉한 자간으로 가독 무게중심을 확실히 잡는다. 섹션 번호·메타 라벨은 소형 대문자에 넓은 트래킹으로 정돈. 텍스트 색은 딥 인디고/슬레이트(#1E1B3A~#2D2A4A), 포인트는 단색 일렉트릭 바이올렛(#7C5CFF) 하나로만 또렷하게 쓰고 그라데이션 텍스트는 쓰지 않는다. 하나의 유리 카드 안에 요소를 좌측 또는 중앙으로 구조적으로 정렬한, 밝고 투명하며 차분한 프로덕트 UI 인상.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-trend-02",
+          "story": "PPT 브루탈리즘 볼드",
+          "prompt": "스타일: 뉴브루탈리즘 볼드. 종이 질감의 미색 오프화이트 배경에 순수 검정 굵은 테두리(4~8px)를 모든 블록·글상자·이미지에 두르고, 일렉트릭 옐로·코발트 블루·토마토 레드·핫핑크 중 3~4색만 큰 면적의 원색 블록으로 채운다. 그라데이션·소프트 섀도 없이 각지고 딱 떨어지는 검정 하드 오프셋 섀도(흐림 0)로만 입체를 준다. 영문·숫자는 초대형 그로테스크 블랙 웨이트 전부 대문자에 자간을 극단적으로 조여 화면을 압도하는 주역으로 세우고, 한글은 세리프 없는 초굵은 블랙 고딕을 중간 크기 제목/부제로 비대칭 배치하되 검정 박스 안 흰 글자 반전이나 원색 블록 위에 얹어 대비시킨다. 작은 영문 라벨은 모노스페이스 느낌 소형 대문자에 자간을 넓게 벌려 모서리에 태그처럼 흩뿌린다. 그리드를 의도적으로 어긋내 요소가 겹치고 색 블록 밖으로 삐져나오는, 거칠고 단단한 극단적 비대칭 구성.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-trend-03",
+          "story": "PPT 그라디언트 메시",
+          "prompt": "스타일: 라벤더·피치·스카이블루·민트·연분홍이 경계 없이 흐르는 다색·고명도 리퀴드 메시 그라데이션 배경(웜톤 피치·연분홍까지 폭넓게 순환), 그 위에 흐릿한 블러와 은은한 광택·얇은 흰 테두리를 가진 반투명 젖빛 유리 패널(글래스모피즘)을 얹어 리퀴드한 공기감을 낸다. 타이포는 세리프 없는 미끈한 기하학 산세리프 계열로 통일하되 영문 헤드라인은 소문자 또는 타이틀 케이스로 간다 — 상단에 소형 영문 올캡스 키커를 아주 넓은 자간으로 얇게 놓고, 그 아래 대형 영문 지오메트릭 산세리프 헤드라인을 라이트~레귤러 굵기·넓은 자간·소문자/타이틀 케이스로 크게 배치해 시각 중심을 잡는다(대문자 헤드라인은 쓰지 않아 케이스로 글래스모피즘과 구분). 다시 그 아래 한글 부제는 중간 굵기 산세리프로 헤드라인의 40~50% 크기, 자간을 살짝 넉넉히 벌려 또렷하게 읽히게 한다(한글은 명조 인상 없이 굵기·크기로만 위계). 본문 텍스트는 짙은 잉크 네이비/차콜(#1C1B2E)로 밝은 배경과 또렷이 대비하고, 포인트는 바이올렛→핑크로 이어지는 채도 높은 그라데이션 스트로크 한 줄만 절제해 시그니처로 쓴다. 좌측 기준의 약간 비대칭 리퀴드 배치, 유리 패널 안 넉넉한 여백, 맑고 촉촉한 다색 밝은 UI.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-trend-04",
+          "story": "PPT 다크 네온",
+          "prompt": "스타일: 짙은 남색-차콜 그라디언트 배경에 무대 뒤 방사형 발광이 은은히 깔린 다크 네온 테크 무대. 포인트 컬러는 네온 시안과 네온 마젠타 두 색뿐이며, 얇은 발광 라인과 외곽 글로우(bloom)로만 강조하고 채도 높은 네온은 작은 면적에만 쓴다. 타이포는 세리프 없는 기하학적 산세리프로 통일한다 — 영문은 전부 대문자의 넓은 그로테스크 디스플레이 헤드라인에 넓은 자간과 시안 글로우를 입혀 무대 간판처럼 시각적 정점을 만들고, 그 아래 한글은 중간~볼드의 굵고 균일한 획을 가진 현대 고딕으로 고휘도 오프화이트(#EAF4FF)에 얹어 내용을 또렷하게 읽힌다(얇은 웨이트 금지, 발광 번짐 방지). 모서리와 상단에는 모노스페이스 테크노 인상의 소형 대문자 영문 라벨과 등폭 숫자를 시안·마젠타 포인트로 배치해 데이터 대시보드 같은 테크 질감을 준다. 위계는 영문 초대형 헤드라인 > 한글 대형 볼드 제목 > 한글 미디엄 부제 > 영문 모노 캡스 소형 라벨 순으로 뚜렷하게 둔다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "ppt-trend-05",
+          "story": "PPT 3D 아이소메트릭",
+          "prompt": "스타일: 밝고 경쾌한 3D 아이소메트릭 프레젠테이션. 배경은 아주 옅은 쿨 화이트(#F3F6FC)에 라벤더·블루 기운이 미세하게 도는 청량한 밝은 톤. 화면 우측에 30도 기울어진 입체 아이소메트릭 아이콘/장면을 배치하되 둥근 모서리와 매끈한 플라스틱·클레이 질감으로 그리고, 코랄(#FF6B6B)·스카이블루(#4D9DE0)·민트(#3FD9B0)·선샤인옐로(#FFD166)·라벤더(#A78BFA)의 경쾌한 중채도 컬러 블록으로 채운다. 그림자는 검정이 아니라 쿨 그레이블루(#C7D0E6)의 낮은 불투명도 소프트 섀도로 오브젝트 아래 부드럽게 깔린다. 타이포그래피: 헤드라인은 영문 대형 지오메트릭 라운드 산세리프 — 끝이 둥근 스트로크, 큰 x-height, 거의 정원에 가까운 'o', 볼드~엑스트라볼드, 약간 넉넉한 자간, 타이틀케이스로 좌측 상단에 크게. 그 아래 한글 부제는 같은 라운드 계열의 미디엄~세미볼드, 약간 넓은 자족폭과 여유로운 자간으로 가볍고 친근하게(세리프 없음). 섹션 라벨·태그는 영문 작은 대문자(small caps) 볼드에 넓은 자간을 주고 액센트 컬러로 포인트하며, 수치·숫자는 영문과 같은 라운드 지오메트릭 볼드로 크게 표기한다. 텍스트는 잉크 네이비(#20264A)로 또렷하게. 전체적으로 여백이 넉넉하고 부드러운 3D 그림자와 명랑한 컬러가 밝은 SaaS·테크 일러스트 무드를 만든다. 3D 입체 오브젝트·영문 주역·쿨 화이트·잉크 네이비로, 2D 손그림·한글 주역·웜 크림의 프렌들리 라운드와 구분된다.\n\n교육용 프레젠테이션 표지 슬라이드. 제목 '프로젝트 개요', 부제(영문 라벨) 'STYLE SAMPLE', 그 아래 항목 3줄 '목표 : 데이터로 결론 내기', '방법 : 센서 측정과 AI 코딩', '산출물 : 결과물 + 그래프 + 발표'. 오른쪽에 노트북·센서·막대그래프를 나타내는 아이콘 묶음과 큰 숫자 '01'. 위 스타일 블록에 명시된 타이포그래피(한글 폰트 느낌, 영문 폰트 느낌, 한글·영문 배열과 크기 위계)를 정확히 반영한다. 한글 텍스트는 오타 없이 또렷하게.",
+          "negativePrompt": "cluttered, distorted text, gibberish letters, watermark, low quality"
+        },
+        {
+          "slug": "cam-cine-01",
+          "story": "CAM 블록버스터 청록-주황",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. cinematic teal-and-orange color grade, cool teal shadows and warm orange skin tones, shallow depth of field, filmic contrast, blockbuster look, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-cine-02",
+          "story": "CAM 애나모픽 와이드",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. anamorphic widescreen cinema look, horizontal lens flares, oval bokeh, 2.39:1 framing feel, shallow depth of field, cinematic, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-cine-03",
+          "story": "CAM 로우키 무드",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. low-key cinematic lighting, single dramatic light source, deep shadows, chiaroscuro, moody atmosphere, rich blacks, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-film-01",
+          "story": "CAM 빈티지 코닥",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. vintage Kodak film photograph, visible film grain, warm faded colors, soft halation, analog 35mm look, nostalgic, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-film-02",
+          "story": "CAM 느와르 하이콘트라스트",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. black and white film noir, high contrast monochrome, hard shadows, venetian blind light, grainy, dramatic mood, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-film-03",
+          "story": "CAM 텅스텐 야간 도시",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. nighttime city scene, tungsten and neon lighting, wet reflective streets, cinematic bokeh of city lights, moody urban night, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-film-04",
+          "story": "CAM 파스텔 드림",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. dreamy pastel photography, soft diffused light, gentle pastel palette, hazy glow, ethereal romantic mood, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-natural-01",
+          "story": "CAM 골든아워 역광",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. golden hour backlight, warm sunset glow, soft rim light, gentle lens flare, natural warm tones, airy, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-natural-02",
+          "story": "CAM 다큐 내추럴",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. natural daylight documentary photography, realistic neutral color, soft window light, candid, true-to-life tones, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "cam-natural-03",
+          "story": "CAM 하이키 광고",
+          "prompt": "카페 창가 자리에 앉아 커피잔을 든 20대 인물의 반측면 상반신. 창밖은 부드럽게 아웃포커스된 거리. 자연스러운 표정. high-key commercial photography, bright clean background, soft even lighting, minimal shadows, crisp product-ad look, photographic, 16:9 framing.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, low quality"
+        },
+        {
+          "slug": "char-real-01",
+          "story": "CHAR 하이퍼리얼 포토",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in hyperrealistic studio portrait, photographic detail, realistic skin texture, soft studio lighting, consistent identity. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-real-02",
+          "story": "CHAR 3D 픽사풍",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in stylized 3D character render, Pixar-like proportions, soft subsurface skin, expressive large eyes, clean studio lighting. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-anime-01",
+          "story": "CHAR 셀 애니메",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in Japanese cel-shaded anime style, clean bold linework, flat cel shading, vibrant colors, expressive anime eyes. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-anime-02",
+          "story": "CHAR 웹툰 클린",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in Korean webtoon illustration style, clean thin linework, soft gradient shading, modern digital coloring, appealing character design. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-anime-03",
+          "story": "CHAR 지브리풍 소프트",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in hand-painted anime style inspired by classic Ghibli films, soft watercolor backgrounds, gentle warm palette, wholesome mood. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-illust-01",
+          "story": "CHAR 수채 일러스트",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in hand-painted watercolor illustration, visible brush strokes and pigment bleed, textured paper, soft organic edges. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-illust-02",
+          "story": "CHAR 아메리칸 코믹 잉크",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in American comic book style, bold ink outlines, halftone dot shading, saturated flat color blocks, dynamic inking. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        },
+        {
+          "slug": "char-illust-03",
+          "story": "CHAR 미니 치비",
+          "prompt": "20대 인물 캐릭터, 단발 헤어, 데님 재킷, 반신 정면, 중립 회색 배경, 또렷한 아이덴티티. Rendered in cute chibi character, 2 to 3 head-tall proportions, rounded shapes, big head, soft pastel colors, adorable mascot vibe. Character centered, half body, neutral background, 16:9.",
+          "negativePrompt": "text, caption, watermark, logo, distorted face, extra limbs, extra fingers, low quality"
+        }
+      ]
+    }
+  ]
+}

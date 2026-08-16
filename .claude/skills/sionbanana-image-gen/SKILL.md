@@ -1,6 +1,6 @@
 ---
 name: sionbanana-image-gen
-description: Use this skill to generate images via 시온바나나 local tool when the user asks for image creation, scene generation, character sheets, key visuals, batch/parallel exploration, or upscaling selected results. Trigger keywords: 이미지 생성, 장면 생성, 캐릭터 시트, 키비주얼, 업스케일, 병렬 생성, 10개 생성, 시온바나나.
+description: Use this skill to generate images via 시온바나나 local tool when the user asks for image creation, scene generation, character sheets, key visuals, batch/parallel exploration, upscaling selected results, or turning a document into a presentation slide deck. Trigger keywords: 이미지 생성, 장면 생성, 캐릭터 시트, 키비주얼, 업스케일, 병렬 생성, 10개 생성, 시온바나나, PPT 제작, PPT로 만들어줘, 슬라이드 제작, 발표자료, 기획안 PPT화.
 ---
 
 # Sion Banana Image Gen
@@ -26,6 +26,69 @@ Prefer the local helper workflow over editing app code. `docs/agent-automation-w
 ```bash
 curl -s http://localhost:3002/api/health
 ```
+
+## PPT·슬라이드 요청 시 — 스타일을 먼저 확정한다 ★
+
+사용자가 "이 문서 PPT로", "발표자료 만들어줘", "슬라이드로 만들어줘" 라고 하면 **즉흥으로 스타일을 지어내지 말고** 등록된 스타일 카탈로그를 먼저 쓴다.
+
+> ★ **운영 스펙 본문은 [`data/styles/PPT-STYLES.md`](../../../data/styles/PPT-STYLES.md)에 있다. PPT 요청을 받으면 반드시 이 문서를 먼저 읽어라.**
+> 이 SKILL의 아래 절차는 요약일 뿐이고, 실제 조판 규격(6단계 파이프라인, 콘텐츠 유형 21종 매핑, 텍스트 보존 등급, 스타일별 비주얼 애셋 규격·조판 상한, 모드 A/B/C)은 그 문서에만 있다.
+
+카탈로그 위치:
+
+- 운영 스펙: `data/styles/PPT-STYLES.md` — **PPT 작업의 소스 오브 트루스**
+- 데이터: `data/styles/styles.json` — PPT 15종(스테디셀러·베스트셀러·최신트렌드 각 5) + 카메라·필름룩 10종 + 캐릭터 8종. 고정 `id`와 주입용 `styleBlock`. **PPT 항목에 한해** `colorTone`, `koreanTypeface`, `latinTypeface`, `arrangement`가 추가로 있다(카메라·캐릭터 항목에는 없다).
+- 갤러리: `data/styles/index.html` — 33개 카드(샘플 썸네일 + 복사용 프롬프트 + `#id` 앵커)
+- 샘플 이미지: `data/styles/samples/scene-1/<id>.png`
+
+절차:
+
+1. `PPT-STYLES.md`와 `styles.json`을 읽고 주제에 맞는 PPT 스타일 **2~3개를 추천**한다. (표·수치 많은 문서 → `ppt-steady-04` / 투자·IR·공공 → `ppt-steady-01` / 일반 교육·온보딩 → `ppt-best-03` / 초중등·워크숍 → `ppt-best-05` / 테크 무대 → `ppt-trend-04` / 시스템·구조 → `ppt-trend-05`)
+2. `open data/styles/index.html` 로 갤러리를 열어 **실제 샘플을 눈으로 보게** 한다. 승인 질문 UI에는 썸네일을 넣을 수 없으므로, 이 단계가 "디자인 카드를 보여주는" 역할이다.
+3. **스타일 + 분량**을 선택지로 물어 승인받는다. 선택 응답이 곧 착수 승인이다.
+4. `PPT-STYLES.md`의 **6단계 파이프라인**을 그대로 밟는다: 섹션 인벤토리 → 장수 수렴 → 유형 매핑 → 텍스트 예산 → 5블록 조립 → 검수.
+5. 프롬프트는 **5블록 고정**으로 조립한다. `styleBlock`만 붙이면 비주얼 규격·상한·negative가 통째로 빠진다.
+
+```text
+[1] 스타일 블록      ← PPT-STYLES.md 2부 "주입 블록"의 앞부분
+[2] 비주얼 애셋 블록  ← 같은 "주입 블록"의 뒷부분 (사진·아이콘·차트·3D·배치)
+[3] 레이아웃 지시     ← 유형 매핑표의 시각 형식
+[4] 실제 텍스트       ← 보존 등급 적용 + 아래 언어 지시 문장
+[5] 금지·품질 지시    ← negative prompt
+```
+
+주의:
+
+- **언어 지시는 반드시 이 문장을 쓴다.** 그냥 "한국어만 사용한다"라고 쓰면 영문 고유명사까지 번역된다 — 실측에서 `React SSR → 리액트 서버 렌더링`, `PostgreSQL → 포스트그레스큐엘`로 전부 한글화됐다.
+  > 본문은 한국어로 쓰되, 영문 제품명·기술명·지표명(예: React SSR, PostgreSQL, D1)은 원문 영문 표기를 그대로 유지하고 한글로 번역하거나 음차하지 않는다.
+- PPT `styleBlock`에는 색감뿐 아니라 **한글·영문 폰트 느낌과 배열**이 들어 있다. 임의로 잘라내지 마라. 폰트 파일은 불러올 수 없으므로 항상 시각 속성(굵기·폭·세리프 여부·대문자·자간·크기 위계)으로 서술돼 있다. 한글 명조·세리프 재현은 불안정하므로(실측 60여 장에서 전부 산세리프) 세리프 인상은 영문·숫자로 만든다.
+- 다크·글래스 계열(`ppt-trend-04`, `ppt-trend-01`)은 표가 밀집된 문서에서 한글 가독성이 떨어진다. 표 많은 기획안에는 밝은 계열을 권한다.
+- **전 슬라이드를 표로 채우지 마라.** 표 슬라이드는 덱 전체의 1/3 이하로 유지하고, 서사·개념 슬라이드(페르소나·루프·밸런스 곡선·로드맵 등)는 일러스트·차트 중심으로 조판한다. (실측: 22장을 전부 표·텍스트로 뽑았다가 "딱딱하고 장황하다"는 피드백을 받아 10장을 시각화로 재생성했다.)
+- 표를 시각으로 바꿀 때의 대응 예: 확률 표 → 하강 곡선 그래프 / 사용자 유형 표 → 페르소나 아바타 카드 / 단계 이름 목록 → 진화 일러스트 띠 / 도입 순서 → 스텝·퍼널 그래픽 / 채널 표 → 아이콘 행.
+- **산출물은 PNG 슬라이드 묶음 + HTML 인덱스다.** `.pptx` 파일을 만들지 않는다. 편집 가능한 덱이 필요하면 `PPT-STYLES.md` 3부의 모드 B/C로 배경·애셋만 생성하고 텍스트는 편집기에서 넣는다.
+
+**PPT 작업의 Phase 라우팅** — 아래 Phase 1~5는 스토리보드(시나리오·캐릭터·장소) 전용이다. PPT는 다음만 적용한다:
+
+| Phase | PPT 적용 |
+|---|---|
+| 1b·1c (jobs·storyboard spec) | **적용** — 슬라이드마다 prompt가 다르므로 spec 방식 |
+| 1d·1e (캐릭터·장소·소품 시트, 마스터샷) | **미적용** — PPT에는 등장인물 연속성이 없다 |
+| 1f (시트 커버리지 검증) | **미적용** |
+| 2 (index) · 5 (딜리버리 정리) | **적용** |
+| 4 (검수) | **PPT 전용 Rubric으로 대체** — 아래 |
+
+**PPT 전용 검수 Rubric** (Medium Rubric의 subject·pose·style 대신 이것을 쓴다):
+
+- `numbers`: 원문의 모든 수치·단위·비율이 슬라이드와 동일한가
+- `tokens`: 영문 제품명·기술명이 번역·음차되지 않았는가
+- `hangul`: 오탈자·깨진 글리프·자모 분리가 없는가
+- `table`: 행·열이 어긋나지 않고 헤더가 구분되는가
+- `mapping`: 유형 매핑표에서 정한 시각 형식으로 나왔는가
+- `budget`: 글자 수·표 행이 해당 스타일 상한 이내인가
+
+**재생성 규칙** — 수치·불변 토큰·한글 오류는 **무조건 재생성(상한 2회)**. 2회로도 안 되면 그 컷만 모드 B/C로 전환한다. 미관 문제(구도·색 편차)는 재생성하지 않는다. (Phase 4의 "최대 1회 자동 재생성"은 스토리보드 기준이며 PPT에는 이 규칙이 우선한다.)
+
+새 스타일을 추가할 때는 `styles.json`에 항목을 넣고, 같은 견본(`sampleSubjects`)으로 샘플 1장을 생성한 뒤 갤러리와 `PPT-STYLES.md`를 갱신한다.
 
 ## Workflow
 
