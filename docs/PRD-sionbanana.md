@@ -2,7 +2,7 @@
 
 > **문서 상태: 보조 구현 명세(Supplemental) · 비정본(Non-canonical).** CEO 보존 브랜치
 > `claude/ceo-skill-check-e77efc`의 `aab16778`에서 생성되어 `597bde4d`까지 보존된 원본을
-> SB WO-003 canonical 후보에 회수했다. 전략·우선순위·현재 상태·완료 판정은
+> SB WO-003을 거쳐 v0.1.3 활성 정본의 보조 문서로 회수했다. 전략·우선순위·현재 상태·완료 판정은
 > `docs/COMPANY.md`와 `docs/WORK_ORDERS.md`가 우선하며, 실제 구현 계약은 추적된 현재 코드와
 > 승인된 개별 작업지시를 함께 대조한다. 이 문서의 [가정]/[확인필요]만으로 새 구현에
 > 착수하지 않는다.

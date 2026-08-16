@@ -97,9 +97,9 @@
         <h1>시온바나나 경영 현황</h1>
       </div>
       <div class="chips">
-        <span>정본 0.1.3-candidate · Checker 대기</span>
+        <span>정본 0.1.3 · Active</span>
         <span>현재 날짜 2026-08-16</span>
-        <span>보고 갱신 2026-08-16 20:54 KST</span>
+        <span>보고 갱신 2026-08-16 21:28 KST</span>
         <span>로컬 관측 2026-08-16 20:52:56 KST</span>
         <span>코드 통합 기준 f90b8751</span>
       </div>
@@ -111,10 +111,10 @@
     <div class="section-heading"><div><span class="eyebrow">Status</span><h2>현재 단계와 진척</h2></div><p>2026-08-16 local read-only 관측 기준 · 확인되지 않은 값은 수치로 추정하지 않음</p></div>
     <div class="kpi-grid">
       <div class="card stat-tile"><span class="stat-label">제품 단계</span><strong>소유자 운영형 로컬 제품</strong><small>수익화 이전 제품 검증</small></div>
-      <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>1/5 완료 · 20%</strong><small>NOW-002는 canonical 후보 검수, 완료 아님</small></div>
+      <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>2/5 완료 · 40%</strong><small>NOW-002 완료 · 실제 cleanup은 T-02 승인 대기</small></div>
       <div class="card stat-tile"><span class="stat-label">공개 배포</span><strong>not_deployed</strong><small>공개 URL·호스팅 설정 미확인</small></div>
       <div class="card stat-tile"><span class="stat-label">웹 분석 계측</span><strong>not_instrumented</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
-      <div class="card stat-tile"><span class="stat-label">최신 정본 후보</span><strong>SB WO-003 · 검수</strong><small>Maker 표적 검증 관찰 수집 · 독립 Checker 대기</small></div>
+      <div class="card stat-tile"><span class="stat-label">최신 정본</span><strong>SB WO-003 · 완료</strong><small>Checker PASS · CEO READY_FOR_CLEANUP</small></div>
     </div>
   </section>
 
@@ -159,8 +159,8 @@
     <div class="section-heading"><div><span class="eyebrow">Delivery</span><h2>최근 보존·완료 이력</h2></div><p>검수 후보와 승인 완료를 구분</p></div>
     <div class="grid-2">
       <div class="card agenda-card">
-        <h3>SB WO-003 · canonical 후보 <span class="badge b-review" style="margin-left:4px">검수</span></h3>
-        <p>WO-002 스냅샷, local main skill 이력, Arduino PPT 자산, CEO 문서 출처를 로컬 커밋으로 보존하고 Maker 표적 검증 관찰을 수집했다. 독립 Checker 판정이 남아 있으므로 완료·정본 승격이 아니다.</p>
+        <h3>SB WO-003 · 저장소·맥락 1차 안정화 <span class="badge b-done" style="margin-left:4px">완료</span></h3>
+        <p>후보 <code>bfea5938</code>이 독립 Checker PASS와 CEO 재검증을 통과했다. v0.1.3 활성 정본으로 승인했고 판정은 <code>READY_FOR_CLEANUP</code>이다. 실제 삭제·push·deploy는 하지 않았다.</p>
       </div>
       <div class="card agenda-card">
         <h3>SB WO-002 · 2026-08-15 현황판·유입 통계 최신화</h3>
@@ -171,8 +171,8 @@
         <p>2026-08-13 독립 Checker PASS와 CEO <code>ACCEPT WITH FOLLOW-UP</code>으로 완료됐다. 당시 후속 한계는 로컬 실물 렌더 미확인과 untracked 정본 보존 위험이었다.</p>
       </div>
       <div class="card agenda-card">
-        <h3>회사 정본 v0.1.2 · CEO 문서 출처 보존</h3>
-        <p>승인 기준 v0.1.2와 CEO 4 doc commits(<code>aab16778</code>~<code>597bde4d</code>)를 보존했다. <code>0.1.3-candidate</code>는 이 출처를 root에 정합화한 검수 후보이며 PRD는 보조·비정본이다.</p>
+        <h3>회사 정본 v0.1.3 · Active</h3>
+        <p>CEO 4 doc commits(<code>aab16778</code>~<code>597bde4d</code>)를 보존하고 후보 <code>bfea5938</code>에 정합화했다. 독립 검수 후 v0.1.3으로 승인했으며 PRD는 보조·비정본이다.</p>
       </div>
       <div class="card agenda-card">
         <h3>모션 결함 원인 진단 2건</h3>
@@ -258,13 +258,13 @@
   </section>
 
   <section>
-    <div class="section-heading"><div><span class="eyebrow">Roadmap</span><h2>진행 중 업무</h2></div><p>NOW 진척 1/5 완료(20%) · 상태는 정본 §6의 뷰어</p></div>
+    <div class="section-heading"><div><span class="eyebrow">Roadmap</span><h2>진행 중 업무</h2></div><p>NOW 진척 2/5 완료(40%) · 상태는 정본 §6의 뷰어</p></div>
     <div class="card table-wrap">
       <table>
         <thead><tr><th>ID</th><th>항목</th><th>상태</th><th>비고 (2026-08-16 KST 실측)</th></tr></thead>
         <tbody>
-          <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>승인 기준 v0.1.2 유지 · 0.1.3-candidate는 Checker 대기</td></tr>
-          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-review">검수</span></td><td>WO-003 canonical 후보 작성 · worktree/branch 삭제는 미실행</td></tr>
+          <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>v0.1.3 Active · 후보 bfea5938 독립 검수 완료</td></tr>
+          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-done">완료</span></td><td>READY_FOR_CLEANUP · worktree/branch 삭제는 T-02 승인 대기</td></tr>
           <tr><td>NOW-003</td><td>핵심 경로 검증 (인증→생성→저장→스토리보드)</td><td><span class="badge b-wait">대기</span></td><td>전체 경로의 최신 실물 검증 증거 없음</td></tr>
           <tr><td>NOW-004</td><td>프리셋·모션 구현 실물 검수</td><td><span class="badge b-review">검수</span></td><td>결함 원인 2건 진단 완료, 수정·회귀 판정 미완료</td></tr>
           <tr><td>NOW-005</td><td>Webtoon Studio 변경 보존·범위 확정</td><td><span class="badge b-wip">착수</span></td><td>미커밋 Webtoon 관련 변경과 산출물 보존 범위 확정 필요</td></tr>
@@ -277,7 +277,7 @@
   <section class="grid-2">
     <div class="card panel">
       <h3 style="margin-bottom:8px">작업지시 현황 (SB WO)</h3>
-      <p class="note"><code>SB WO-001</code>과 <code>SB WO-002</code>는 완료됐다. <code>SB WO-003</code>은 canonical 후보를 독립 Checker에게 인계하는 <b>검수</b> 상태다. 이전 작업의 PASS는 제품 전체 회귀 PASS나 이번 후보 판정을 뜻하지 않는다.</p>
+      <p class="note"><code>SB WO-001</code>~<code>SB WO-003</code> 세 건은 완료됐다. WO-003의 PASS는 정본·보존 범위 판정이며 제품 전체 기능 회귀 PASS를 뜻하지 않는다.</p>
     </div>
     <div class="card panel">
       <h3 style="margin-bottom:8px">저장소 스냅샷</h3>
@@ -286,7 +286,7 @@
         <tbody>
           <tr><td>코드 통합 기준</td><td><code>f90b8751</code></td><td><code>feature/webtoon-studio</code> · canonical 문서 후보는 이 뒤 단일 로컬 커밋</td></tr>
           <tr><td>제외 tracked dirty</td><td>4 files</td><td>agent/storyboard 스크립트 3 + 표적 테스트 1, byte-identical·unstaged 유지</td></tr>
-          <tr><td>canonical 후보</td><td><span class="badge b-review">검수</span></td><td>COMPANY·WO·CLAUDE·AGENTS·dashboard·analytics·README·보조 PRD만 단일 로컬 커밋</td></tr>
+          <tr><td>canonical 정본</td><td><span class="badge b-done">Active</span></td><td>후보 <code>bfea5938</code> Checker PASS · v0.1.3 승인</td></tr>
           <tr><td>제외 untracked</td><td>37 files</td><td>Webtoon WIP 16, 생성물·도구·문서 20, 필요성 미충족 <code>.codex/config.toml</code> 1</td></tr>
           <tr><td>추가 worktree</td><td>3개</td><td>Arduino 보존 branch, friendly-pasteur detached, CEO source branch · 삭제 미실행</td></tr>
         </tbody>
@@ -297,14 +297,14 @@
   <section>
     <div class="section-heading"><div><span class="eyebrow">Risks</span><h2>위험·막힘</h2></div><p>확인된 사실과 미확인 영역을 분리</p></div>
     <ul class="risk-list">
-      <li><b>후보 판정 대기</b> — local main 이력과 PPT는 feature에 보존됐지만 canonical 후보는 Checker 전이다. 완료·정본 승격을 선언하지 않는다.</li>
+      <li><b>정리 실행 대기</b> — 판정은 <code>READY_FOR_CLEANUP</code>이지만 worktree·branch 삭제·prune은 T-02 별도 승인 전까지 실행하지 않는다.</li>
       <li><b>NOW-005 산출물 보존 위험</b> — Webtoon 관련 미커밋 변경과 산출물이 존재한다. 정리·이동·삭제 전 보존 범위 확정이 필요하다.</li>
       <li><b>분석·배포 원천 부족</b> — 공개 URL과 GA4·Search Console·문의/예약/구매 실제 원천을 확인하지 못했다. 미수집 상태를 방문자나 매출 숫자로 바꿀 수 없다.</li>
       <li><b>RTDB 확인 차단</b> — 마지막 2026-08-15 safe shallow GET은 DNS 경계로 응답을 받지 못했고 WO-003은 network 금지로 새 조회가 없다. 연결·데이터 유무·권한을 임의 판정하지 않는다.</li>
       <li><b>로컬 기록 해석 한계</b> — 관리자·개발·자동화·테스트 활동을 분리할 수 없고 원천 간 중복 가능성이 있다. 서로 다른 레코드 단위를 합산하지 않는다.</li>
       <li><b>제품 전체 실물·회귀는 별도</b> — 이번 최신화는 정본 현황판과 분석 상태 갱신이며, dirty worktree 전체 기능 회귀 판정이 아니다.</li>
       <li><b>외부 반영 없음</b> — 모든 보존·병합·candidate는 로컬 commit뿐이다. push·deploy·worktree 삭제는 실행하지 않았다.</li>
-      <li><b>원본 공백 관찰</b> — 보존된 PPT 원본에는 Markdown hard-break와 갤러리 빈 줄의 후행 공백 37건이 있다. 바이트 보존 때문에 정규화하지 않았으며 Checker가 수용 여부를 판단한다.</li>
+      <li><b>원본 공백 관찰</b> — 보존된 PPT 원본에는 Markdown hard-break와 갤러리 빈 줄의 후행 공백이 있다. Checker는 바이트 보존 근거를 확인하고 비차단으로 수용했다.</li>
       <li><b>T-01 미승인</b> — 광범위 미션 확장은 <code>UNAPPROVED — implement 금지</code>다.</li>
       <li><b>자격증명 노출 대응 미결정</b> — 저장소 유출 여부보다 사용처·교체 범위 판단이 남아 있다.</li>
       <li><b>모션 결함 수정 미승인</b> — 원인 진단은 끝났지만 수정·회귀 범위는 승인 전이다.</li>
@@ -315,8 +315,8 @@
     <div class="section-heading"><div><span class="eyebrow">Next</span><h2>다음 행동</h2></div><p>증거 확보 후에만 상태 변경</p></div>
     <div class="grid-2">
       <div class="card agenda-card">
-        <h3>1. SB WO-003 독립 Checker</h3>
-        <p>보존 커밋·canonical 문서·2026-08-16 수치·제외 인벤토리를 같은 SourceRefs로 재검증하고 PASS/FAIL/INCONCLUSIVE를 판정한다.</p>
+        <h3>1. T-02 cleanup 실행 여부 결정</h3>
+        <p>현재 판정은 <code>READY_FOR_CLEANUP</code>이다. 삭제 대기 worktree·중복 branch 목록을 다시 확인한 뒤 삭제·prune 범위를 대표가 별도로 승인해야 한다.</p>
       </div>
       <div class="card agenda-card">
         <h3>2. T-05 웹 유입 추진 여부 결정</h3>
@@ -345,7 +345,7 @@
       <li>2026-08-16 — <code>SB WO-003</code> 시작 기준 48 entries, Arduino skill·38자산 해시를 재확인하고 고유 산출물을 로컬 커밋으로 분리 보존.</li>
       <li>2026-08-16 — local main 10개 skill 이력을 merge commit으로 보존하고 Arduino PPT routing + 38자산을 root에 통합. worktree·branch 삭제와 push·deploy는 미실행.</li>
       <li>2026-08-16 20:52:56 KST — 로컬 원천 5종을 재집계. 외부 분석은 새 조회 없이 마지막 관측시각과 <code>미연결/자료 없음</code>을 유지.</li>
-      <li>2026-08-16 — <code>0.1.3-candidate</code>를 <code>검수</code>로 인계. 독립 Checker와 CEO 최종 판정 전이며 완료 아님.</li>
+      <li>2026-08-16 — 후보 <code>bfea5938</code> 독립 Checker PASS. CEO가 AIDE 원계약과 제외 WIP 집계까지 재검증해 <code>READY_FOR_CLEANUP</code>으로 최종 판정하고 v0.1.3 정본으로 승인.</li>
     </ul>
   </footer>
 </main>

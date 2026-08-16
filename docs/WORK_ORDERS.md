@@ -21,7 +21,7 @@
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 canonical 후보 · 독립 Checker 대기 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 완료 · T-02 정리 승인 대기 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|---|
 | SB WO-001 | 2026-08-13 | CEO 현황판·AIDE 분석 상태 정본 갱신 | CEO(Sol) / 문서 Maker(Luna) | P0 | 2026-08-13 | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
-| SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 검수 | Checker 대기 · 완료 아님 |
+| SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · READY_FOR_CLEANUP |
 
 ## 지시서
 
@@ -165,7 +165,7 @@
 - **우선순위:** P0
 - **담당:** CEO(Sol, 계약·최종 판정) / Terra(Maker, 유일 writer) / 독립 Checker(읽기 전용)
 - **목표일:** 2026-08-16 KST
-- **상태:** `검수` — canonical 후보 작성 후 Checker 대기. 완료·정본 승격 아님.
+- **상태:** `완료` — 후보 `bfea5938` 독립 Checker PASS, CEO `READY_FOR_CLEANUP`.
 - **위험등급:** R2 — 다중 브랜치 이력·정본·분석 상태 계약을 한 후보로 통합하므로 독립
   Checker가 필수다. 런타임 인증·권한·배포·운영 데이터는 변경하지 않는다.
 - **목표:** 고유 산출물을 잃지 않으면서 canonical root
@@ -183,7 +183,7 @@
 | SRC-USER-20260816 | 대표 지시 `저장소·맥락 1차 안정화`, 2026-08-16 | 모든 고유 작업 보존, WO/feature별 분리, canonical 6종 정합화, 충돌 없는 것만 통합, 좁은 검증, 삭제·push·deploy·network·install 금지 |
 | SRC-AGENTS | root `AGENTS.md`, 2026-08-16 시작본 SHA256 `974eb75e…299` | 기존 dirty·사용자·타 에이전트 변경을 보존하고 증거 없이 완료를 선언하지 않음 |
 | SRC-COMPANY-WO | `docs/COMPANY.md` v0.1.2와 `docs/WORK_ORDERS.md` WO-002 스냅샷 | 정본 결정·상태 기록은 실제 HEAD와 검수 상태를 반영하고, 코드 흔적만으로 완료 승격 금지 |
-| SRC-AIDE-STANDARD | AIDE `docs/ANALYTICS_STANDARD_V1.md` v1 §8, `data/analytics-contract.json` schemaVersion 1 | 미배포=`not_deployed`, 미계측=`not_instrumented`; unavailable은 0이 아니며 공급자·단위를 합산하지 않음 |
+| SRC-AIDE-STANDARD | `/Users/nohshinhee/Documents/2. coding/aide/docs/ANALYTICS_STANDARD_V1.md` v1 §8, `/Users/nohshinhee/Documents/2. coding/aide/data/analytics-contract.json` schemaVersion 1 | 미배포=`not_deployed`, 미계측=`not_instrumented`; unavailable은 0이 아니며 공급자·단위를 합산하지 않음 |
 
 #### 시작 기준과 출처 이력
 
@@ -216,6 +216,10 @@
 | root Webtoon WIP 16 files | untracked·미완료로 유지. clean checkout 기능으로 서술하거나 stage하지 않음 |
 | 기타 제외 dirty/untracked 40 files | canonical 편집 직전 경로+내용 집계 SHA256 `c68dfcf6a4fa371a4ca8983a3ccb1da4dcce7501bbbe3f000f090d241b5524e7`; byte-identical·unstaged 유지 |
 | `.codex/config.toml` | SHA256 `fdcfc227…ec1e`, secret-like 값 없음. AGENTS 안전 규칙으로 재현 가능해 필요성 미충족; untracked·unstaged 유지 |
+
+제외 40파일 집계 레시피는 최종 `git status --porcelain=v1 --untracked-files=all` 순서에서
+`.codex/config.toml`을 뺀 untracked 36파일의 `shasum -a 256` 행을 먼저, tracked modified
+4파일의 같은 행을 뒤에 이어 붙인 뒤 전체 스트림을 다시 SHA256으로 계산하는 방식이다.
 
 #### 정확한 변경 범위
 
@@ -259,7 +263,7 @@
 - WO-002 스냅샷: `661bc1c5b6c06d91db0c98127c88b4f8c74c99df`.
 - local main merge: `55eabb0ca036c8064aa304dfa504cdfbd225b2fc`.
 - PPT root 통합: `f90b87513f566c532e6335f86ab514fcf88ca6a6`.
-- canonical 후보 커밋 SHA는 이 문서를 포함해 생성되므로 Maker 인계 보고에서 확정한다.
+- canonical 후보: `bfea5938984ebbe3d6c6a1b6d40303d0e4c387fe`.
 - 모든 보존점은 local commit이며 외부 push가 없다. 롤백이 필요하면 Checker가 지정한 후보
   변경만 새 작업으로 되돌리고, 기존 사용자·WIP 파일이나 보존 branch를 삭제하지 않는다.
 
@@ -278,11 +282,29 @@
   문서 후보 작성에 착수. 삭제·push·deploy·network 없음.
 - 2026-08-16 KST — Maker가 좁은 검증과 최종 인벤토리 대조 후 독립 Checker 단계인
   `검수`로 인계한다. 최종 판정과 정본 승격은 대기한다.
+- 2026-08-16 KST — 독립 Checker가 후보 `bfea5938`을 R2-high로 재평가하고 DoD 전 항목
+  PASS(두 비차단 제한 포함)로 판정했다. 허용 범위 밖 변경·유실·ref/worktree 삭제 없음.
+- 2026-08-16 KST — CEO가 외부 AIDE 원계약을 직접 재대조하고 제외 40파일 집계 해시를
+  재현해 두 제한을 해소했다. 최종 판정 `READY_FOR_CLEANUP`, v0.1.3 정본 승격, WO 완료.
 
 ## 검수 로그
 
 판정은 해당 지시서 아래에 검수 로그 항목으로 남긴다 — 재실행한 검증 커맨드, 독립 재계산,
 실물 확인 내용, 세션의 일탈·가정에 대한 승인/반려, 병합 커밋 해시까지 기록한다.
+
+### SB WO-003 — 저장소·맥락 1차 안정화
+
+- 검수 기준: base `5af8de94`, 후보 `bfea5938984ebbe3d6c6a1b6d40303d0e4c387fe`,
+  Arduino 보존 `b273f7db`, main merge `55eabb0c`, PPT 통합 `f90b8751`.
+- Maker 관찰: 표적 검증 9묶음 수집·9통과·0최종실패. 실행 동작 변경이 없어 전체
+  build와 전체 test는 2건 skip. 제외 WIP 40파일+별도 config 1파일은 시작 해시 유지.
+- 독립 Checker: R2-high, `PASS`. 변경 49경로가 skill 3 + styles 38 + context 8 allowlist와
+  일치하고 main 10·CEO 4·Arduino 39 입력·worktree 4개가 모두 보존됐다고 판정.
+- CEO 재검증: AIDE 원계약 required fields/status enum/daily30 합계 `true`, HTML parse 성공,
+  로컬 원천 독립 재집계 5종 일치, 제외 WIP 집계 `c68dfc…524e7` 재현, staged 0 확인.
+- **최종 판정:** `READY_FOR_CLEANUP`. 후보를 v0.1.3 활성 정본으로 승인하고 SB WO-003을
+  완료한다. worktree·branch 삭제, push·deploy, 외부 변경은 수행하지 않았으며 T-02 별도
+  승인이 필요하다.
 
 - `SB WO-001` 명령 검증 — 기준 HEAD
   `5af8de946c8ca56ac15a49daf1ed804e78c072a6`, 작업 디렉터리
