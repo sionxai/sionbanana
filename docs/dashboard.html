@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sion Banana CEO 현황판</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f5f8; --surface: #ffffff; --surface-2: #f8fafc; --text: #172033; --muted: #526075;
+      --border: #dce2ea; --shadow: 0 8px 24px rgba(15, 23, 42, .06);
+      --accent: #a86a08; --accent-strong: #8a5205; --accent-bg: #fff8e6; --accent-bd: #f2c14b;
+      --st-wait-fg: #1d4ed8; --st-wait-bg: #eff6ff; --st-wait-bd: #93c5fd;
+      --st-wip-fg: #92400e; --st-wip-bg: #fffbeb; --st-wip-bd: #f6c453;
+      --st-review-fg: #6d28d9; --st-review-bg: #f5f3ff; --st-review-bd: #c4b5fd;
+      --st-done-fg: #047857; --st-done-bg: #ecfdf5; --st-done-bd: #6ee7b7;
+      --st-hold-fg: #526075; --st-hold-bg: #f1f5f9; --st-hold-bd: #cbd5e1;
+      --risk-fg: #be123c; --risk-bg: #fff1f2; --risk-bd: #fda4af;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #0b1220; --surface: #111b2c; --surface-2: #162236; --text: #edf2f8; --muted: #aab6c7;
+        --border: #2b3a50; --shadow: 0 10px 28px rgba(0, 0, 0, .22);
+        --accent: #f5c957; --accent-strong: #ffd97f; --accent-bg: #33270d; --accent-bd: #b98716;
+        --st-wait-fg: #9ecbff; --st-wait-bg: #102a50; --st-wait-bd: #3779d6;
+        --st-wip-fg: #fbd36a; --st-wip-bg: #3b2508; --st-wip-bd: #b97716;
+        --st-review-fg: #d2b9ff; --st-review-bg: #2d2050; --st-review-bd: #8557db;
+        --st-done-fg: #75e3ba; --st-done-bg: #0c392f; --st-done-bd: #16976f;
+        --st-hold-fg: #aab6c7; --st-hold-bg: #1b2739; --st-hold-bd: #3b4c64;
+        --risk-fg: #ffb1c0; --risk-bg: #481426; --risk-bd: #df4268;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body { margin: 0; color: var(--text); background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+    main { width: min(1200px, calc(100% - 44px)); margin: 0 auto; padding: 22px 0 60px; }
+    section + section { margin-top: 24px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 2px; font-size: clamp(24px, 2.6vw, 32px); line-height: 1.15; letter-spacing: -.03em; }
+    h2 { margin-bottom: 0; font-size: 21px; letter-spacing: -.02em; }
+    .card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+    .eyebrow { display: block; margin-bottom: 4px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    code { padding: .1em .35em; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .hero { padding: 18px 24px 16px; border-top: 3px solid var(--accent-bd); }
+    .hero-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 24px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chips span { display: inline-flex; align-items: center; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; }
+    .mission { margin: 10px 0 0; font-size: 15px; }
+    .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .section-heading p { margin: 0; color: var(--muted); font-size: 11px; text-align: right; }
+    .executive { padding: 16px 20px; border: 1px solid var(--accent-bd); border-left: 5px solid var(--accent); border-radius: 14px; background: var(--accent-bg); }
+    .executive h2 { margin-bottom: 10px; }
+    .task-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .task-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 13px; border: 1px solid var(--accent-bd); border-radius: 10px; background: var(--surface); }
+    .task-id { flex: 0 0 auto; margin-top: 1px; padding: 1px 7px; border: 1px solid var(--accent-bd); border-radius: 999px; background: var(--accent-bg); color: var(--accent-strong); font-size: 10px; font-weight: 800; }
+    .task-item strong { font-size: 13px; }
+    .task-item em { display: block; color: var(--muted); font-size: 12px; font-style: normal; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+    .agenda-card { padding: 14px 16px; }
+    .agenda-card h3 { margin-bottom: 6px; font-size: 14px; }
+    .agenda-card p, .agenda-card li { color: var(--muted); font-size: 12.5px; }
+    .agenda-card ol, .agenda-card ul { margin: 6px 0 0; padding-left: 18px; }
+    .proposal { margin-top: 8px; padding: 9px 12px; border: 1px dashed var(--accent-bd); border-radius: 8px; background: var(--accent-bg); color: var(--text); font-size: 12.5px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 9px; }
+    .stat-tile { min-height: 86px; padding: 11px 13px; box-shadow: none; }
+    .stat-label { display: block; min-height: 32px; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1.4; }
+    .stat-tile strong { display: block; font-size: 19px; line-height: 1.2; }
+    .stat-tile small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    .table-wrap { overflow-x: auto; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-block; padding: 1px 9px; border: 1px solid; border-radius: 999px; font-size: 10.5px; font-weight: 800; white-space: nowrap; }
+    .b-wait { color: var(--st-wait-fg); background: var(--st-wait-bg); border-color: var(--st-wait-bd); }
+    .b-wip { color: var(--st-wip-fg); background: var(--st-wip-bg); border-color: var(--st-wip-bd); }
+    .b-review { color: var(--st-review-fg); background: var(--st-review-bg); border-color: var(--st-review-bd); }
+    .b-done { color: var(--st-done-fg); background: var(--st-done-bg); border-color: var(--st-done-bd); }
+    .b-hold { color: var(--st-hold-fg); background: var(--st-hold-bg); border-color: var(--st-hold-bd); }
+    .panel { padding: 14px 16px; }
+    .risk-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .risk-list li { padding: 9px 12px; border: 1px solid var(--risk-bd); border-radius: 10px; background: var(--risk-bg); font-size: 12.5px; }
+    .risk-list b { color: var(--risk-fg); }
+    .note { color: var(--muted); font-size: 12px; }
+    footer { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+    footer ul { margin: 6px 0 0; padding-left: 18px; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="card hero">
+    <div class="hero-top">
+      <div>
+        <span class="eyebrow">Sion Banana · CEO 현황판</span>
+        <h1>시온바나나 경영 현황</h1>
+      </div>
+      <div class="chips">
+        <span>정본 v0.1.2</span>
+        <span>현재 날짜 2026-08-15</span>
+        <span>보고 갱신 2026-08-15 09:22 KST</span>
+        <span>원천 관측 2026-08-15 08:57:28 KST</span>
+        <span>feature 5af8de94</span>
+      </div>
+    </div>
+    <p class="mission">1인 제작자를 위한 로컬 AI 프리프로덕션 스튜디오 — 캐릭터·장소·소품의 일관성을 유지한 다중 컷 콘텐츠를 레퍼런스 → 스토리보드 → 검수 → 내보내기 흐름으로 완성한다. <span class="note">(현재 날짜는 2026-08-15, 원천 관측시각은 <code>2026-08-14T23:57:28.289Z</code> / 2026-08-15 08:57:28 KST)</span></p>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Status</span><h2>현재 단계와 진척</h2></div><p>2026-08-15 08:57:28 KST 원천 관측 기준 · 확인되지 않은 값은 수치로 추정하지 않음</p></div>
+    <div class="kpi-grid">
+      <div class="card stat-tile"><span class="stat-label">제품 단계</span><strong>소유자 운영형 로컬 제품</strong><small>수익화 이전 제품 검증</small></div>
+      <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>1/5 완료 · 20%</strong><small>NOW-001 완료, 나머지 대기·검수·착수</small></div>
+      <div class="card stat-tile"><span class="stat-label">공개 배포</span><strong>not_deployed</strong><small>공개 URL·호스팅 설정 미확인</small></div>
+      <div class="card stat-tile"><span class="stat-label">웹 분석 계측</span><strong>not_instrumented</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
+      <div class="card stat-tile"><span class="stat-label">최신 정본 갱신</span><strong>SB WO-002 · 완료</strong><small>Checker PASS · CEO ACCEPT WITH FOLLOW-UP</small></div>
+    </div>
+  </section>
+
+  <section class="executive">
+    <h2>CEO 판단 및 대표 승인 필요사항</h2>
+    <p class="note">발행된 정식 작업지시는 <code>SB WO-001</code>, <code>SB WO-002</code> 두 건이다. 아래 T-01~T-05는 대표 승인 대기 제안이며 정식 작업지시가 아니다.</p>
+    <ul class="task-list">
+      <li class="task-item"><span class="task-id">T-01</span><span><strong>미션 확장 개정안(v0.2.0) 승인 여부 결정</strong><em>AI 고품질 미디어 제작 전반으로의 미션 확장 제안 유지</em></span></li>
+      <li class="task-item"><span class="task-id">T-02</span><span><strong>워크트리·브랜치 정리안 승인 여부 결정</strong><em>worktree 3개 정리와 main ↔ feature 통합 방향 확정 필요</em></span></li>
+      <li class="task-item"><span class="task-id">T-03</span><span><strong>자격증명 노출 대응안 승인 여부 결정</strong><em>사용처와 필요한 교체 범위를 먼저 확정해야 한다</em></span></li>
+      <li class="task-item"><span class="task-id">T-04</span><span><strong>모션에셋 결함 수정안 승인 여부 결정</strong><em>4위상 프롬프트 중복과 2행 시트 미러링의 수정·회귀 범위 확정 필요</em></span></li>
+      <li class="task-item"><span class="task-id">T-05</span><span><strong>웹 유입 추진 여부 결정</strong><em>현재 로컬·미배포 방침을 유지하면 보류. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인해야 한다</em></span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Agenda</span><h2>결정 대기 안건</h2></div><p>승인 전까지는 제안 상태이며 정본 방향은 바꾸지 않음</p></div>
+    <div class="grid-2">
+      <div class="card agenda-card">
+        <h3>T-01 · 미션 확장 개정안 (COMPANY.md v0.2.0)</h3>
+        <p>대표자가 밝힌 방향(2026-08-07): 이 프로젝트는 AI를 통한 고품질 미디어 제작이다 — 이미지·영상·영화·CF·PPT, 그리고 그 전 단계의 스토리·시나리오까지.</p>
+        <div class="proposal"><b>제안 문구</b> — 미션에 다음을 추가: "산출물은 단일 이미지에 그치지 않는다. 이미지·영상·영화·CF·프레젠테이션(PPT) 등 고품질 미디어 완성품과, 그 전 단계인 스토리·시나리오·스토리보드 제작까지를 하나의 로컬 워크플로우로 포괄한다."</div>
+      </div>
+      <div class="card agenda-card">
+        <h3>T-02 · 워크트리·브랜치 정리안</h3>
+        <ol>
+          <li><b>PPT 노하우 회수</b> — arduino worktree의 관련 변경은 기존 스냅샷이므로 정리 전 최신 상태를 재검증한다.</li>
+          <li><b>worktree 3개 정리</b> — 회수 후 제거·브랜치 삭제.</li>
+          <li><b>정본 일원화</b> — main과 feature 사이 정본 문서 보존 위치를 하나로 확정.</li>
+          <li><b>2단계 분리 결정</b> — feature/webtoon-studio의 미커밋 Webtoon 변경 보존 범위와 통합 전략 확정.</li>
+        </ol>
+      </div>
+      <div class="card agenda-card">
+        <h3>T-05 · 분석 연결 승인 범위</h3>
+        <p>현재 로컬·미배포 방침을 유지하면 분석 연결은 보류한다. 웹 유입을 추진할 때만 COMPANY.md DN-002/DEC-007 방향을 재검토하고 공식 공개 경로부터 확정한다.</p>
+        <div class="proposal"><b>추진 시 개별 승인 항목</b> — GA4 속성, Search Console 속성, 각 읽기 권한, 운영 배포. 이 안건은 분석을 곧바로 배포하라는 지시가 아니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Completed</span><h2>최근 완료</h2></div><p>완료 근거와 검증 한계를 함께 기록</p></div>
+    <div class="grid-2">
+      <div class="card agenda-card">
+        <h3>SB WO-002 · 2026-08-15 현황판·유입 통계 최신화</h3>
+        <p>독립 Checker가 DoD 1~6 전부 PASS로 판정했고 CEO가 <code>ACCEPT WITH FOLLOW-UP</code>으로 완료했다. 외부 분석 미연결과 staged·미커밋 상태는 후속 한계이며, 로컬 원시 기록은 방문자·전환·매출과 합산하지 않는다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>SB WO-001 · CEO 현황판·AIDE 분석 상태 정본 갱신</h3>
+        <p>2026-08-13 독립 Checker PASS와 CEO <code>ACCEPT WITH FOLLOW-UP</code>으로 완료됐다. 당시 후속 한계는 로컬 실물 렌더 미확인과 untracked 정본 보존 위험이었다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>회사 정본 v0.1.2 · 대장 · 현황판 부트스트랩</h3>
+        <p>정본 4종과 CEO 현황판 기준은 유지된다. 이번 대상 3파일은 canonical root에서 staged했지만 <code>COMPANY.md</code>·<code>CLAUDE.md</code> 등 다른 정본 사본은 여전히 untracked이므로 통합 전까지 보존에 주의한다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>모션 결함 원인 진단 2건</h3>
+        <p>4위상 프롬프트 반복과 2행 시트 미러링 원인은 이미 진단 완료다. 수정 완료나 전체 회귀 통과를 의미하지는 않는다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Diagnosis</span><h2>모션에셋 생성 결함 — 원인 확정</h2></div><p>2026-08-12 기준 기존 진단 유지</p></div>
+    <div class="grid-2">
+      <div class="card agenda-card">
+        <h3>원인 A · 프롬프트가 중복 프레임을 요청한다 <span class="badge b-done" style="margin-left:4px">코드 확정</span></h3>
+        <p><code>ACTION_PHASES.run</code>에 위상 설명이 4개뿐인데 순환 액션은 <code>index % phases.length</code>로 위상을 배정한다. 8프레임을 요청하면 5~8번이 1~4번과 같은 지시문을 받는다.</p>
+        <div class="proposal"><b>수정 방향</b> — 위상표를 8개로 확장하거나, frameCount가 위상 수보다 클 때 중간 포즈 문구를 생성한다.</div>
+      </div>
+      <div class="card agenda-card">
+        <h3>원인 B · 2행 시트의 아랫줄이 좌우 반전된다 <span class="badge b-review" style="margin-left:4px">재현됨</span></h3>
+        <p>재현 실행에서 원본 생성 이미지부터 아랫줄 4컷이 미러링되어 나왔다. 슬라이스가 아니라 이미지 모델 단계 문제이며, 현재는 감지·교정 로직이 없다.</p>
+        <div class="proposal"><b>수정 방향</b> — 8프레임을 8열×1행으로 생성해 행 미러링 여지를 줄이고, 후속으로 <code>flipX</code> 감지·교정 로직을 추가한다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">KPI</span><h2>핵심 지표</h2></div><p>기준선 수집 기간 2026-08-04 ~ 2026-08-18 · 제작 20회 표본 우선</p></div>
+    <div class="kpi-grid">
+      <div class="card stat-tile"><span class="stat-label">① 납품 가능 워크플로우 완료율</span><strong>미측정</strong><small>목표 90% 이상</small></div>
+      <div class="card stat-tile"><span class="stat-label">② 레퍼런스 일관성 통과율</span><strong>미측정</strong><small>목표 80% 이상 (12컷+ 묶음)</small></div>
+      <div class="card stat-tile"><span class="stat-label">③ 제작 시간 절감률</span><strong>미측정</strong><small>목표 50% 이상 (수작업 대비)</small></div>
+      <div class="card stat-tile"><span class="stat-label">④ 재작업률</span><strong>미측정</strong><small>목표 25% 이하</small></div>
+      <div class="card stat-tile"><span class="stat-label">⑤ 데이터 보존 신뢰도</span><strong>미측정</strong><small>유실·불일치 0건</small></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Acquisition</span><h2>유입 지표 · GA4</h2></div><p><code>projectId=sionbanana</code> · provider: GA4 · 단위: visitors · 품질: 자료 없음 · 관측 2026-08-15 08:57:28 KST</p></div>
+    <div class="kpi-grid">
+      <div class="card stat-tile"><span class="stat-label">오늘 방문자</span><strong>미연결</strong><small>GA4 실제 수집 원천 미확인</small></div>
+      <div class="card stat-tile"><span class="stat-label">최근 7일 방문</span><strong>미연결</strong><small>08-09~08-15 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">직전 7일 방문</span><strong>미연결</strong><small>08-02~08-08 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">최근 30일 방문</span><strong>미연결</strong><small>07-17~08-15 · 숫자 추정 금지</small></div>
+      <div class="card stat-tile"><span class="stat-label">인기 페이지/유입경로</span><strong>자료 없음</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
+      <div class="card stat-tile"><span class="stat-label">핵심 CTA/문의</span><strong>자료 없음</strong><small>확인 가능한 전환 원장 없음</small></div>
+    </div>
+    <div class="card table-wrap" style="margin-top:10px">
+      <table>
+        <thead><tr><th>원천 / 공급자</th><th>단위 · 품질</th><th>상태·관측 결과</th><th>해석 제한</th></tr></thead>
+        <tbody>
+          <tr><td>GA4 / <code>ga4</code></td><td>visitors · 자료 없음</td><td><span class="badge b-hold">not_instrumented</span> 계측 코드·실제 수집 증거 미확인. 환경변수 이름 형태는 수집 증거가 아님</td><td>오늘·7일·30일 방문, 인기 페이지, 유입경로, CTA를 숫자로 보고할 수 없음</td></tr>
+          <tr><td>Search Console / <code>google_search_console</code></td><td>queries·impressions · 자료 없음</td><td><span class="badge b-hold">미연결</span> 속성·읽기 권한·검색어·노출 원천 미확인</td><td>검색 유입을 방문이나 전환으로 추정하지 않음</td></tr>
+          <tr><td>Firebase RTDB / <code>firebase_rtdb</code></td><td>product records · 확인 불가</td><td><span class="badge b-hold">권한/환경 경계로 확인 불가</span> safe shallow GET이 실행환경 DNS 경계에서 응답 미수신</td><td>연결·데이터 유무·권한을 미연결로 단정하거나 RTDB 값을 제품 사용 지표로 보고하지 않음</td></tr>
+          <tr><td>문의·예약·구매 / <code>business_ledger</code></td><td>confirmed business events · 자료 없음</td><td><span class="badge b-hold">미연결</span> 확인 가능한 원장 없음</td><td>CTA 클릭·외부 예약·전화 클릭을 실제 전환이나 매출로 간주하지 않음</td></tr>
+          <tr><td>공개 배포</td><td>URL · 자료 없음</td><td><span class="badge b-hold">not_deployed</span> 공개 URL·운영 배포 설정 미확인</td><td>실제 외부 방문 수집 여부를 확인할 수 없음</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Usage</span><h2>제품 사용 원시 지표 · 로컬 파일시스템</h2></div><p>provider: filesystem_json · 단위: 원천별 records · 품질: 정확 · 관측 2026-08-15 08:57:28 KST</p></div>
+    <div class="kpi-grid">
+      <div class="card stat-tile"><span class="stat-label">이미지 메타 · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 4,818 · 7일 78 · 직전7일 312 · 30일 2,200</small></div>
+      <div class="card stat-tile"><span class="stat-label">영상 메타 · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 83 · 7일 0 · 직전7일 4 · 30일 4</small></div>
+      <div class="card stat-tile"><span class="stat-label">agent run · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 2,469 · 7일 36 · 직전7일 290 · 30일 1,596</small></div>
+      <div class="card stat-tile"><span class="stat-label">motion project · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 27 · 7일 5 · 직전7일 0 · 30일 27</small></div>
+      <div class="card stat-tile"><span class="stat-label">webtoon project · 오늘</span><strong>0 <small>(실측)</small></strong><small>총 1 · 7일 0 · 직전7일 0 · 30일 0</small></div>
+      <div class="card stat-tile"><span class="stat-label">인기 기능(최근 30일 agent run category)</span><strong>debate-comic</strong><small>218회 · debate-topic 156회 · unknown 122회</small></div>
+    </div>
+    <div class="card table-wrap" style="margin-top:10px">
+      <table>
+        <thead><tr><th>원천</th><th>총량</th><th>오늘</th><th>최근 7일</th><th>직전 7일</th><th>최근 30일</th><th>최근 활동</th></tr></thead>
+        <tbody>
+          <tr><td>이미지 메타 JSON</td><td>4,818</td><td>0</td><td>78</td><td>312</td><td>2,200</td><td>2026-08-12 08:40:11 KST</td></tr>
+          <tr><td>영상 메타 JSON</td><td>83</td><td>0</td><td>0</td><td>4</td><td>4</td><td>2026-08-06 15:30:56 KST</td></tr>
+          <tr><td>agent run manifest</td><td>2,469</td><td>0</td><td>36</td><td>290</td><td>1,596</td><td>2026-08-09 22:06:51 KST</td></tr>
+          <tr><td>motion project</td><td>27</td><td>0</td><td>5</td><td>0</td><td>27</td><td>2026-08-12 08:40:12 KST</td></tr>
+          <tr><td>webtoon project</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>2026-06-05 21:51:03 KST</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:8px">기간은 KST 달력일 기준(today 08-15, 최근7일 08-09~15, 직전7일 08-02~08, 최근30일 07-17~08-15)이다. 파싱 오류·시간 누락·mtime 대체·미래 레코드는 모두 0건이다. 각 원천의 단위가 달라 서로 합산하지 않으며 관리자·개발·자동화·테스트 분리와 원천 간 중복 제거는 불가능하다. 방문자·고유 사용자·완료 워크플로우·매출을 대체하지 않는다.</p>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Roadmap</span><h2>진행 중 업무</h2></div><p>NOW 진척 1/5 완료(20%) · 상태는 정본 §6의 뷰어</p></div>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>항목</th><th>상태</th><th>비고 (2026-08-15 KST 실측)</th></tr></thead>
+        <tbody>
+          <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>정본 v0.1.2와 작업지시 대장 유지</td></tr>
+          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-wait">대기</span></td><td>T-02 승인 전 정리 금지</td></tr>
+          <tr><td>NOW-003</td><td>핵심 경로 검증 (인증→생성→저장→스토리보드)</td><td><span class="badge b-wait">대기</span></td><td>전체 경로의 최신 실물 검증 증거 없음</td></tr>
+          <tr><td>NOW-004</td><td>프리셋·모션 구현 실물 검수</td><td><span class="badge b-review">검수</span></td><td>결함 원인 2건 진단 완료, 수정·회귀 판정 미완료</td></tr>
+          <tr><td>NOW-005</td><td>Webtoon Studio 변경 보존·범위 확정</td><td><span class="badge b-wip">착수</span></td><td>미커밋 Webtoon 관련 변경과 산출물 보존 범위 확정 필요</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:8px">다음(NEXT): 영구 저장(SQLite) · 웹툰 P0 · 외부 의존성 감지 · KPI 기준선 — 모두 <b>대기</b> / 나중(LATER): 웹툰 자동화 · 모션 통합 · 패키징 · 배포 — 모두 <b>보류</b></p>
+  </section>
+
+  <section class="grid-2">
+    <div class="card panel">
+      <h3 style="margin-bottom:8px">작업지시 현황 (SB WO)</h3>
+      <p class="note"><code>SB WO-001</code>과 <code>SB WO-002</code>는 완료됐다. SB WO-002 독립 Checker 판정은 PASS, CEO 판정은 <code>ACCEPT WITH FOLLOW-UP</code>이다. 두 작업 모두 현황판·정본 문서 범위에 한정되며 제품 전체 회귀 PASS를 뜻하지 않는다.</p>
+    </div>
+    <div class="card panel">
+      <h3 style="margin-bottom:8px">저장소 스냅샷</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>항목</th><th>상태</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td>HEAD</td><td><code>5af8de94</code></td><td><code>feature/webtoon-studio</code></td></tr>
+          <tr><td>tracked dirty</td><td>5 files</td><td><code>AGENTS.md</code>, storyboard/agent 관련 파일 수정 존재</td></tr>
+          <tr><td>SB WO-002 대상 3파일</td><td>staged · 미커밋</td><td><code>WORK_ORDERS.md</code>, <code>dashboard.html</code>, <code>analytics-status.json</code>만 추적 대상으로 추가</td></tr>
+          <tr><td>기타 untracked 정본</td><td>유지</td><td><code>CLAUDE.md</code>, <code>docs/COMPANY.md</code>, <code>docs/PRD-sionbanana.md</code> 등은 이번 범위 밖</td></tr>
+          <tr><td>동시 worktree</td><td>3개</td><td>arduino, friendly-pasteur, key-visual-work</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Risks</span><h2>위험·막힘</h2></div><p>확인된 사실과 미확인 영역을 분리</p></div>
+    <ul class="risk-list">
+      <li><b>브랜치 분산</b> — main, feature, 별도 CEO 보존 브랜치 흔적이 분리되어 있다. 정본 사본을 승인 없이 정리하지 않는다.</li>
+      <li><b>NOW-005 산출물 보존 위험</b> — Webtoon 관련 미커밋 변경과 산출물이 존재한다. 정리·이동·삭제 전 보존 범위 확정이 필요하다.</li>
+      <li><b>분석·배포 원천 부족</b> — 공개 URL과 GA4·Search Console·문의/예약/구매 실제 원천을 확인하지 못했다. 미수집 상태를 방문자나 매출 숫자로 바꿀 수 없다.</li>
+      <li><b>RTDB 확인 차단</b> — safe shallow GET은 실행환경 DNS 경계로 응답을 받지 못했다. 연결·데이터 유무·권한을 임의로 판정하지 않는다.</li>
+      <li><b>로컬 기록 해석 한계</b> — 관리자·개발·자동화·테스트 활동을 분리할 수 없고 원천 간 중복 가능성이 있다. 서로 다른 레코드 단위를 합산하지 않는다.</li>
+      <li><b>제품 전체 실물·회귀는 별도</b> — 이번 최신화는 정본 현황판과 분석 상태 갱신이며, dirty worktree 전체 기능 회귀 판정이 아니다.</li>
+      <li><b>커밋·push 미실행</b> — 이번 대상 3파일은 canonical root에서 staged했지만 대표 지시대로 커밋·push하지 않았다. 영구 보존과 브랜치 통합은 별도 결정이 필요하다.</li>
+      <li><b>PPT 노하우 미회수</b> — arduino worktree 관련 내용은 기존 스냅샷이다. 정리 전 최신 상태 재검증과 회수가 필요하다.</li>
+      <li><b>자격증명 노출 대응 미결정</b> — 저장소 유출 여부보다 사용처·교체 범위 판단이 남아 있다.</li>
+      <li><b>모션 결함 수정 미승인</b> — 원인 진단은 끝났지만 수정·회귀 범위는 승인 전이다.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="section-heading"><div><span class="eyebrow">Next</span><h2>다음 행동</h2></div><p>증거 확보 후에만 상태 변경</p></div>
+    <div class="grid-2">
+      <div class="card agenda-card">
+        <h3>1. SB WO-002 후속 보존</h3>
+        <p>대상 3파일은 canonical root에서 staged했지만 커밋·push하지 않았다. T-02 통합 방향이 결정될 때까지 다른 변경과 섞거나 삭제하지 않는다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>2. T-05 웹 유입 추진 여부 결정</h3>
+        <p>현재 로컬·미배포 방침이면 보류한다. 추진 시 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>3. NOW-004 실물·회귀 판정</h3>
+        <p>모션 결함 수정 범위를 승인받은 뒤 실물과 경계 사례를 별도 작업지시로 검증한다.</p>
+      </div>
+      <div class="card agenda-card">
+        <h3>4. NOW-005 보존·범위 확정</h3>
+        <p>Webtoon 산출물을 파괴적으로 정리하지 말고 보존·통합 범위를 먼저 확정한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <b>운영 원칙</b> — 진실의 원본은 항상 정본 문서(<code>docs/COMPANY.md</code>, <code>docs/WORK_ORDERS.md</code>)이며 이 현황판은 뷰어 전용이다. CEO는 주요 작업 마무리마다 갱신한다 (COMPANY.md §7-9).
+    <ul>
+      <li>2026-08-13 00:27 KST — <code>SB WO-001</code> 완료. 분석 상태를 <code>not_deployed</code>·<code>not_instrumented</code>로 분리 보고.</li>
+      <li>2026-08-15 08:57:28 KST 원천 관측 — <code>SB WO-002</code>로 정본·Git·로컬 원시 레코드를 재대조하고 Maker가 검수 단계로 인계.</li>
+      <li>2026-08-15 08:57:28 KST — GA4·Search Console·공개 URL·문의/결제 원천은 자료 없음, RTDB는 권한/환경 경계로 확인 불가. 확인 불가 값을 0으로 바꾸지 않음.</li>
+      <li>2026-08-15 08:57:28 KST — 로컬 파일시스템 원천별 exact 집계 반영: images 4,818, videos 83, agent runs 2,469, motion 27, webtoon 1. 마지막 활동은 2026-08-12 08:40:12 KST이며 서로 다른 단위는 합산하지 않음.</li>
+      <li>2026-08-15 09:19 KST — 독립 Checker 1차 FAIL의 추적·공백검사 결함을 보완하기 위해 대상 3파일만 staged하고 실제 staged diff 공백검사를 통과. 커밋·push·배포는 미실행.</li>
+      <li>2026-08-15 09:21 KST — 독립 Checker 재판정 DoD 1~6 전부 PASS. CEO가 <code>ACCEPT WITH FOLLOW-UP</code>으로 <code>SB WO-002</code> 완료 판정.</li>
+    </ul>
+  </footer>
+</main>
+</body>
+</html>

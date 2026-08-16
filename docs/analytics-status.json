@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "standardId": "aide-web-analytics-v1",
+  "projectId": "sionbanana",
+  "publicUrl": null,
+  "deploymentStatus": "not_deployed",
+  "measurementStatus": "not_instrumented",
+  "implementedEvents": [],
+  "verifiedAt": null,
+  "provider": "ga4",
+  "updatedAt": "2026-08-15T00:22:05.000Z",
+  "updatedAtKst": "2026-08-15 09:22:05 KST",
+  "observedAt": "2026-08-14T23:57:28.289Z",
+  "observedAtKst": "2026-08-15 08:57:28 KST",
+  "timeZone": "Asia/Seoul",
+  "dateWindowsKst": {
+    "today": "2026-08-15",
+    "last7": "2026-08-09..2026-08-15",
+    "prior7": "2026-08-02..2026-08-08",
+    "last30": "2026-07-17..2026-08-15"
+  },
+  "quality": {
+    "ga4": "자료 없음",
+    "searchConsole": "자료 없음",
+    "firebaseRtdb": "확인 불가",
+    "localProductUsage": "정확"
+  },
+  "dashboardSummary": {
+    "ga4": {
+      "provider": "ga4",
+      "measurementUnit": "visitors",
+      "quality": "자료 없음",
+      "observedAt": "2026-08-14T23:57:28.289Z",
+      "observedAtKst": "2026-08-15 08:57:28 KST",
+      "today": "미연결",
+      "last7": "미연결",
+      "prior7": "미연결",
+      "last30": "미연결",
+      "popularPagesOrFeatures": "자료 없음",
+      "trafficSources": "자료 없음",
+      "keyCtaOrInquiries": "자료 없음",
+      "businessConversions": "자료 없음"
+    },
+    "searchConsole": {
+      "provider": "google_search_console",
+      "measurementUnit": "queries_impressions",
+      "quality": "자료 없음",
+      "observedAt": "2026-08-14T23:57:28.289Z",
+      "observedAtKst": "2026-08-15 08:57:28 KST",
+      "status": "미연결",
+      "searchQueries": "자료 없음",
+      "impressions": "자료 없음"
+    },
+    "firebaseRtdb": {
+      "provider": "firebase_rtdb",
+      "measurementUnit": "product_records",
+      "quality": "확인 불가",
+      "observedAt": "2026-08-14T23:57:28.289Z",
+      "observedAtKst": "2026-08-15 08:57:28 KST",
+      "status": "권한/환경 경계로 확인 불가",
+      "today": "권한/환경 경계로 확인 불가",
+      "last7": "권한/환경 경계로 확인 불가",
+      "prior7": "권한/환경 경계로 확인 불가",
+      "last30": "권한/환경 경계로 확인 불가"
+    },
+    "localProductUsage": {
+      "provider": "filesystem_json",
+      "measurementUnit": "source_records",
+      "quality": "정확",
+      "observedAt": "2026-08-14T23:57:28.289Z",
+      "observedAtKst": "2026-08-15 08:57:28 KST",
+      "dateBasis": "Asia/Seoul calendar day",
+      "total": {
+        "images": 4818,
+        "videos": 83,
+        "agentRuns": 2469,
+        "motionProjects": 27,
+        "webtoonProjects": 1
+      },
+      "latestActivityAt": "2026-08-11T23:40:12.083Z",
+      "latestActivityAtKst": "2026-08-12 08:40:12 KST",
+      "latestBySourceKst": {
+        "images": "2026-08-12 08:40:11 KST",
+        "videos": "2026-08-06 15:30:56 KST",
+        "agentRuns": "2026-08-09 22:06:51 KST",
+        "motionProjects": "2026-08-12 08:40:12 KST",
+        "webtoonProjects": "2026-06-05 21:51:03 KST"
+      },
+      "today": {
+        "images": 0,
+        "videos": 0,
+        "agentRuns": 0,
+        "motionProjects": 0,
+        "webtoonProjects": 0
+      },
+      "last7": {
+        "images": 78,
+        "videos": 0,
+        "agentRuns": 36,
+        "motionProjects": 5,
+        "webtoonProjects": 0
+      },
+      "prior7": {
+        "images": 312,
+        "videos": 4,
+        "agentRuns": 290,
+        "motionProjects": 0,
+        "webtoonProjects": 0
+      },
+      "last30": {
+        "images": 2200,
+        "videos": 4,
+        "agentRuns": 1596,
+        "motionProjects": 27,
+        "webtoonProjects": 0
+      },
+      "daily30": [
+        { "date": "2026-07-17", "images": 9, "videos": 0, "agentRuns": 9, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-18", "images": 0, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-19", "images": 112, "videos": 0, "agentRuns": 30, "motionProjects": 7, "webtoonProjects": 0 },
+        { "date": "2026-07-20", "images": 30, "videos": 0, "agentRuns": 26, "motionProjects": 1, "webtoonProjects": 0 },
+        { "date": "2026-07-21", "images": 390, "videos": 0, "agentRuns": 350, "motionProjects": 2, "webtoonProjects": 0 },
+        { "date": "2026-07-22", "images": 149, "videos": 0, "agentRuns": 81, "motionProjects": 1, "webtoonProjects": 0 },
+        { "date": "2026-07-23", "images": 61, "videos": 0, "agentRuns": 49, "motionProjects": 6, "webtoonProjects": 0 },
+        { "date": "2026-07-24", "images": 63, "videos": 0, "agentRuns": 53, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-25", "images": 125, "videos": 0, "agentRuns": 120, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-26", "images": 134, "videos": 0, "agentRuns": 131, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-27", "images": 360, "videos": 0, "agentRuns": 312, "motionProjects": 2, "webtoonProjects": 0 },
+        { "date": "2026-07-28", "images": 53, "videos": 0, "agentRuns": 42, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-29", "images": 63, "videos": 0, "agentRuns": 60, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-07-30", "images": 9, "videos": 0, "agentRuns": 6, "motionProjects": 3, "webtoonProjects": 0 },
+        { "date": "2026-07-31", "images": 251, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-01", "images": 1, "videos": 0, "agentRuns": 1, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-02", "images": 9, "videos": 0, "agentRuns": 9, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-03", "images": 50, "videos": 0, "agentRuns": 38, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-04", "images": 30, "videos": 0, "agentRuns": 27, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-05", "images": 31, "videos": 0, "agentRuns": 31, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-06", "images": 113, "videos": 4, "agentRuns": 113, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-07", "images": 65, "videos": 0, "agentRuns": 65, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-08", "images": 14, "videos": 0, "agentRuns": 7, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-09", "images": 63, "videos": 0, "agentRuns": 36, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-10", "images": 11, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-11", "images": 0, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-12", "images": 4, "videos": 0, "agentRuns": 0, "motionProjects": 5, "webtoonProjects": 0 },
+        { "date": "2026-08-13", "images": 0, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-14", "images": 0, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 },
+        { "date": "2026-08-15", "images": 0, "videos": 0, "agentRuns": 0, "motionProjects": 0, "webtoonProjects": 0 }
+      ],
+      "topCategoriesLast30": [
+        { "name": "debate-comic", "count": 218 },
+        { "name": "debate-topic", "count": 156 },
+        { "name": "unknown", "count": 122 },
+        { "name": "cookview-food", "count": 63 },
+        { "name": "aitool-thumb-v2", "count": 49 }
+      ]
+    },
+    "conversionLedger": {
+      "provider": "business_ledger",
+      "measurementUnit": "confirmed_business_events",
+      "quality": "자료 없음",
+      "observedAt": "2026-08-14T23:57:28.289Z",
+      "observedAtKst": "2026-08-15 08:57:28 KST",
+      "status": "미연결",
+      "inquiries": "자료 없음",
+      "bookings": "자료 없음",
+      "purchases": "자료 없음"
+    }
+  },
+  "verificationEvidence": [
+    "2026-08-15 08:57:28 KST 관측 기준 저장소 읽기 전용 검색에서 GA4, gtag, GTM, Firebase Analytics, Search Console 계측 코드와 공개 배포 설정 파일을 확인하지 못함. Firebase/GA 환경변수 이름 형태는 존재하지만 값은 읽거나 기록하지 않았고 실제 수집 증거로 간주하지 않음",
+    "2026-08-15 08:57:28 KST 관측 기준 공개 URL, .openai/hosting.json, vercel.json, firebase.json을 확인하지 못해 deploymentStatus를 not_deployed로 유지함",
+    "Firebase RTDB safe shallow GET은 실행환경 DNS 경계로 응답을 받지 못함. 공개 페이지 렌더, POST, 운영 쓰기는 수행하지 않았으며 RTDB 상태를 미연결로 단정하지 않음",
+    "2026-08-15 08:57:28 KST 관측 기준 data/images JSON 4,818건, data/videos JSON 83건, data/agent-runs manifest 2,469건, data/motion-assets project 27건, data/webtoon project 1건을 KST 달력일 기준으로 재집계함. 파싱 오류, 시간 누락, mtime 대체, 미래 레코드는 각각 0건",
+    "최근 30일 agent run category를 직접 재계산해 debate-comic 218, debate-topic 156, unknown 122, cookview-food 63, aitool-thumb-v2 49를 확인함"
+  ],
+  "limitations": [
+    "GA4와 Search Console의 실제 분석 원천을 확인하지 못해 오늘 방문자, 최근 7일/30일 방문, 인기 페이지, 유입경로, 핵심 CTA를 실제 방문 지표로 검증할 수 없다",
+    "공개 URL과 운영 배포가 없어 외부 방문 수집 여부를 읽기 전용으로도 확인할 수 없다",
+    "Firebase RTDB는 실행환경 DNS 경계로 safe shallow GET 응답을 확인하지 못했으므로 연결·데이터 유무·권한 상태를 판정할 수 없다",
+    "로컬 제품 사용 원천은 파일시스템 exact 집계지만 각 원천의 레코드 단위가 서로 다르므로 합산하지 않는다. 방문자, 고유 사용자, 완료 워크플로우, 문의, 예약, 매출의 대체 지표도 아니다",
+    "문의·예약·구매 원장과 Search Console 접근 권한이 없어 실제 사업 전환과 검색 유입은 자료 없음 상태로 남긴다",
+    "로컬 원시 레코드에서 관리자·개발·자동화·테스트 활동을 분리할 수 없고 원천 간 중복 가능성이 있다",
+    "날짜 구간은 Asia/Seoul 달력일 기준이며 관측 당일은 2026-08-15 08:57:28 KST까지의 부분일이다",
+    "GA4 계측 코드와 실제 전송을 확인하지 못했으므로 관리자·개발환경 제외, 자동·수동 page_view 중복, 개인정보 미전송 여부를 검증할 수 없다"
+  ]
+}
