@@ -17,8 +17,9 @@
 - 토큰·비밀값은 서버 경계 밖과 로그에 노출하지 않는다.
 - **현재 정본 상태:** `SB WO-003` 후보 `bfea5938`이 독립 Checker PASS와 CEO 재검증을
   거쳐 `0.1.3` 활성 정본으로 승인됐다. 저장소 판정은 `READY_FOR_CLEANUP`이며 코드 통합
-  기준은 `feature/webtoon-studio`의 `f90b8751`이다. worktree·branch 삭제와 push·deploy는
-  별도 승인 전까지 계속 금지한다.
+  기준은 `feature/webtoon-studio`의 `f90b8751`이다. 2026-08-17 R3 Checker 승인 범위에서
+  병합 브랜치 2개만 비강제 삭제해 최종 `CANONICAL_CONFIRMED`로 마감했다. 추가 worktree·
+  branch 삭제와 push·deploy는 별도 승인 전까지 계속 금지한다.
 - **실제 저장 경계:** 생성 이미지·영상과 메타데이터는 로컬 파일시스템(`data/images`,
   `data/videos`)에 저장하고, 일부 캐릭터·스토리 편집 상태는 아직 `localStorage`다.
   SQLite 통합은 결정된 후속 구현이며 현재 구현으로 표현하지 않는다.

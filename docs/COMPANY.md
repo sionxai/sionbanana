@@ -6,11 +6,14 @@
 > - 승인일: **2026-08-16**
 > - 기준 코드 통합 상태: `feature/webtoon-studio` / `f90b87513f566c532e6335f86ab514fcf88ca6a6`
 > - 검수 대상: `bfea5938984ebbe3d6c6a1b6d40303d0e4c387fe` / 독립 Checker `PASS`
+> - 저장소 판정: **CANONICAL_CONFIRMED** (2026-08-17 R3 cleanup 검수·실행 기록)
 
 이 문서는 Sion Banana의 사업 방향, 우선순위, KPI, 로드맵을 결정하는 단일 기준의
 **활성 정본**이다. SB WO-003 후보 `bfea5938`은 독립 Checker PASS와 CEO 재검증을 거쳐
 v0.1.3으로 승인됐다. `READY_FOR_CLEANUP`은 후속 정리 작업을 안전하게 계획할 수 있다는
 판정이며, worktree·branch 삭제나 push·deploy 승인을 뜻하지 않는다.
+2026-08-17 대표가 승인한 exact cleanup에서는 완전 병합·미사용 브랜치 2개만 비강제로
+삭제했고, ignored 파일 또는 고유 커밋이 있는 추가 worktree 3개는 보존했다.
 전략 판단에서 이 문서와 README, PRD, 작업지시서 또는 현재 코드가 충돌하면 이 문서를
 우선한다. 구현 세부사항은 PRD와 작업지시서가 담당하되, 이 문서의 방향을 바꿀 수 없다.
 
@@ -169,6 +172,7 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 | DEC-007 | 2026-08-04 | 공개 배포는 인증 방식과 약관 검토가 끝날 때까지 보류한다. | README `약관 / 면책`, `REDESIGN_PLAN.md` §6 | 유지 |
 | DEC-008 | 2026-08-16 | `feature/webtoon-studio`에 CEO 문서·local main skill 이력·Arduino PPT 자산을 삭제 없이 보존한 canonical 후보를 두고 독립 Checker 판정 전에는 완료·정본 승격을 선언하지 않는다. | `SB WO-003`, 보존 커밋 `661bc1c5`·`55eabb0c`·`f90b8751` | 완료 |
 | DEC-009 | 2026-08-16 | 후보 `bfea5938`을 v0.1.3 활성 정본으로 승인하고 저장소를 `READY_FOR_CLEANUP`으로 판정한다. 정리·삭제·push·deploy는 별도 T-02 승인 전까지 계속 금지한다. | 독립 Checker PASS, CEO AIDE 원계약·제외 WIP 집계 재검증 | 유지 |
+| DEC-010 | 2026-08-17 | R3 Checker가 승인한 완전 병합·미사용 브랜치 `claude/key-visual-work-721540`, `claude/skill-hope-lessons`만 `git branch -d`로 삭제하고, ignored 파일 또는 고유 커밋이 있는 worktree 3개와 연결 branch는 보존한다. 저장소 판정은 `CANONICAL_CONFIRMED`다. | R3 Checker DoD 5/5 PASS, 실행 후 branch/worktree/status 재대조 | 유지 |
 
 결정을 바꾸려면 변경 이유, 기대 KPI 영향, 되돌림 조건을 이 표에 새 행으로 기록한다.
 기존 행을 지워 과거 결정을 숨기지 않는다.
@@ -212,6 +216,7 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 | 0.1.2 | 2026-08-07 | 운영 원칙 9 보강 — 현황판 갱신 시 크롬 브라우저 자동 표시. | 대표자 지시(2026-08-07) |
 | 0.1.3-candidate | 2026-08-16 | SB WO-003 보존·통합 사실, 실제 인증·모델·저장 상태, Webtoon WIP 경계를 반영하고 NOW-002를 `canonical 후보 검수`로 이동. 완료·승격 판정은 Checker와 CEO 대기. | 코드 통합 기준 `f90b8751`, SB WO-003 SourceRefs |
 | 0.1.3 | 2026-08-16 | 후보 `bfea5938` 독립 Checker PASS와 CEO 재검증을 반영해 활성 정본으로 승격. NOW-002 완료, 저장소 판정 `READY_FOR_CLEANUP`. | SB WO-003 검수 로그, DEC-009 |
+| 0.1.3+cleanup.1 | 2026-08-17 | exact local cleanup으로 병합 브랜치 2개만 비강제 삭제하고 worktree 3개·WIP 41경로·ignored 자산을 보존. 최종 판정 `CANONICAL_CONFIRMED`. | R3 cleanup Checker PASS, DEC-010 |
 
 ## 11. 관련 문서
 

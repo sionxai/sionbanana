@@ -9,13 +9,13 @@
 ## 대표자 할 일
 
 - [ ] T-01 **UNAPPROVED — implement 금지.** 미션 확장 개정안(v0.2.0) 승인 여부 결정 — "AI 고품질 미디어 제작 전반(이미지·영상·영화·CF·PPT + 스토리·시나리오)" 반영은 대표가 별도 승인하기 전 제안일 뿐이며 구현 범위가 아니다.
-- [ ] T-02 워크트리·브랜치 **삭제·정리안은 미승인** — SB WO-003은 고유 산출물의 비파괴 로컬 보존과 local main 병합만 승인했다. 잔여 worktree/branch 삭제·prune·push는 계속 금지한다.
+- [x] T-02 1차 exact cleanup 승인·실행 — R3 Checker PASS 후 완전 병합·미사용 로컬 브랜치 2개만 `git branch -d`로 삭제했다. ignored 파일 또는 고유 커밋이 있는 worktree 3개와 연결 branch는 보존하며, 추가 삭제·prune·push는 새 승인 전까지 금지한다.
 - [ ] T-03 자격증명 노출 대응안 승인 여부 결정 — 사용처 확인 및 필요한 교체 범위를 먼저 확정한다.
 - [ ] T-04 모션에셋 결함 수정안 승인 여부 결정 — 4위상 프롬프트 중복과 2행 시트 미러링 진단을 바탕으로 수정 범위를 확정한다.
 - [ ] T-05 웹 유입 추진 여부 결정 — 현재 로컬·미배포 방침을 유지하면 보류한다. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.
 
-> T-01~T-05는 모두 **미승인 대표자 제안**이며 정식 작업지시가 아니다. 승인된 작업은 아래
-> 상태표와 지시서에 `SB WO-###`로만 기록한다.
+> T-02의 위 exact local cleanup만 2026-08-17 대표 결정으로 승인·실행됐다. T-01·T-03~T-05와
+> T-02의 추가 삭제·prune·push는 미승인이며, 정식 작업지시는 아래 상태표에 `SB WO-###`로 기록한다.
 
 ## 세션 명부
 
@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|---|
 | SB WO-001 | 2026-08-13 | CEO 현황판·AIDE 분석 상태 정본 갱신 | CEO(Sol) / 문서 Maker(Luna) | P0 | 2026-08-13 | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
-| SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · READY_FOR_CLEANUP |
+| SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 
 ## 지시서
 
@@ -286,6 +286,11 @@
   PASS(두 비차단 제한 포함)로 판정했다. 허용 범위 밖 변경·유실·ref/worktree 삭제 없음.
 - 2026-08-16 KST — CEO가 외부 AIDE 원계약을 직접 재대조하고 제외 40파일 집계 해시를
   재현해 두 제한을 해소했다. 최종 판정 `READY_FOR_CLEANUP`, v0.1.3 정본 승격, WO 완료.
+- 2026-08-17 KST — R3 cleanup Checker가 기록 커밋 `715cde98`과 exact branch 후보 2개를
+  DoD 5/5 PASS로 판정. 추가 worktree 3개는 ignored 파일·고유 커밋 때문에 제거 대상에서 제외.
+- 2026-08-17 KST — `claude/key-visual-work-721540`(`0bd298af`)과
+  `claude/skill-hope-lessons`(`9751b62a`)만 `git branch -d`로 삭제. worktree 4개, WIP 41경로,
+  Arduino/CEO source branch와 ignored 자산을 보존하고 `CANONICAL_CONFIRMED`로 마감.
 
 ## 검수 로그
 
@@ -305,6 +310,10 @@
 - **최종 판정:** `READY_FOR_CLEANUP`. 후보를 v0.1.3 활성 정본으로 승인하고 SB WO-003을
   완료한다. worktree·branch 삭제, push·deploy, 외부 변경은 수행하지 않았으며 T-02 별도
   승인이 필요하다.
+- **cleanup 마감:** 2026-08-17 R3 Checker DoD 5/5 PASS 후 병합 브랜치 2개만 비강제
+  삭제했다. 실행 후 root staged 0, 기존 modified 4 + untracked 37, worktree 4개,
+  `data/styles` 38파일을 재확인했다. 추가 worktree는 보존했고 최종 판정은
+  `CANONICAL_CONFIRMED`다. push·deploy·force·external 변경은 0건이다.
 
 - `SB WO-001` 명령 검증 — 기준 HEAD
   `5af8de946c8ca56ac15a49daf1ed804e78c072a6`, 작업 디렉터리

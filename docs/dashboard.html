@@ -98,8 +98,8 @@
       </div>
       <div class="chips">
         <span>정본 0.1.3 · Active</span>
-        <span>현재 날짜 2026-08-16</span>
-        <span>보고 갱신 2026-08-16 21:28 KST</span>
+        <span>현재 날짜 2026-08-17</span>
+        <span>보고 갱신 2026-08-17 13:48 KST</span>
         <span>로컬 관측 2026-08-16 20:52:56 KST</span>
         <span>코드 통합 기준 f90b8751</span>
       </div>
@@ -114,16 +114,16 @@
       <div class="card stat-tile"><span class="stat-label">NOW 진척</span><strong>2/5 완료 · 40%</strong><small>NOW-002 완료 · 실제 cleanup은 T-02 승인 대기</small></div>
       <div class="card stat-tile"><span class="stat-label">공개 배포</span><strong>not_deployed</strong><small>공개 URL·호스팅 설정 미확인</small></div>
       <div class="card stat-tile"><span class="stat-label">웹 분석 계측</span><strong>not_instrumented</strong><small>GA4·Search Console 실제 원천 미확인</small></div>
-      <div class="card stat-tile"><span class="stat-label">최신 정본</span><strong>SB WO-003 · 완료</strong><small>Checker PASS · CEO READY_FOR_CLEANUP</small></div>
+      <div class="card stat-tile"><span class="stat-label">최신 정본</span><strong>SB WO-003 · 완료</strong><small>R3 Checker PASS · CANONICAL_CONFIRMED</small></div>
     </div>
   </section>
 
   <section class="executive">
     <h2>CEO 판단 및 대표 승인 필요사항</h2>
-    <p class="note">발행된 정식 작업지시는 <code>SB WO-001</code>~<code>SB WO-003</code> 세 건이다. 아래 T-01~T-05는 대표 승인 대기 제안이며 정식 작업지시가 아니다.</p>
+    <p class="note">발행된 정식 작업지시는 <code>SB WO-001</code>~<code>SB WO-003</code> 세 건이다. T-02의 exact branch cleanup만 2026-08-17 대표 결정으로 승인·실행됐고, 나머지 안건과 추가 cleanup은 승인 대기다.</p>
     <ul class="task-list">
       <li class="task-item"><span class="task-id">T-01</span><span><strong>UNAPPROVED — implement 금지 · 미션 확장안</strong><em>대표가 별도 승인하기 전 v0.2.0 제안은 구현 범위가 아니다</em></span></li>
-      <li class="task-item"><span class="task-id">T-02</span><span><strong>worktree·branch 삭제/정리안 승인 여부 결정</strong><em>WO-003의 비파괴 로컬 보존·main 병합과 별개로 삭제·prune·push는 미승인</em></span></li>
+      <li class="task-item"><span class="task-id">T-02</span><span><strong>1차 exact cleanup 완료</strong><em>병합 브랜치 2개만 비강제 삭제. worktree 3개와 추가 삭제·prune·push는 보존/미승인</em></span></li>
       <li class="task-item"><span class="task-id">T-03</span><span><strong>자격증명 노출 대응안 승인 여부 결정</strong><em>사용처와 필요한 교체 범위를 먼저 확정해야 한다</em></span></li>
       <li class="task-item"><span class="task-id">T-04</span><span><strong>모션에셋 결함 수정안 승인 여부 결정</strong><em>4위상 프롬프트 중복과 2행 시트 미러링의 수정·회귀 범위 확정 필요</em></span></li>
       <li class="task-item"><span class="task-id">T-05</span><span><strong>웹 유입 추진 여부 결정</strong><em>현재 로컬·미배포 방침을 유지하면 보류. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인해야 한다</em></span></li>
@@ -143,7 +143,8 @@
         <ol>
           <li><b>PPT 노하우 보존 완료</b> — Arduino 39파일을 <code>b273f7db</code>에 보존하고 root에는 38자산과 PPT routing만 통합했다.</li>
           <li><b>local main 이력 보존 완료</b> — 세 skill 경로만 merge commit <code>55eabb0c</code>로 통합했다.</li>
-          <li><b>삭제는 미승인</b> — worktree 3개와 source branch는 제거·prune하지 않았다.</li>
+          <li><b>worktree 삭제는 미승인</b> — worktree 3개와 source branch는 제거·prune하지 않았다.</li>
+          <li><b>exact branch cleanup 완료</b> — R3 Checker 승인 후 병합·미사용 branch 2개만 <code>git branch -d</code>로 삭제했다.</li>
           <li><b>Webtoon은 별도</b> — untracked 16파일은 WIP로 유지하며 이번 canonical 후보에 stage하지 않았다.</li>
         </ol>
       </div>
@@ -160,7 +161,7 @@
     <div class="grid-2">
       <div class="card agenda-card">
         <h3>SB WO-003 · 저장소·맥락 1차 안정화 <span class="badge b-done" style="margin-left:4px">완료</span></h3>
-        <p>후보 <code>bfea5938</code>이 독립 Checker PASS와 CEO 재검증을 통과했다. v0.1.3 활성 정본으로 승인했고 판정은 <code>READY_FOR_CLEANUP</code>이다. 실제 삭제·push·deploy는 하지 않았다.</p>
+        <p>후보 <code>bfea5938</code>이 독립 Checker PASS와 CEO 재검증을 통과했다. 2026-08-17 R3 cleanup Checker 승인 후 병합 브랜치 2개만 비강제 삭제해 최종 <code>CANONICAL_CONFIRMED</code>로 마감했다. push·deploy는 하지 않았다.</p>
       </div>
       <div class="card agenda-card">
         <h3>SB WO-002 · 2026-08-15 현황판·유입 통계 최신화</h3>
@@ -264,7 +265,7 @@
         <thead><tr><th>ID</th><th>항목</th><th>상태</th><th>비고 (2026-08-16 KST 실측)</th></tr></thead>
         <tbody>
           <tr><td>NOW-001</td><td>회사 정본 수립</td><td><span class="badge b-done">완료</span></td><td>v0.1.3 Active · 후보 bfea5938 독립 검수 완료</td></tr>
-          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-done">완료</span></td><td>READY_FOR_CLEANUP · worktree/branch 삭제는 T-02 승인 대기</td></tr>
+          <tr><td>NOW-002</td><td>미커밋 작업·worktree 분류</td><td><span class="badge b-done">완료</span></td><td>CANONICAL_CONFIRMED · branch 2 삭제, worktree 3 보존</td></tr>
           <tr><td>NOW-003</td><td>핵심 경로 검증 (인증→생성→저장→스토리보드)</td><td><span class="badge b-wait">대기</span></td><td>전체 경로의 최신 실물 검증 증거 없음</td></tr>
           <tr><td>NOW-004</td><td>프리셋·모션 구현 실물 검수</td><td><span class="badge b-review">검수</span></td><td>결함 원인 2건 진단 완료, 수정·회귀 판정 미완료</td></tr>
           <tr><td>NOW-005</td><td>Webtoon Studio 변경 보존·범위 확정</td><td><span class="badge b-wip">착수</span></td><td>미커밋 Webtoon 관련 변경과 산출물 보존 범위 확정 필요</td></tr>
@@ -289,6 +290,7 @@
           <tr><td>canonical 정본</td><td><span class="badge b-done">Active</span></td><td>후보 <code>bfea5938</code> Checker PASS · v0.1.3 승인</td></tr>
           <tr><td>제외 untracked</td><td>37 files</td><td>Webtoon WIP 16, 생성물·도구·문서 20, 필요성 미충족 <code>.codex/config.toml</code> 1</td></tr>
           <tr><td>추가 worktree</td><td>3개</td><td>Arduino 보존 branch, friendly-pasteur detached, CEO source branch · 삭제 미실행</td></tr>
+          <tr><td>branch cleanup</td><td>2개 삭제</td><td><code>claude/key-visual-work-721540</code>, <code>claude/skill-hope-lessons</code> · non-force</td></tr>
         </tbody>
       </table></div>
     </div>
@@ -297,7 +299,7 @@
   <section>
     <div class="section-heading"><div><span class="eyebrow">Risks</span><h2>위험·막힘</h2></div><p>확인된 사실과 미확인 영역을 분리</p></div>
     <ul class="risk-list">
-      <li><b>정리 실행 대기</b> — 판정은 <code>READY_FOR_CLEANUP</code>이지만 worktree·branch 삭제·prune은 T-02 별도 승인 전까지 실행하지 않는다.</li>
+      <li><b>추가 정리 보류</b> — worktree 3개에는 ignored 파일 또는 고유 커밋이 있어 제거하지 않았다. 추가 삭제·prune은 별도 승인 전까지 금지한다.</li>
       <li><b>NOW-005 산출물 보존 위험</b> — Webtoon 관련 미커밋 변경과 산출물이 존재한다. 정리·이동·삭제 전 보존 범위 확정이 필요하다.</li>
       <li><b>분석·배포 원천 부족</b> — 공개 URL과 GA4·Search Console·문의/예약/구매 실제 원천을 확인하지 못했다. 미수집 상태를 방문자나 매출 숫자로 바꿀 수 없다.</li>
       <li><b>RTDB 확인 차단</b> — 마지막 2026-08-15 safe shallow GET은 DNS 경계로 응답을 받지 못했고 WO-003은 network 금지로 새 조회가 없다. 연결·데이터 유무·권한을 임의 판정하지 않는다.</li>
@@ -315,8 +317,8 @@
     <div class="section-heading"><div><span class="eyebrow">Next</span><h2>다음 행동</h2></div><p>증거 확보 후에만 상태 변경</p></div>
     <div class="grid-2">
       <div class="card agenda-card">
-        <h3>1. T-02 cleanup 실행 여부 결정</h3>
-        <p>현재 판정은 <code>READY_FOR_CLEANUP</code>이다. 삭제 대기 worktree·중복 branch 목록을 다시 확인한 뒤 삭제·prune 범위를 대표가 별도로 승인해야 한다.</p>
+        <h3>1. 보존 worktree 유지</h3>
+        <p>Arduino·CEO·friendly worktree의 고유 커밋과 ignored 설정/자산을 계속 보존한다. 복구 증거와 별도 승인이 생기기 전에는 추가 삭제하지 않는다.</p>
       </div>
       <div class="card agenda-card">
         <h3>2. T-05 웹 유입 추진 여부 결정</h3>
@@ -346,6 +348,7 @@
       <li>2026-08-16 — local main 10개 skill 이력을 merge commit으로 보존하고 Arduino PPT routing + 38자산을 root에 통합. worktree·branch 삭제와 push·deploy는 미실행.</li>
       <li>2026-08-16 20:52:56 KST — 로컬 원천 5종을 재집계. 외부 분석은 새 조회 없이 마지막 관측시각과 <code>미연결/자료 없음</code>을 유지.</li>
       <li>2026-08-16 — 후보 <code>bfea5938</code> 독립 Checker PASS. CEO가 AIDE 원계약과 제외 WIP 집계까지 재검증해 <code>READY_FOR_CLEANUP</code>으로 최종 판정하고 v0.1.3 정본으로 승인.</li>
+      <li>2026-08-17 — R3 Checker DoD 5/5 PASS 후 완전 병합·미사용 branch 2개만 <code>git branch -d</code>로 삭제. worktree 3개·WIP 41경로·ignored 자산을 보존하고 <code>CANONICAL_CONFIRMED</code>로 마감.</li>
     </ul>
   </footer>
 </main>
