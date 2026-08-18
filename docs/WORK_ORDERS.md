@@ -21,7 +21,7 @@
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 완료 · T-02 정리 승인 대기 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 CANONICAL_CONFIRMED · 보존 worktree 유지 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -165,7 +165,7 @@
 - **우선순위:** P0
 - **담당:** CEO(Sol, 계약·최종 판정) / Terra(Maker, 유일 writer) / 독립 Checker(읽기 전용)
 - **목표일:** 2026-08-16 KST
-- **상태:** `완료` — 후보 `bfea5938` 독립 Checker PASS, CEO `READY_FOR_CLEANUP`.
+- **상태:** `완료` — 후보 `bfea5938` 독립 Checker PASS, exact cleanup 후 CEO `CANONICAL_CONFIRMED`.
 - **위험등급:** R2 — 다중 브랜치 이력·정본·분석 상태 계약을 한 후보로 통합하므로 독립
   Checker가 필수다. 런타임 인증·권한·배포·운영 데이터는 변경하지 않는다.
 - **목표:** 고유 산출물을 잃지 않으면서 canonical root
@@ -307,7 +307,7 @@
   일치하고 main 10·CEO 4·Arduino 39 입력·worktree 4개가 모두 보존됐다고 판정.
 - CEO 재검증: AIDE 원계약 required fields/status enum/daily30 합계 `true`, HTML parse 성공,
   로컬 원천 독립 재집계 5종 일치, 제외 WIP 집계 `c68dfc…524e7` 재현, staged 0 확인.
-- **최종 판정:** `READY_FOR_CLEANUP`. 후보를 v0.1.3 활성 정본으로 승인하고 SB WO-003을
+- **1차 판정:** `READY_FOR_CLEANUP`. 후보를 v0.1.3 활성 정본으로 승인하고 SB WO-003을
   완료한다. worktree·branch 삭제, push·deploy, 외부 변경은 수행하지 않았으며 T-02 별도
   승인이 필요하다.
 - **cleanup 마감:** 2026-08-17 R3 Checker DoD 5/5 PASS 후 병합 브랜치 2개만 비강제
