@@ -22,7 +22,7 @@
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-004 발행·위임 통제 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-004 완료 · 후속(source 유니온·전역 스킬 영상 절) 백로그 관리 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -31,7 +31,7 @@
 | SB WO-001 | 2026-08-13 | CEO 현황판·AIDE 분석 상태 정본 갱신 | CEO(Sol) / 문서 Maker(Luna) | P0 | 2026-08-13 | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
-| SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 발행 | — |
+| SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
 
 ## 지시서
 
@@ -337,6 +337,10 @@
 - 2026-08-21 17:5x KST — 대표 승인("승인")으로 `발행`. 전용 워크트리
   `.claude/worktrees/sb-wo-004-mcp-video` (`claude/sb-wo-004-mcp-video` @ `da264feb`,
   base `feature/webtoon-studio`) 생성.
+- 2026-08-21 18:0x KST — Maker(Codex exec, --full-auto 샌드박스·네트워크 차단) 구현 반환.
+  porcelain 대조로 지정 3파일만 변경 확인, `검수` 진입.
+- 2026-08-21 18:12 KST — CEO 재검증 통과(구문 2파일·신규 6/6·회귀 11/11) + 결함 1건
+  직접 수정 + 실기 스모크 `ready` 실증. `완료`. 병합 `7e12d8f3`.
 
 ## 검수 로그
 
@@ -434,3 +438,28 @@
   canonical 현황판과 분석 상태에 반영한 목표는 달성해 `완료`로 기록한다. 후속 한계는
   GA4·Search Console·사업 전환 원천 미연결, RTDB 확인 불가, 대상 세 파일 staged·미커밋,
   그 밖의 정본 사본 untracked 상태다. 이 판정은 제품 전체 기능·실물·회귀 PASS가 아니다.
+
+### SB WO-004 — MCP 영상 도구 create_video·get_video
+
+- 검수 기준: 워크트리 `claude/sb-wo-004-mcp-video` base `da264feb`, 시작 porcelain 0줄.
+  Maker 산출 후 porcelain — 정확히 지정 3파일(M `scripts/mcp-server.mjs`,
+  신규 `scripts/video-worker.mjs`·`tests/mcp-video.test.mjs`). 범위 위반 0건.
+- Maker(Codex exec, gpt-5.6-terra) 보고 — '구현 완료 / 검증 미실행': 샌드박스 키체인
+  크래시(SecItemCopyMatching -50, exit 139 — CODEX_PROTOCOL §2 기지 일과성 이슈)로 node
+  검증 전부 중단, 1회 재시도 후 규칙대로 구분 보고. `deno check` 대체 시도 1건 관찰.
+- CEO 재실행 — `node --check` 2파일 exit 0. 신규 `tests/mcp-video.test.mjs` 1차 5/6:
+  running→ready 케이스 FAIL 검출(`destPath parent must contain only regular,
+  non-symbolic-link directories`). 회귀 `mcp-server-batch`+`motion-mcp` 11/11 PASS.
+- CEO 직접 수정 1건(4줄) — `inspectReadyVideo`가 기존 `assertNoSymlinkDirectories`(전
+  조상 심링크 검사, export_motion의 임의 사용자 경로용)를 `data/videos` 내부로 봉쇄가
+  끝난 결과 경로에 재사용 → `/var` 등 OS 심링크 상위 경로 오탐 거부. video-worker와 동일한
+  realpath 봉쇄(`assertPathInside(realVideosRoot, realVideoDir)`)로 교체. 최종 파일
+  심링크는 기존 `O_NOFOLLOW`가 차단. 수정 후 신규 테스트 6/6 PASS.
+- 실기 스모크 — imageId `pxi7hm5h5pmsmlykpb` →
+  jobId `video-job-1787303473751-1c5420e5-e284-41d7-b973-36dd13cd62e2`, 약 50초 후
+  `ready`. `data/videos/2026-08/t3nn2slc67mt2qde9p.mp4`, 1,691,935 bytes, sha256
+  `b533c016…9a81` — CEO가 `shasum -a 256`으로 독립 재계산해 도구 보고값과 일치 확인.
+- 커밋 — WO 브랜치 `51755591`, `feature/webtoon-studio` 병합 `7e12d8f3` (로컬 전용,
+  push·배포·브랜치 삭제 없음). 위임 왕복 1회.
+- **판정: PASS · 완료.** 한계: 상주 MCP 서버 프로세스는 재시작 후부터 새 도구 노출.
+  후속(백로그): source 유니온(imagePath/dataUrl) 확장, 전역 `sionbanana-remote` 스킬 영상 절.
