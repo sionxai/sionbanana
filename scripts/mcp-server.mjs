@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -28,6 +28,10 @@ const MOTION_EXPORT_BASE64_MAX_BYTES = 12 * 1024 * 1024;
 const MOTION_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MOTION_POLL_INTERVAL_MS = 500;
 const MOTION_ID_RE = /^[A-Za-z0-9._-]+$/;
+const DEFAULT_VIDEO_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
+const VIDEO_DEADLINE_BUFFER_MS = 30_000;
+const VIDEO_POLL_INTERVAL_MS = 500;
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]+$/;
 const MOCK_MODE = process.env.SIONBANANA_MCP_MOCK === "1";
 
 const optionalText = () => z.string().trim().min(1).optional();
@@ -106,6 +110,38 @@ const motionAdvancedSchema = z
     matte: motionMatteSchema.optional()
   })
   .strict();
+const videoImageIdSchema = z.string().trim().min(1).max(160).regex(VIDEO_ID_RE);
+const videoDurationSchema = z.union([
+  z.number().int().positive().max(30),
+  z.string().trim().regex(/^(?:[1-9]|[12][0-9]|30)$/).transform(Number)
+]);
+const videoSourceSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("imageId"),
+        imageId: videoImageIdSchema
+      })
+      .strict()
+  ]);
+export const videoCreateInputSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    source: videoSourceSchema,
+    prompt: z.string().trim().min(1).max(8000),
+    duration: videoDurationSchema.optional(),
+    resolution: z.string().trim().min(1).max(32).optional(),
+    aspectRatio: z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9:_-]+$/).optional(),
+    model: z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.:-]+$/).optional(),
+    waitMs: z.number().int().min(0).max(30_000).default(0)
+  })
+  .strict();
+export const videoGetInputSchema = z
+  .object({
+    jobId: z.string().trim().min(1).regex(VIDEO_ID_RE),
+    waitMs: z.number().int().min(0).max(30_000).default(0)
+  })
+  .strict();
 
 const TOOL_NAMES = [
   "health_check",
@@ -118,6 +154,8 @@ const TOOL_NAMES = [
   "list_images",
   "create_motion",
   "get_motion",
+  "create_video",
+  "get_video",
   "export_motion",
   "list_motion"
 ];
@@ -355,6 +393,50 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => getMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "create_video",
+    {
+      title: "Create Video",
+      description: "Starts image-to-video generation in a detached worker and returns a pollable job id.",
+      inputSchema: {
+        name: z.string().trim().min(1).optional(),
+        source: videoSourceSchema,
+        prompt: z.string().trim().min(1).max(8000),
+        duration: videoDurationSchema.optional(),
+        resolution: z.string().trim().min(1).max(32).optional(),
+        aspectRatio: z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9:_-]+$/).optional(),
+        model: z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.:-]+$/).optional(),
+        waitMs: z.number().int().min(0).max(30_000).default(0)
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => createVideo(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "get_video",
+    {
+      title: "Get Video",
+      description: "Polls a video job and returns a verified local video path when it is ready.",
+      inputSchema: {
+        jobId: z.string().trim().min(1).regex(VIDEO_ID_RE),
+        waitMs: z.number().int().min(0).max(30_000).default(0)
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => getVideo(input, context)
   );
 
   registerJsonTool(
@@ -829,6 +911,130 @@ export async function getMotion(input, context) {
       ok: false,
       reason: errorMessage(error)
     };
+  }
+}
+
+export async function createVideo(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = videoCreateInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  const jobId = `video-job-${Date.now()}-${randomUUID()}`;
+  if (context.mock) {
+    return {
+      ok: true,
+      jobId,
+      status: "running",
+      mocked: true
+    };
+  }
+
+  let jobPath;
+  let job;
+  try {
+    const createdAt = Date.now();
+    const jobsRoot = await videoDirectory(context, "video-jobs", true);
+    jobPath = videoIdPath(jobsRoot, jobId, ".json");
+    job = {
+      status: "running",
+      createdAtIso: new Date(createdAt).toISOString(),
+      deadlineIso: new Date(createdAt + videoGenerationTimeoutMs() + VIDEO_DEADLINE_BUFFER_MS).toISOString(),
+      ...(parsedInput.name ? { name: parsedInput.name } : {}),
+      request: {
+        sourceImageId: parsedInput.source.imageId,
+        prompt: parsedInput.prompt,
+        ...(parsedInput.duration !== undefined ? { duration: parsedInput.duration } : {}),
+        ...(parsedInput.resolution ? { resolution: parsedInput.resolution } : {}),
+        ...(parsedInput.aspectRatio ? { aspectRatio: parsedInput.aspectRatio } : {}),
+        ...(parsedInput.model ? { model: parsedInput.model } : {})
+      }
+    };
+    await atomicWriteJson(jobPath, job);
+
+    try {
+      const workerScript = path.join(context.repoRoot, "scripts", "video-worker.mjs");
+      const worker = (context.spawnImpl ?? spawn)(process.execPath, [workerScript, jobId], {
+        cwd: context.repoRoot,
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          SIONBANANA_DATA_DIR: path.resolve(context.dataRoot)
+        }
+      });
+      worker.once("error", error => {
+        const failed = {
+          ...job,
+          status: "failed",
+          reason: `generation-error: unable to start video worker: ${error.message}`,
+          finishedAtIso: new Date().toISOString()
+        };
+        atomicWriteJson(jobPath, failed).catch(() => {});
+      });
+      worker.unref();
+    } catch (error) {
+      job = {
+        ...job,
+        status: "failed",
+        reason: `generation-error: unable to start video worker: ${errorMessage(error)}`,
+        finishedAtIso: new Date().toISOString()
+      };
+      await atomicWriteJson(jobPath, job).catch(() => {});
+    }
+
+    if (parsedInput.waitMs > 0 && job.status === "running") {
+      return await getVideo({ jobId, waitMs: parsedInput.waitMs }, context);
+    }
+    return videoJobResult(jobId, job);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: errorMessage(error)
+    };
+  }
+}
+
+export async function getVideo(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = videoGetInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  try {
+    const waitUntil = Date.now() + parsedInput.waitMs;
+    let record = await readVideoJob(parsedInput.jobId, context);
+    if (!record) {
+      return { ok: false, reason: "unknown jobId" };
+    }
+    record.job = await applyVideoDeadline(record.job, record.path);
+
+    while (record.job.status === "running" && Date.now() < waitUntil) {
+      const deadline = Date.parse(record.job.deadlineIso || "");
+      const now = Date.now();
+      const untilDeadline = Number.isFinite(deadline) ? Math.max(1, deadline - now + 1) : Infinity;
+      const sleepMs = Math.min(VIDEO_POLL_INTERVAL_MS, waitUntil - now, untilDeadline);
+      if (sleepMs <= 0) {
+        break;
+      }
+      await delay(sleepMs);
+      record = await readVideoJob(parsedInput.jobId, context);
+      if (!record) {
+        return { ok: false, reason: "unknown jobId" };
+      }
+      record.job = await applyVideoDeadline(record.job, record.path);
+    }
+
+    if (record.job.status !== "ready") {
+      return videoJobResult(parsedInput.jobId, record.job);
+    }
+    return await readyVideoResult(parsedInput.jobId, record.job, record.path, context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
   }
 }
 
@@ -1433,6 +1639,203 @@ function getDataRoot() {
     return path.resolve(process.env.HOME || REPO_ROOT, envDir.slice(2));
   }
   return path.resolve(envDir);
+}
+
+async function videoDirectory(context, name, create) {
+  const dataRoot = path.resolve(context.dataRoot);
+  const directory = path.resolve(dataRoot, name);
+  assertPathInside(dataRoot, directory, "video data path must stay inside dataRoot");
+  if (create) {
+    await fs.mkdir(dataRoot, { recursive: true });
+    await assertDirectoryNotSymlink(dataRoot);
+    await fs.mkdir(directory, { recursive: true });
+  } else {
+    try {
+      await fs.access(directory);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+  await assertDirectoryNotSymlink(dataRoot);
+  await assertDirectoryNotSymlink(directory);
+  const realDataRoot = await fs.realpath(dataRoot);
+  const realDirectory = await fs.realpath(directory);
+  assertPathInside(realDataRoot, realDirectory, "video data symlink escapes dataRoot");
+  return directory;
+}
+
+function videoIdPath(root, id, suffix = "") {
+  if (!isVideoId(id)) {
+    throw new Error("video id must contain only letters, numbers, underscores, and hyphens");
+  }
+  const candidate = path.resolve(root, `${id}${suffix}`);
+  if (path.dirname(candidate) !== path.resolve(root)) {
+    throw new Error("video path must stay inside its storage directory");
+  }
+  return candidate;
+}
+
+function isVideoId(value) {
+  return typeof value === "string" && VIDEO_ID_RE.test(value);
+}
+
+async function readVideoJob(jobId, context) {
+  const jobsRoot = await videoDirectory(context, "video-jobs", false);
+  if (!jobsRoot) {
+    return null;
+  }
+  const jobPath = videoIdPath(jobsRoot, jobId, ".json");
+  let stat;
+  try {
+    stat = await fs.lstat(jobPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("video job file must be a regular, non-symbolic-link file");
+  }
+  return {
+    path: jobPath,
+    job: await readJsonFile(jobPath)
+  };
+}
+
+async function applyVideoDeadline(job, jobPath) {
+  const deadline = Date.parse(job?.deadlineIso || "");
+  if (job?.status !== "running") {
+    return job;
+  }
+  if (!Number.isFinite(deadline)) {
+    return await failVideoJob(
+      jobPath,
+      job,
+      "timed out (invalid or missing deadlineIso); refusing to leave job running"
+    );
+  }
+  if (Date.now() <= deadline) {
+    return job;
+  }
+  return await failVideoJob(
+    jobPath,
+    job,
+    "timed out (deadline exceeded); worker may have died — retry create_video"
+  );
+}
+
+async function failVideoJob(jobPath, job, reason, extra = {}) {
+  const failed = {
+    ...job,
+    status: "failed",
+    reason,
+    ...extra,
+    finishedAtIso: new Date().toISOString()
+  };
+  await atomicWriteJson(jobPath, failed).catch(() => {});
+  return failed;
+}
+
+function videoJobResult(jobId, job) {
+  const status = job?.status === "running" || job?.status === "ready" || job?.status === "failed"
+    ? job.status
+    : "failed";
+  return {
+    ok: true,
+    jobId,
+    status,
+    ...(typeof job?.reason === "string"
+      ? { reason: job.reason }
+      : status === "failed" && job?.status !== "failed"
+        ? { reason: "invalid video job status" }
+        : {})
+  };
+}
+
+async function readyVideoResult(jobId, job, jobPath, context) {
+  try {
+    const video = await inspectReadyVideo(job, context);
+    if (typeof job.bytes === "number" && job.bytes !== video.bytes) {
+      throw new Error("video file size does not match the completed job record");
+    }
+    if (typeof job.sha256 === "string" && job.sha256 !== video.sha256) {
+      throw new Error("video file sha256 does not match the completed job record");
+    }
+    return {
+      ok: true,
+      jobId,
+      status: "ready",
+      videoPath: video.videoPath,
+      bytes: video.bytes,
+      contentType: typeof job.contentType === "string" && job.contentType.trim()
+        ? job.contentType
+        : "video/mp4",
+      sha256: video.sha256
+    };
+  } catch (error) {
+    const failed = await failVideoJob(
+      jobPath,
+      job,
+      `result-validation-error: ${errorMessage(error)}`
+    );
+    return videoJobResult(jobId, failed);
+  }
+}
+
+async function inspectReadyVideo(job, context) {
+  if (typeof job?.videoPath !== "string" || !path.isAbsolute(job.videoPath)) {
+    throw new Error("ready video job has no absolute videoPath");
+  }
+  const videosRoot = await videoDirectory(context, "videos", false);
+  if (!videosRoot) {
+    throw new Error("videos directory does not exist");
+  }
+  const videoPath = path.resolve(job.videoPath);
+  assertPathInside(videosRoot, videoPath, "videoPath must stay inside data/videos");
+  // dataRoot 상위의 OS 심링크(/var 등)는 정당하므로 전체 조상 검사 대신
+  // videos 루트 실경로 기준 봉쇄만 확인한다. 최종 파일은 O_NOFOLLOW가 막는다.
+  const realVideosRoot = await fs.realpath(videosRoot);
+  const realVideoDir = await fs.realpath(path.dirname(videoPath));
+  assertPathInside(realVideosRoot, realVideoDir, "videoPath symlink escapes data/videos");
+  let handle;
+  try {
+    handle = await fs.open(videoPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error("videoPath must be a non-empty regular, non-symbolic-link file");
+    }
+    const hash = createHash("sha256");
+    let bytes = 0;
+    const stream = handle.createReadStream({ autoClose: false });
+    await new Promise((resolve, reject) => {
+      stream.on("data", chunk => {
+        bytes += chunk.byteLength;
+        hash.update(chunk);
+      });
+      stream.once("end", resolve);
+      stream.once("error", reject);
+    });
+    if (bytes !== stat.size) {
+      throw new Error("videoPath changed while it was being verified");
+    }
+    return { videoPath, bytes, sha256: hash.digest("hex") };
+  } catch (error) {
+    if (error?.code === "ELOOP") {
+      throw new Error("videoPath must be a regular, non-symbolic-link file");
+    }
+    throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+function videoGenerationTimeoutMs() {
+  const parsed = Number(process.env.SIONBANANA_VIDEO_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_VIDEO_GENERATION_TIMEOUT_MS;
 }
 
 function getRunsRoot(context) {
