@@ -13,15 +13,16 @@
 - [ ] T-03 자격증명 노출 대응안 승인 여부 결정 — 사용처 확인 및 필요한 교체 범위를 먼저 확정한다.
 - [ ] T-04 모션에셋 결함 수정안 승인 여부 결정 — 4위상 프롬프트 중복과 2행 시트 미러링 진단을 바탕으로 수정 범위를 확정한다.
 - [ ] T-05 웹 유입 추진 여부 결정 — 현재 로컬·미배포 방침을 유지하면 보류한다. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.
+- [ ] T-06 `~/.codex/config.toml` 스키마 충돌 대응 방향 결정 — `[agents]` 블록(ChatGPT 데스크톱 앱 기록)이 codex CLI 0.144.0 파서와 충돌해 **codex CLI·MCP 기동 불능** (2026-08-21 실측, CEO는 임시 CODEX_HOME으로 우회 중). 앱이 소유한 파일이라 임의 수정 보류 — 앱 업데이트 대기 / CLI 채널 갱신 / 블록 수동 조정 중 택일 필요.
 
-> T-02의 위 exact local cleanup만 2026-08-17 대표 결정으로 승인·실행됐다. T-01·T-03~T-05와
+> T-02의 위 exact local cleanup만 2026-08-17 대표 결정으로 승인·실행됐다. T-01·T-03~T-06과
 > T-02의 추가 삭제·prune·push는 미승인이며, 정식 작업지시는 아래 상태표에 `SB WO-###`로 기록한다.
 
 ## 세션 명부
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-003 CANONICAL_CONFIRMED · 보존 worktree 유지 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-004 발행·위임 통제 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -30,6 +31,7 @@
 | SB WO-001 | 2026-08-13 | CEO 현황판·AIDE 분석 상태 정본 갱신 | CEO(Sol) / 문서 Maker(Luna) | P0 | 2026-08-13 | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
+| SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 발행 | — |
 
 ## 지시서
 
@@ -291,6 +293,50 @@
 - 2026-08-17 KST — `claude/key-visual-work-721540`(`0bd298af`)과
   `claude/skill-hope-lessons`(`9751b62a`)만 `git branch -d`로 삭제. worktree 4개, WIP 41경로,
   Arduino/CEO source branch와 ignored 자산을 보존하고 `CANONICAL_CONFIRMED`로 마감.
+
+### SB WO-004 — MCP 영상 도구 create_video·get_video
+
+- **ID:** `SB WO-004`
+- **우선순위:** P1
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현 — 2단 위임) / 검수 CEO 직접
+- **목표일:** 2026-08-22 KST
+- **의존성:** 기존 모션 MCP 패턴(`create_motion`→`get_motion`), `/api/video` 계약(불변),
+  Codex 자문(2026-08-21, gpt-5.6-terra read-only — 대장 외부 기록), 대표 승인(2026-08-21)
+- **목표:** sionbanana MCP(`scripts/mcp-server.mjs`)에 `create_video`(비동기 잡 생성)와
+  `get_video`(폴링) 2개 도구를 추가해, 클로드·코덱스 외부 세션이 로컬 이미지 id로 영상을
+  생성하고 결과 파일 경로를 받을 수 있게 한다.
+- **배경:** 영상 생성은 6월부터 앱(`/api/video`)·CLI(`agent-video.mjs`)에 존재하나 MCP
+  도구가 없어 외부 세션에서 접근 불가(2026-08-21 CEO 조사). COMPANY.md §7-1 핵심 흐름
+  우선 원칙 내에서 기존 기능의 접근성 개선이며 T-01 미션 확장과 무관 — 신규 기능·확장
+  아님. KPI 관측: 검수 시 MCP 경유 영상 제작 1회 실기 확인으로 갈음.
+- **변경 범위 (이 3개 파일만):**
+  1. `scripts/mcp-server.mjs` — 도구 2개 등록
+  2. `scripts/video-worker.mjs` — 신규 detached worker (`motion-worker.mjs` 미러)
+  3. `tests/mcp-video.test.mjs` — 신규 계약·상태 전이 테스트 (mock, 실서버 무의존)
+- **핵심 계약:** `create_video` 즉시 `running`+jobId 반환(waitMs≤30000 지원) / 잡 기록
+  `data/video-jobs/` / `get_video`는 `running|ready|failed`만 반환 / `failed`엔 조치 가능한
+  `reason`(+서버 에러 코드 보존) / `ready`엔 절대 `videoPath`(실존·크기>0 검증)+bytes+
+  contentType+sha256, base64 금지 / 입력 source는 `{type:"imageId"}` 단일 변형(유니온 확장
+  후속) / worker 타임아웃 `SIONBANANA_VIDEO_TIMEOUT_MS` 기본 20분, deadline 초과 시
+  `failed` 전환 / preflight는 서버 health까지만(progrok 문제는 잡 실패로 기록).
+- **완료 기준(검증 커맨드):** `node --check` 2파일 / package.json test 규약(register-ts-alias
+  --import)으로 `tests/mcp-video.test.mjs` PASS / 회귀: 같은 방식 `tests/motion-mcp.test.mjs`
+  `tests/mcp-server-batch.test.mjs` PASS / 검수 시 CEO가 재실행 + 실기 스모크(create→ready→
+  파일 실존) 1회.
+- **금지:** 변경 3파일 밖 수정, `/api/video`·기존 12개 도구 동작 변경, git commit·push,
+  npm install, 테스트의 실서버·네트워크 의존, base64 결과 반환.
+- **위험등급:** R2 — 공유 파일 `mcp-server.mjs` 수정, 회귀 테스트 필수. 런타임 앱 코드 불변.
+- **예상 대표자 투입시간:** 0~5분 (검수 완료 보고 확인만).
+- **롤백:** 전용 브랜치(`claude/sb-wo-004-mcp-video`) 폐기로 완결. canonical 불변.
+- **보고 형식:** 변경 파일 / 구현 요약 / 검증 커맨드·exit code·테스트 로그 / 가정 / 미해결.
+  Maker는 PASS 자기 판정 금지, 무증거 완료 주장은 반려. 검증 미실행 항목은
+  '구현 완료 / 검증 미실행'으로 구분.
+
+#### 상태 이력
+
+- 2026-08-21 17:5x KST — 대표 승인("승인")으로 `발행`. 전용 워크트리
+  `.claude/worktrees/sb-wo-004-mcp-video` (`claude/sb-wo-004-mcp-video` @ `da264feb`,
+  base `feature/webtoon-studio`) 생성.
 
 ## 검수 로그
 
