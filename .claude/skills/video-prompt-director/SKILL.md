@@ -29,6 +29,7 @@ description: 2026 세대 멀티샷·네이티브 오디오 영상 생성 모델(
 ## 절대 원칙 (모델 공식 가이드 기반 — 어기면 화질이 무너진다)
 
 1. **샷당 카메라 무빙은 1개만.** 카메라 무빙과 피사체 무빙을 한 샷에 섞지 않는다. (orbit + 줌인 + 붐업 + 트래킹 동시 금지 — 통제 불능·흔들림 1순위 원인)
+   - 예외(실측 2026-08-21): **"then"으로 잇는 순차 비트는 최대 3개까지 통과** — "camera holds, then tilts down, then slowly pushes in". 동시 결합은 여전히 금지, 비트 수 4개 이상 금지.
 2. **"빠른(fast)"은 화질을 가장 망치는 키워드.** fast 카메라 + fast 컷 + 복잡한 씬을 겹치지 않는다. 빠른 느낌이 필요하면 셋 중 한 요소에만.
 3. **조명 묘사는 화질에 가장 큰 영향.** 모든 샷에 광원·색온도·그림자를 명시한다.
 4. **인물·환경은 매 샷 동일하게 락.** 첫 등장 시 외형을 못 박고, 이후 샷에서 "동일 인물(같은 헤어·의상·체형)"로 명시 유지.
@@ -86,6 +87,17 @@ image-to-video는 소스 이미지 1장을 1번 프레임으로 고정하고 움
 - **10초**: 단일 동작 또는 짧은 대사 한 줄 (손동작, 표정 변화 + 대사).
 - **15초**: 프레임 안에서 전개될 동작·대사가 풍부한 컷에 한해. 채울 게 없는데 15초 주면 모델이 빈 시간을 상상으로 메워 표류한다.
 
+### 15초 풀필 · 오디오 레이어 — 실측 확정 (2026-08-21 E1~E3 계측 + 외부 가이드 교차)
+
+"채울 게 없으면 표류"는 맞지만, **아래 구성이면 15초가 음성·음악·모션으로 꽉 찬다** (초당 에너지 실측: 죽은 구간 0):
+
+1. **대사 풀필 공식 — 15초 ≈ 한국어 5문장** (문장당 ~2.5–3초). ①블록에 "speaks warmly and almost continuously for the entire clip", 문장 사이는 "a short natural breath, then:"으로 잇는다 — **휴지도 오디오 이벤트로 지시 가능**하다. 마지막 문장엔 클로징 액션(미소 등)을 묶는다. 립싱크는 정면·입 또렷한 키프레임에서 프레임 단위로 동기화된다(실측).
+2. **BGM 깔개는 무음 보험.** Audio 블록에 "a soft ... BGM plays quietly and continuously from start to finish and never stops"를 깐다. 대사만 넣고 음악을 금지하면 대사 소진 후 통무음이 된다 (실측: 2문장+no music → 뒤 10초 무음 / 5문장+BGM 깔개 → 무음 0). 오디오를 아예 안 쓰면 모델이 임의 BGM을 넣으므로(외부 가이드), **무음이 필요할 때만** "no background music" — 이 금지는 확실히 이행된다.
+3. **오디오 3레이어 문법 작동.** `Audio layers:` 뒤에 base(연속 BGM) / top(내레이션·대사) / accent(이벤트 SFX)를 명시하면 공존한다(실측). **화면 밖 내레이터 VO도 된다** — 단 내레이션은 앞쪽 1~5초에 몰리는 경향, 이후는 base가 이어받는다. 이벤트 SFX는 "a soft pop sparkle each time a panel lights up"처럼 화면 이벤트에 건다.
+4. **타임라인은 First / Then / Finally 3비트.** 액션·카메라·오디오 아크가 전부 이 순차 구문을 따라간다 (실측: 3단 동작, hold→tilt-down→push-in, soft→build→chime 모두 착지). 초 수치("0–5s")보다 순차 접속사가 신뢰된다.
+5. **카메라 고정 문구는 "camera not moving"** (또는 "absolutely locked static ... on a tripod, no push-in, no pan"). "stable camera"/"steady shot"은 부드러운 무빙 묘사로 오해된다(외부 가이드).
+6. **VFX 입자 어휘**: golden light particles drift / dust particles swirl / volumetric haze / heat shimmer / rain in the foreground / thin smoke. **스택은 2~3개까지만.**
+
 ### 모드 A 예시 (5블록, 실측 통과)
 ```
 A 34-year-old Korean man (mangled right cauliflower ear, deep scar at the outer end of the LEFT eyebrow, sturdy build, black hooded zip-up), extreme close-up of his face, fingertip pressing harder on the glass, eyes widening, brow furrowing, a startled micro-flinch.
@@ -141,5 +153,6 @@ Audio: a distant muffled closing announcement and a faint ghostly disembodied vo
   node scripts/agent-video.mjs --source-id <키프레임 image-id> --prompt "<5블록>" \
     [--duration N] [--resolution 720p] [--aspect 16:9] [--model grok-imagine-video] [--port 3002]
   ```
+  **MCP 경로(다른 세션 포함, SB WO-004)**: `mcp__sionbanana__create_video`(`source:{type:"imageId", imageId}` + prompt + duration/resolution/aspectRatio → jobId 즉시 반환) → `mcp__sionbanana__get_video`(폴링, ready 시 검증된 절대 videoPath). CLI와 동일 계약.
   (`--source-id` = 키프레임의 `/api/images/<id>` id — storyboard summary의 `jobs[].ids`에서 가져온다.) API 직접 호출은 `/api/video`(`{sourceImageId, prompt, duration, resolution, aspectRatio}`). 결과 영상은 `data/videos/`에 저장되고 앱 생성기록에 자동 병합된다. Grok은 단일 prompt 안에서 `Shot Switch`로 멀티샷을 낸다.
 - **모드 B (외부)**: Seedance/Kling/Veo 등은 출력 샷리스트를 사용자가 해당 툴에 직접 투입.
