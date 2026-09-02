@@ -32,7 +32,7 @@
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
-| SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 발행 | — |
+| SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 완료 | PASS · 체이닝 스모크 YAVG 3.16 · 병합 1ffdc4b3 |
 
 ## 지시서
 
@@ -359,6 +359,8 @@
 #### 상태 이력
 
 - 2026-09-02 21:1x KST — 대표 승인으로 `발행`. 워크트리 `.claude/worktrees/sb-wo-006-video-upload` (`claude/sb-wo-006-video-upload` @ `9dd7bfdb`) 생성, Maker 위임 가동.
+- 2026-09-02 21:3x KST — Maker 반환, porcelain 정확히 2파일 확인 → `검수`.
+- 2026-09-02 21:4x KST — CEO 재검증(구문·mcp-video 9/9·회귀 11/11) + 코드 정독 + 실기 스모크 PASS → `완료`. WO 커밋 `f389c72d`, 병합 `1ffdc4b3`.
 
 ## 검수 로그
 
@@ -481,3 +483,14 @@
   push·배포·브랜치 삭제 없음). 위임 왕복 1회.
 - **판정: PASS · 완료.** 한계: 상주 MCP 서버 프로세스는 재시작 후부터 새 도구 노출.
   후속(백로그): source 유니온(imagePath/dataUrl) 확장, 전역 `sionbanana-remote` 스킬 영상 절.
+
+### SB WO-006 — 영상 소스 upload 변형 (프레임 체이닝 1급화)
+
+- 검수 기준: 워크트리 `claude/sb-wo-006-video-upload` base `9dd7bfdb`, 시작 porcelain 0줄 → Maker 후 정확히 `M scripts/mcp-server.mjs`, `M tests/mcp-video.test.mjs`. 범위 위반 0건.
+- Maker(Codex exec, gpt-5.6-terra, --full-auto) 보고 — 구현 완료 / 검증 미실행(샌드박스 키체인 -50 기지 이슈, TAP 미수집을 근거로 PASS 자기판정 거부). 가정 명시: 썸네일 512/80, UTC 월버킷.
+- CEO 재실행 — `node --check` exit 0 / `mcp-video` **9/9**(신규: imagePath 등록·dataUrl 등록·거부 5케이스·스키마 거부·imageId 회귀) / 회귀 `motion-mcp`+`mcp-server-batch` **11/11**.
+- CEO 코드 정독 — 스키마 `motionUploadSourceSchema` 재사용 + superRefine; 검증 헬퍼 재사용(정규파일·심링크·8MB·PNG/JPEG 매직·repoRoot 봉쇄); 등록은 sharp PNG 정규화 → `data/images/<UTC YYYY-MM>/<19자 base36 id>.png|.json|.thumb.webp`(512/80, lib 상수와 동일) `wx` 원자 쓰기; 버킷 realpath 봉쇄; 사이드카는 basename만(절대경로·비밀 없음); dataUrl 파일명 폴백 `upload.png`. 직접 수정 0건.
+- 실기 스모크 — E1(`k9rcrdm6ca9mt46ti71`) 정확한 마지막 프레임 `data/frames/wo006-cut1-end.png` → `create_video source:{type:"upload", imagePath}` → `sourceImageId tt7va0bz04omtk2i30q` 3파일 등록 확인(사이드카 필드 정합) → 5.04s `ready`, sha256 독립 재계산 일치 → **이음매 YAVG 3.16**(인접 프레임 2.3 · 다른 장면 57 기준 → 연속).
+- 커밋 — WO `f389c72d`, 병합 `1ffdc4b3`(로컬 전용, push·배포·브랜치 삭제 없음). 상주 서버 재기동 불필요(MCP 프로세스는 세션마다 스폰). 위임 왕복 1회.
+- **판정: PASS · 완료.** 파트 A(스킬 정본 `e99ccc73` + 전역 브리지)와 짝으로 프레임 체이닝이 도구·문서 양쪽에서 1급 지원됨. 후속(백로그): 컷 경계 BGM 연속성 실측, 체이닝 다단(3컷+) 드리프트 측정.
+
