@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import sharp from "sharp";
 import { z } from "zod";
 
 import { runJobs } from "./agent-generate.mjs";
@@ -32,6 +33,8 @@ const DEFAULT_VIDEO_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 const VIDEO_DEADLINE_BUFFER_MS = 30_000;
 const VIDEO_POLL_INTERVAL_MS = 500;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]+$/;
+const IMAGE_UPLOAD_THUMBNAIL_MAX_SIZE = 512;
+const IMAGE_UPLOAD_THUMBNAIL_QUALITY = 80;
 const MOCK_MODE = process.env.SIONBANANA_MCP_MOCK === "1";
 
 const optionalText = () => z.string().trim().min(1).optional();
@@ -122,8 +125,17 @@ const videoSourceSchema = z
         type: z.literal("imageId"),
         imageId: videoImageIdSchema
       })
-      .strict()
-  ]);
+      .strict(),
+    motionUploadSourceSchema
+  ])
+  .superRefine((source, issueContext) => {
+    if (source.type === "upload" && !source.dataUrl && !source.imagePath) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "upload source must include dataUrl or imagePath"
+      });
+    }
+  });
 export const videoCreateInputSchema = z
   .object({
     name: z.string().trim().min(1).optional(),
@@ -922,12 +934,20 @@ export async function createVideo(input, context) {
     return { ok: false, reason: errorMessage(error) };
   }
 
+  let sourceImageId;
+  try {
+    sourceImageId = await resolveVideoSourceImageId(parsedInput.source, parsedInput.name, context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
   const jobId = `video-job-${Date.now()}-${randomUUID()}`;
   if (context.mock) {
     return {
       ok: true,
       jobId,
       status: "running",
+      sourceImageId,
       mocked: true
     };
   }
@@ -944,7 +964,7 @@ export async function createVideo(input, context) {
       deadlineIso: new Date(createdAt + videoGenerationTimeoutMs() + VIDEO_DEADLINE_BUFFER_MS).toISOString(),
       ...(parsedInput.name ? { name: parsedInput.name } : {}),
       request: {
-        sourceImageId: parsedInput.source.imageId,
+        sourceImageId,
         prompt: parsedInput.prompt,
         ...(parsedInput.duration !== undefined ? { duration: parsedInput.duration } : {}),
         ...(parsedInput.resolution ? { resolution: parsedInput.resolution } : {}),
@@ -986,9 +1006,12 @@ export async function createVideo(input, context) {
     }
 
     if (parsedInput.waitMs > 0 && job.status === "running") {
-      return await getVideo({ jobId, waitMs: parsedInput.waitMs }, context);
+      return {
+        ...(await getVideo({ jobId, waitMs: parsedInput.waitMs }, context)),
+        sourceImageId
+      };
     }
-    return videoJobResult(jobId, job);
+    return { ...videoJobResult(jobId, job), sourceImageId };
   } catch (error) {
     return {
       ok: false,
@@ -1336,6 +1359,104 @@ async function normalizeMotionSource(source, context) {
   };
 }
 
+async function resolveVideoSourceImageId(source, name, context) {
+  if (source.type === "imageId") {
+    return source.imageId;
+  }
+  const upload = await readVideoUploadSource(source, context);
+  return await registerVideoUploadImage(upload, name, context);
+}
+
+async function readVideoUploadSource(source, context) {
+  if (source.dataUrl) {
+    assertMotionDataUrlSize(source.dataUrl);
+    const encoded = source.dataUrl.slice(source.dataUrl.indexOf(",") + 1);
+    const buffer = Buffer.from(encoded, "base64");
+    if (!detectMotionImageMime(buffer)) {
+      throw new Error("source.dataUrl must contain a PNG or JPEG image");
+    }
+    return { buffer, originalFileName: "upload.png" };
+  }
+
+  const imagePath = await resolveMotionUploadPath(source.imagePath, context);
+  const realRepoRoot = await fs.realpath(context.repoRoot);
+  assertPathInside(realRepoRoot, imagePath, "source.imagePath must stay inside repoRoot");
+  const stat = await fs.lstat(imagePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("source.imagePath must be a regular, non-symbolic-link file");
+  }
+  if (stat.size > MOTION_UPLOAD_MAX_BYTES) {
+    throw new Error("source.imagePath exceeds the 8MB limit");
+  }
+  const buffer = await fs.readFile(imagePath);
+  if (buffer.byteLength > MOTION_UPLOAD_MAX_BYTES) {
+    throw new Error("source.imagePath exceeds the 8MB limit");
+  }
+  if (!detectMotionImageMime(buffer)) {
+    throw new Error("source.imagePath must contain a PNG or JPEG image");
+  }
+  return { buffer, originalFileName: path.basename(imagePath) };
+}
+
+async function registerVideoUploadImage(upload, name, context) {
+  const normalizedPng = await sharp(upload.buffer).png().toBuffer();
+  const metadata = await sharp(normalizedPng).metadata();
+  if (!Number.isInteger(metadata.width) || !Number.isInteger(metadata.height)) {
+    throw new Error("uploaded image dimensions could not be determined");
+  }
+  const thumbnail = await sharp(normalizedPng)
+    .resize({
+      width: IMAGE_UPLOAD_THUMBNAIL_MAX_SIZE,
+      height: IMAGE_UPLOAD_THUMBNAIL_MAX_SIZE,
+      fit: "inside",
+      withoutEnlargement: true
+    })
+    .webp({ quality: IMAGE_UPLOAD_THUMBNAIL_QUALITY })
+    .toBuffer();
+  const imagesRoot = await videoDirectory(context, "images", true);
+  const bucket = monthBucket(new Date());
+  const bucketDirectory = await imageUploadBucketDirectory(imagesRoot, bucket);
+  const id = createImageUploadId();
+  const imagePath = videoIdPath(bucketDirectory, id, ".png");
+  const metadataPath = videoIdPath(bucketDirectory, id, ".json");
+  const thumbnailPath = videoIdPath(bucketDirectory, id, ".thumb.webp");
+  const sidecar = {
+    mode: "upload",
+    source: "mcp-video-upload",
+    rawPrompt: name || "video source upload",
+    createdAtIso: new Date().toISOString(),
+    width: metadata.width,
+    height: metadata.height,
+    originalFileName: path.basename(upload.originalFileName)
+  };
+
+  await atomicWriteFile(imagePath, normalizedPng);
+  await atomicWriteFile(metadataPath, `${JSON.stringify(sidecar, null, 2)}\n`);
+  await atomicWriteFile(thumbnailPath, thumbnail);
+  return id;
+}
+
+async function imageUploadBucketDirectory(imagesRoot, bucket) {
+  const directory = path.resolve(imagesRoot, bucket);
+  assertPathInside(imagesRoot, directory, "image upload bucket must stay inside data/images");
+  await fs.mkdir(directory, { recursive: true });
+  await assertDirectoryNotSymlink(directory);
+  const realImagesRoot = await fs.realpath(imagesRoot);
+  const realDirectory = await fs.realpath(directory);
+  assertPathInside(realImagesRoot, realDirectory, "image upload bucket symlink escapes data/images");
+  return directory;
+}
+
+function createImageUploadId() {
+  return `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`.slice(0, 19);
+}
+
+function monthBucket(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
 async function resolveMotionUploadPath(imagePath, context) {
   if (!asString(imagePath)) {
     throw new Error("upload source must include dataUrl or imagePath");
@@ -1597,11 +1718,15 @@ function assertPathInside(root, candidate, message) {
 }
 
 async function atomicWriteJson(target, value) {
+  await atomicWriteFile(target, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function atomicWriteFile(target, contents) {
   const directory = path.dirname(target);
   await assertDirectoryNotSymlink(directory);
   const temp = path.join(directory, `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(temp, contents, { flag: "wx" });
     await fs.rename(temp, target);
   } finally {
     await fs.unlink(temp).catch(() => {});
