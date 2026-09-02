@@ -32,6 +32,7 @@
 | SB WO-002 | 2026-08-15 | AIDE 현황판·유입 통계 최신화 | CEO(Sol) / 문서 Maker(Terra) / 독립 Checker | P0 | 2026-08-15(KST) | 완료 | PASS · ACCEPT WITH FOLLOW-UP |
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
+| SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 발행 | — |
 
 ## 지시서
 
@@ -341,6 +342,23 @@
   porcelain 대조로 지정 3파일만 변경 확인, `검수` 진입.
 - 2026-08-21 18:12 KST — CEO 재검증 통과(구문 2파일·신규 6/6·회귀 11/11) + 결함 1건
   직접 수정 + 실기 스모크 `ready` 실증. `완료`. 병합 `7e12d8f3`.
+
+### SB WO-006 — 영상 소스 upload 변형 (프레임 체이닝 1급화)
+
+- **ID:** `SB WO-006` · **우선순위:** P1 · **목표일:** 2026-09-03 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현 — 2단 위임) / 검수 CEO 직접
+- **의존성:** SB WO-004 계약(`create_video`/`get_video`), 모션 upload 검증 헬퍼, `lib/local/storage.ts` 이미지 저장 규약, 대표 승인(2026-09-02 "A,B 파트 전부 진행")
+- **목표:** `create_video.source`에 `{type:"upload", imagePath|dataUrl}` 추가. MCP가 이미지를 `data/images/<월버킷>/`에 png+json+thumb.webp로 등록 후 기존 imageId 흐름으로 진행 → 컷1 마지막 프레임 경로만 넘기면 컷2가 이어짐(프레임 체이닝). 응답에 `sourceImageId` 포함.
+- **배경:** 2026-09-02 실측 — 다른 세션이 raw 파일 쓰기(`data/images/refs-hope/chain-dragon-cut1-end.png`)로 체이닝을 실증. 이를 도구 계약으로 승격해 raw 쓰기 없이 재현 가능하게 한다(COMPANY §7-1 핵심 흐름 내 접근성 개선, T-01과 무관). 파트 A(스킬 문서)와 짝.
+- **변경 범위:** `scripts/mcp-server.mjs`, `tests/mcp-video.test.mjs` 2파일. worker·라우트 불변. 상주 서버 재기동 불필요(MCP 프로세스는 세션마다 새로 뜸).
+- **완료 기준:** `node --check` / 신규·기존 `mcp-video` 테스트 PASS(upload imagePath·dataUrl·거부 5케이스·imageId 회귀) / 회귀 `motion-mcp`·`mcp-server-batch` PASS / CEO 실기 스모크: 기존 영상 마지막 프레임 → upload → `ready` + 이음매 YAVG 측정.
+- **금지:** 2파일 밖 수정, 기존 도구 동작 변경, commit·push, npm install, 실서버 의존 테스트, 사이드카에 절대경로·비밀 기록.
+- **위험등급:** R2(공유 파일 mcp-server.mjs) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-006-video-upload` 폐기.
+- **보고 형식:** WO-004와 동일.
+
+#### 상태 이력
+
+- 2026-09-02 21:1x KST — 대표 승인으로 `발행`. 워크트리 `.claude/worktrees/sb-wo-006-video-upload` (`claude/sb-wo-006-video-upload` @ `9dd7bfdb`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
