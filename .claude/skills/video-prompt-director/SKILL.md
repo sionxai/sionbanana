@@ -98,6 +98,40 @@ image-to-video는 소스 이미지 1장을 1번 프레임으로 고정하고 움
 5. **카메라 고정 문구는 "camera not moving"** (또는 "absolutely locked static ... on a tripod, no push-in, no pan"). "stable camera"/"steady shot"은 부드러운 무빙 묘사로 오해된다(외부 가이드).
 6. **VFX 입자 어휘**: golden light particles drift / dust particles swirl / volumetric haze / heat shimmer / rain in the foreground / thin smoke. **스택은 2~3개까지만.**
 
+### 프레임 체이닝 — 15초 벽을 잇는 법 (2026-09-02 실측)
+
+Grok 1.5엔 끝프레임(end-frame) 파라미터가 없다. 대신 **컷1의 마지막 프레임을 이미지로 등록해 컷2의 소스로 쓰면 같은 효과**가 난다 — 이음매 앞뒤 프레임차가 인접 프레임 수준이다.
+
+| 비교 | YAVG(휘도 차) | 판정 |
+|---|---|---|
+| 같은 영상 인접 프레임(0.04s) | 2.3 | 기준 |
+| **체이닝 이음매**(컷1 끝 → 컷2 첫) | **3.6** | 연속 |
+| 같은 장면 2.5초 시간차 | 34.8 | 점프 |
+| 전혀 다른 장면 | 57.1 | 불연속 |
+
+절차 (MCP — 다른 세션에서도 동일):
+1. 컷1 생성: `create_video` → `get_video` ready → `videoPath`.
+2. **마지막 프레임을 정확히** 추출 (`-sseof -0.1`은 2프레임 앞을 잡는다 — 정확 추출과 YAVG 2.06 차이):
+   ```bash
+   N=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 cut1.mp4)
+   ffmpeg -i cut1.mp4 -vf "select='eq(n\,$((N-1)))'" -vsync 0 -frames:v 1 data/frames/cut1-end.png
+   ```
+   파일은 **시온바나나 저장소 안**(`data/frames/` 등)에 둔다 — upload 소스는 repoRoot 내부 경로만 받는다.
+3. 컷2 생성: `create_video` `source:{type:"upload", imagePath:"<저장소 안 절대경로>"}` (SB WO-006 이후 MCP). 재시작 전 구 MCP 프로세스면 폴백: 프레임을 `data/images/<버킷>/<커스텀id>.png`로 복사한 뒤 `source:{type:"imageId", imageId:"<커스텀id>"}` — `readImageById`가 전 버킷을 스캔하므로 사이드카 없이 해석된다(실증: `data/images/refs-hope/chain-dragon-cut1-end.png`).
+4. 컷2 프롬프트: ①블록 첫 문장을 **"Continues seamlessly from this exact frame: <컷1 마지막 상태 묘사>"**로 열고, 조명·카메라·정체성 락 문구는 컷1과 동일하게 복사한다. 새 피사체·새 장면 금지 철칙 그대로.
+5. 이어붙이기 (같은 해상도·코덱이면 재인코딩 없이 — 실측 15s+15s → 30.1s, video+audio 유지):
+   ```bash
+   printf "file '%s'\nfile '%s'\n" cut1.mp4 cut2.mp4 > list.txt
+   ffmpeg -f concat -safe 0 -i list.txt -c copy joined.mp4
+   ```
+6. 이음매 검증 — 컷1 마지막 프레임 vs 컷2 첫 프레임(`ffmpeg -i cut2.mp4 -frames:v 1 cut2-first.png`):
+   ```bash
+   ffmpeg -i cut1-end.png -i cut2-first.png -filter_complex "[0]format=gray[a];[1]format=gray[b];[a][b]blend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-" -f null - 2>&1 | grep -o 'YAVG=[0-9.]*'
+   ```
+   **YAVG ≤ 5 = 연속, 30 이상 = 눈에 띄는 점프 → 컷2 재생성.**
+
+주의: 오디오는 컷마다 새로 생성된다 — 대사는 컷 경계에서 문장을 닫는다. 컷을 넘는 BGM 연속성은 **보장되지 않는다(미검증 가정)** → 긴 시퀀스의 음악은 후반 편집에서 한 트랙으로 까는 편이 안전하다.
+
 ### 모드 A 예시 (5블록, 실측 통과)
 ```
 A 34-year-old Korean man (mangled right cauliflower ear, deep scar at the outer end of the LEFT eyebrow, sturdy build, black hooded zip-up), extreme close-up of his face, fingertip pressing harder on the glass, eyes widening, brow furrowing, a startled micro-flinch.
