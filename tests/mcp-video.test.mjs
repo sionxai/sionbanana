@@ -4,7 +4,6 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
   createVideo,
@@ -14,14 +13,19 @@ import {
   videoGetInputSchema
 } from "../scripts/mcp-server.mjs";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PNG_BUFFER = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+9sL5WQAAAABJRU5ErkJggg==",
+  "base64"
+);
 
 async function videoFixture(t) {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sionbanana-video-mcp-"));
+  const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sionbanana-video-repo-"));
   t.after(async () => {
     await fs.rm(dataRoot, { recursive: true, force: true });
+    await fs.rm(repoRoot, { recursive: true, force: true });
   });
-  return { repoRoot: REPO_ROOT, dataRoot };
+  return { repoRoot, dataRoot };
 }
 
 async function writeJson(filePath, value) {
@@ -57,7 +61,12 @@ test("create_video records a strict imageId request and starts a detached worker
     context
   );
 
-  assert.deepEqual(result, { ok: true, jobId: result.jobId, status: "running" });
+  assert.deepEqual(result, {
+    ok: true,
+    jobId: result.jobId,
+    status: "running",
+    sourceImageId: "image_123"
+  });
   assert.match(result.jobId, /^video-job-[0-9]+-[0-9a-f-]+$/);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], process.execPath);
@@ -79,6 +88,131 @@ test("create_video records a strict imageId request and starts a detached worker
     aspectRatio: "16:9",
     model: "grok-imagine-video"
   });
+});
+
+test("create_video registers an imagePath upload before recording its video job", async t => {
+  const context = await videoFixture(t);
+  const imagePath = path.join(context.repoRoot, "frames", "cut-1-last.png");
+  await fs.mkdir(path.dirname(imagePath), { recursive: true });
+  await fs.writeFile(imagePath, PNG_BUFFER);
+  context.spawnImpl = () => ({ once() { return this; }, unref() {} });
+
+  const result = await createVideo(
+    {
+      name: "cut 2 starting frame",
+      source: { type: "upload", imagePath: "frames/cut-1-last.png" },
+      prompt: "Continue from this exact frame."
+    },
+    context
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.sourceImageId, /^[a-z0-9]{1,19}$/);
+  const bucket = new Date().toISOString().slice(0, 7);
+  const imageDirectory = path.join(context.dataRoot, "images", bucket);
+  const image = await fs.readFile(path.join(imageDirectory, `${result.sourceImageId}.png`));
+  const thumbnail = await fs.readFile(path.join(imageDirectory, `${result.sourceImageId}.thumb.webp`));
+  const metadata = JSON.parse(
+    await fs.readFile(path.join(imageDirectory, `${result.sourceImageId}.json`), "utf8")
+  );
+  assert.equal(image.subarray(0, 8).equals(PNG_BUFFER.subarray(0, 8)), true);
+  assert.equal(thumbnail.subarray(0, 4).toString("ascii"), "RIFF");
+  assert.deepEqual(metadata, {
+    mode: "upload",
+    source: "mcp-video-upload",
+    rawPrompt: "cut 2 starting frame",
+    createdAtIso: metadata.createdAtIso,
+    width: 1,
+    height: 1,
+    originalFileName: "cut-1-last.png"
+  });
+  assert.equal(Number.isFinite(Date.parse(metadata.createdAtIso)), true);
+
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "video-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.equal(job.request.sourceImageId, result.sourceImageId);
+});
+
+test("create_video registers a dataUrl upload using safe fallback metadata", async t => {
+  const context = await videoFixture(t);
+  context.spawnImpl = () => ({ once() { return this; }, unref() {} });
+  const result = await createVideo(
+    {
+      source: { type: "upload", dataUrl: `data:image/png;base64,${PNG_BUFFER.toString("base64")}` },
+      prompt: "Animate the supplied frame."
+    },
+    context
+  );
+
+  assert.equal(result.ok, true);
+  const bucket = new Date().toISOString().slice(0, 7);
+  const imageDirectory = path.join(context.dataRoot, "images", bucket);
+  await fs.access(path.join(imageDirectory, `${result.sourceImageId}.png`));
+  await fs.access(path.join(imageDirectory, `${result.sourceImageId}.thumb.webp`));
+  const metadata = JSON.parse(
+    await fs.readFile(path.join(imageDirectory, `${result.sourceImageId}.json`), "utf8")
+  );
+  assert.equal(metadata.rawPrompt, "video source upload");
+  assert.equal(metadata.originalFileName, "upload.png");
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "video-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.equal(job.request.sourceImageId, result.sourceImageId);
+});
+
+test("create_video rejects invalid video upload sources", async t => {
+  const context = await videoFixture(t);
+  const insideNotImage = path.join(context.repoRoot, "not-image.bin");
+  const insideImage = path.join(context.repoRoot, "image.png");
+  const symlinkPath = path.join(context.repoRoot, "image-link.png");
+  const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sionbanana-video-outside-"));
+  t.after(async () => {
+    await fs.rm(outsideRoot, { recursive: true, force: true });
+  });
+  await fs.writeFile(insideNotImage, "not an image");
+  await fs.writeFile(insideImage, PNG_BUFFER);
+  await fs.writeFile(path.join(outsideRoot, "outside.png"), PNG_BUFFER);
+  await fs.symlink(insideImage, symlinkPath);
+
+  const baseInput = { prompt: "animate" };
+  const missing = await createVideo({ ...baseInput, source: { type: "upload" } }, context);
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /must include dataUrl or imagePath/);
+
+  const tooLarge = await createVideo(
+    {
+      ...baseInput,
+      source: {
+        type: "upload",
+        dataUrl: `data:image/png;base64,${Buffer.alloc(8 * 1024 * 1024 + 1).toString("base64")}`
+      }
+    },
+    context
+  );
+  assert.equal(tooLarge.ok, false);
+  assert.match(tooLarge.reason, /8MB limit/);
+
+  const notImage = await createVideo(
+    { ...baseInput, source: { type: "upload", imagePath: "not-image.bin" } },
+    context
+  );
+  assert.equal(notImage.ok, false);
+  assert.match(notImage.reason, /PNG or JPEG/);
+
+  const outside = await createVideo(
+    { ...baseInput, source: { type: "upload", imagePath: path.join(outsideRoot, "outside.png") } },
+    context
+  );
+  assert.equal(outside.ok, false);
+  assert.match(outside.reason, /stay inside repoRoot/);
+
+  const symlink = await createVideo(
+    { ...baseInput, source: { type: "upload", imagePath: "image-link.png" } },
+    context
+  );
+  assert.equal(symlink.ok, false);
+  assert.match(symlink.reason, /regular, non-symbolic-link/);
 });
 
 test("video schemas reject unknown fields, traversal ids, and unsupported source variants", () => {
