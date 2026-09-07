@@ -4,6 +4,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +30,7 @@ const MOTION_EXPORT_BASE64_MAX_BYTES = 12 * 1024 * 1024;
 const MOTION_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MOTION_POLL_INTERVAL_MS = 500;
 const MOTION_ID_RE = /^[A-Za-z0-9._-]+$/;
+const MOTION_SET_ID_RE = /^[A-Za-z0-9-]+$/;
 const DEFAULT_VIDEO_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 const VIDEO_DEADLINE_BUFFER_MS = 30_000;
 const VIDEO_POLL_INTERVAL_MS = 500;
@@ -183,6 +185,117 @@ export const videoGetInputSchema = z
     waitMs: z.number().int().min(0).max(30_000).default(0)
   })
   .strict();
+const motionSetReferenceSchema = z.union([
+  z
+    .object({
+      type: z.literal("imageId"),
+      imageId: videoImageIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("upload"),
+      dataUrl: z.string().trim().min(1),
+      imagePath: z.string().trim().min(1).optional()
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("upload"),
+      dataUrl: z.string().trim().min(1).optional(),
+      imagePath: z.string().trim().min(1)
+    })
+    .strict()
+]);
+const motionSetBaseInputSchema = z
+  .object({
+    description: z.string().trim().min(1).max(4000),
+    style: z.string().trim().max(400).optional(),
+    facing: z.enum(["right", "left"]).optional(),
+    allowMirror: z.boolean().optional(),
+    subjectType: z.enum(["character", "object"]).optional(),
+    characterId: z.string().trim().max(200).optional(),
+    reference: motionSetReferenceSchema.optional()
+  })
+  .strict();
+const motionSetOverridesInputSchema = z
+  .object({
+    cols: z.number().int().min(1).max(8).optional(),
+    rows: z.number().int().min(1).max(8).optional(),
+    fps: z.number().int().min(1).max(60).optional(),
+    loop: z.enum(["loop", "pingpong", "once"]).optional()
+  })
+  .strict();
+const motionSetMemberInputSchema = z.union([
+  z
+    .object({
+      action: z.enum([
+        "idle",
+        "walk",
+        "run",
+        "jump",
+        "attack",
+        "reload",
+        "hit",
+        "fall",
+        "stun",
+        "getup"
+      ]),
+      prompt: z.string().trim().max(4000).optional(),
+      overrides: motionSetOverridesInputSchema.optional()
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("custom"),
+      prompt: z.string().trim().min(1).max(4000),
+      overrides: motionSetOverridesInputSchema.optional()
+    })
+    .strict()
+]);
+const motionSetCreateObjectSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    base: motionSetBaseInputSchema,
+    common: z
+      .object({
+        cols: z.number().int().min(1).max(8),
+        rows: z.number().int().min(1).max(8),
+        fps: z.number().int().min(1).max(60).optional()
+      })
+      .strict(),
+    members: z.array(motionSetMemberInputSchema).min(1),
+    start: z.boolean().optional()
+  })
+  .strict();
+export const motionSetCreateInputSchema = motionSetCreateObjectSchema.superRefine((value, issueContext) => {
+  const actions = new Set();
+  for (const [index, member] of value.members.entries()) {
+    if (actions.has(member.action)) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["members", index, "action"],
+        message: `Duplicate motion action: ${member.action}.`
+      });
+    }
+    actions.add(member.action);
+  }
+});
+export const motionSetGetInputSchema = z
+  .object({ setId: z.string().trim().min(1).regex(MOTION_SET_ID_RE) })
+  .strict();
+export const motionSetListInputSchema = z.object({}).strict();
+export const motionSetExportInputSchema = z
+  .object({
+    setId: z.string().trim().min(1).regex(MOTION_SET_ID_RE),
+    destPath: optionalText(),
+    asBase64: z.boolean().default(false),
+    includeGif: z.boolean().default(true),
+    gifFps: z.number().int().min(1).optional()
+  })
+  .strict();
+const MOTION_SET_TOOL_DESCRIPTION =
+  "세트 = 한 캐릭터의 여러 동작을 순차 생성. 순환 프리셋은 반복 행 자동 제외(실효 4장 정상).";
 
 const TOOL_NAMES = [
   "health_check",
@@ -198,7 +311,11 @@ const TOOL_NAMES = [
   "create_video",
   "get_video",
   "export_motion",
-  "list_motion"
+  "list_motion",
+  "create_motion_set",
+  "get_motion_set",
+  "list_motion_sets",
+  "export_motion_set"
 ];
 
 export function createSionBananaMcpServer(options = {}) {
@@ -508,6 +625,70 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => listMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "create_motion_set",
+    {
+      title: "Create Motion Set",
+      description: MOTION_SET_TOOL_DESCRIPTION,
+      inputSchema: motionSetCreateObjectSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => createMotionSet(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "get_motion_set",
+    {
+      title: "Get Motion Set",
+      description: MOTION_SET_TOOL_DESCRIPTION,
+      inputSchema: motionSetGetInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => getMotionSet(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "list_motion_sets",
+    {
+      title: "List Motion Sets",
+      description: MOTION_SET_TOOL_DESCRIPTION,
+      inputSchema: motionSetListInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => listMotionSets(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "export_motion_set",
+    {
+      title: "Export Motion Set",
+      description: MOTION_SET_TOOL_DESCRIPTION,
+      inputSchema: motionSetExportInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => exportMotionSet(input, context)
   );
 
   return server;
@@ -1188,6 +1369,425 @@ export async function exportMotion(input, context) {
   }
 
   return result;
+}
+
+export async function createMotionSet(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionSetCreateInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  let referenceImage;
+  try {
+    referenceImage = parsedInput.base.reference
+      ? await normalizeMotionSetReference(parsedInput.base.reference, context)
+      : null;
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  if (context.mock) {
+    return {
+      ok: true,
+      setId: "motion-set-mock",
+      status: parsedInput.start === false ? "pending" : "running",
+      members: parsedInput.members.map(member => ({ action: member.action, status: "pending" })),
+      mocked: true
+    };
+  }
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  const { reference: _reference, ...base } = parsedInput.base;
+  const requestBody = {
+    name: parsedInput.name,
+    base: {
+      ...base,
+      ...(referenceImage ? { referenceImage: referenceImage.dataUrl } : {})
+    },
+    common: parsedInput.common,
+    members: parsedInput.members,
+    ...(parsedInput.start === undefined ? {} : { start: parsedInput.start })
+  };
+  const url = `${baseUrl}/api/motion/sets`;
+  let body;
+  let response;
+  try {
+    response = await context.fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody)
+    });
+    const text = await response.text();
+    body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason:
+        typeof body?.reason === "string"
+          ? body.reason
+          : `${response.status} ${response.statusText || "motion set creation failed"}`
+    };
+  }
+  const set = body?.set;
+  if (
+    body?.ok !== true ||
+    !set ||
+    typeof set.id !== "string" ||
+    typeof set.status !== "string" ||
+    !Array.isArray(set.members)
+  ) {
+    return { ok: false, reason: "motion set response was incomplete" };
+  }
+  const members = set.members.map(member => ({
+    action: member?.action,
+    status: member?.status
+  }));
+  if (members.some(member => typeof member.action !== "string" || typeof member.status !== "string")) {
+    return { ok: false, reason: "motion set response was incomplete" };
+  }
+  return { ok: true, setId: set.id, status: set.status, members };
+}
+
+export async function getMotionSet(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionSetGetInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return { ok: true, setId: parsedInput.setId, status: "pending", members: [], mocked: true };
+  }
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  const url = `${baseUrl}/api/motion/sets/${encodeURIComponent(parsedInput.setId)}`;
+  let body;
+  let response;
+  try {
+    response = await context.fetchImpl(url, { method: "GET" });
+    const text = await response.text();
+    body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason:
+        typeof body?.reason === "string"
+          ? body.reason
+          : `${response.status} ${response.statusText || "motion set lookup failed"}`
+    };
+  }
+  const set = body?.set;
+  if (
+    body?.ok !== true ||
+    !set ||
+    typeof set.id !== "string" ||
+    typeof set.status !== "string" ||
+    !Array.isArray(set.members)
+  ) {
+    return { ok: false, reason: "motion set response was incomplete" };
+  }
+
+  try {
+    const members = await Promise.all(
+      set.members.map(async member => {
+        if (!member || typeof member.action !== "string" || typeof member.status !== "string") {
+          throw new Error("motion set response was incomplete");
+        }
+        const projectId = typeof member.projectId === "string" ? member.projectId : null;
+        const result = {
+          action: member.action,
+          status: member.status,
+          projectId,
+          reason: typeof member.reason === "string" ? member.reason : null
+        };
+        if (member.status === "ready" && projectId) {
+          return { ...result, ...(await readMotionSetProjectMetrics(projectId, context)) };
+        }
+        return result;
+      })
+    );
+    return { ok: true, setId: set.id, status: set.status, members };
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+export async function listMotionSets(input, context) {
+  try {
+    motionSetListInputSchema.parse(input ?? {});
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) return { ok: true, sets: [], mocked: true };
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  const url = `${baseUrl}/api/motion/sets`;
+  let body;
+  let response;
+  try {
+    response = await context.fetchImpl(url, { method: "GET" });
+    const text = await response.text();
+    body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason:
+        typeof body?.reason === "string"
+          ? body.reason
+          : `${response.status} ${response.statusText || "motion set list failed"}`
+    };
+  }
+  if (body?.ok !== true || !Array.isArray(body.sets)) {
+    return { ok: false, reason: "motion set list response was incomplete" };
+  }
+  return body;
+}
+
+export async function exportMotionSet(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionSetExportInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return { ok: true, mocked: true, setId: parsedInput.setId };
+  }
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  const searchParams = new URLSearchParams({ gif: parsedInput.includeGif ? "1" : "0" });
+  if (parsedInput.gifFps !== undefined) searchParams.set("fps", String(parsedInput.gifFps));
+  const url = `${baseUrl}/api/motion/sets/${encodeURIComponent(parsedInput.setId)}/export-file?${searchParams}`;
+  let response;
+  try {
+    response = await context.fetchImpl(url, { method: "GET" });
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (!response.ok) {
+    let body = null;
+    try {
+      const text = await response.text();
+      body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+    } catch (error) {
+      return { ok: false, reason: errorMessage(error) };
+    }
+    return {
+      ok: false,
+      reason:
+        typeof body?.reason === "string"
+          ? body.reason
+          : `${response.status} ${response.statusText || "motion set export failed"}`
+    };
+  }
+
+  let persisted;
+  try {
+    persisted = await persistMotionSetExport(response, parsedInput.setId, context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  const result = {
+    ok: true,
+    setId: parsedInput.setId,
+    zipPath: persisted.zipPath,
+    bytes: persisted.bytes,
+    sha256: persisted.sha256,
+    gifIncluded: parsedInput.includeGif
+  };
+  if (parsedInput.asBase64) {
+    try {
+      const encoded = await readMotionExportBase64(persisted.zipPath);
+      if (encoded.base64) result.base64 = encoded.base64;
+      else result.base64Skipped = encoded.base64Skipped;
+    } catch (error) {
+      result.base64Skipped = errorMessage(error);
+    }
+  }
+  if (parsedInput.destPath) {
+    try {
+      result.copiedTo = await copyMotionExport(persisted.zipPath, parsedInput.destPath, context);
+    } catch (error) {
+      result.destPathRejected = errorMessage(error);
+    }
+  }
+  return result;
+}
+
+async function normalizeMotionSetReference(reference, context) {
+  if (reference.type === "upload") {
+    return await normalizeMotionSource(reference, context);
+  }
+  const imagePath = await resolveMotionSetImageIdPath(reference.imageId, context);
+  const buffer = await readMotionSetImageIdBuffer(imagePath);
+  const mimeType = detectMotionImageMime(buffer);
+  if (mimeType) {
+    const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
+    assertMotionDataUrlSize(dataUrl);
+    return { type: "upload", dataUrl };
+  }
+  const normalizedPng = await sharp(buffer).png().toBuffer();
+  const dataUrl = `data:image/png;base64,${normalizedPng.toString("base64")}`;
+  assertMotionDataUrlSize(dataUrl);
+  return { type: "upload", dataUrl };
+}
+
+async function readMotionSetImageIdBuffer(imagePath) {
+  let handle;
+  try {
+    handle = await fs.open(imagePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error("imageId source must be a regular, non-symbolic-link file");
+    }
+    if (stat.size > MOTION_UPLOAD_MAX_BYTES) {
+      throw new Error("imageId source exceeds the 8MB limit");
+    }
+    const buffer = await handle.readFile();
+    if (buffer.byteLength > MOTION_UPLOAD_MAX_BYTES) {
+      throw new Error("imageId source exceeds the 8MB limit");
+    }
+    return buffer;
+  } catch (error) {
+    if (error?.code === "ELOOP") {
+      throw new Error("imageId source must be a regular, non-symbolic-link file");
+    }
+    throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function resolveMotionSetImageIdPath(imageId, context) {
+  const imagesRoot = path.resolve(context.dataRoot, "images");
+  assertPathInside(path.resolve(context.dataRoot), imagesRoot, "image lookup must stay inside dataRoot");
+  try {
+    await assertDirectoryNotSymlink(imagesRoot);
+  } catch (error) {
+    if (error?.code === "ENOENT") throw new Error(`imageId was not found: ${imageId}`);
+    throw error;
+  }
+  const realImagesRoot = await fs.realpath(imagesRoot);
+  const buckets = await fs.readdir(imagesRoot, { withFileTypes: true });
+  for (const bucket of buckets) {
+    if (!bucket.isDirectory() || bucket.isSymbolicLink()) continue;
+    const bucketDirectory = path.resolve(imagesRoot, bucket.name);
+    await assertDirectoryNotSymlink(bucketDirectory);
+    const realBucketDirectory = await fs.realpath(bucketDirectory);
+    assertPathInside(realImagesRoot, realBucketDirectory, "image bucket symlink escapes dataRoot");
+    for (const extension of ["png", "jpg", "jpeg", "webp"]) {
+      const candidate = path.resolve(bucketDirectory, `${imageId}.${extension}`);
+      if (path.dirname(candidate) !== bucketDirectory) continue;
+      try {
+        const stat = await fs.lstat(candidate);
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+        const realCandidate = await fs.realpath(candidate);
+        if (path.dirname(realCandidate) !== realBucketDirectory) continue;
+        return realCandidate;
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+  }
+  throw new Error(`imageId was not found: ${imageId}`);
+}
+
+async function readMotionSetProjectMetrics(projectId, context) {
+  if (!isMotionId(projectId)) throw new Error("ready motion set member has an invalid projectId");
+  const assetsRoot = await motionDirectory(context, "motion-assets", false);
+  if (!assetsRoot) throw new Error("motion-assets directory does not exist");
+  const directory = motionIdPath(assetsRoot, projectId);
+  const directoryStat = await fs.lstat(directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("motion project directory must be a regular, non-symbolic-link directory");
+  }
+  const projectPath = path.join(directory, "project.json");
+  const projectStat = await fs.lstat(projectPath);
+  if (!projectStat.isFile() || projectStat.isSymbolicLink()) {
+    throw new Error("motion project file must be a regular, non-symbolic-link file");
+  }
+  const project = await readJsonFile(projectPath);
+  if (project.id !== projectId) throw new Error("motion project id does not match its directory");
+  const repeatedRows = Array.isArray(project.duplicateDetection?.rows)
+    ? project.duplicateDetection.rows.flatMap((row, index) => (row?.repeated === true ? [index] : []))
+    : [];
+  const mirroredRows = Array.isArray(project.mirrorDetection?.rows)
+    ? project.mirrorDetection.rows.flatMap((row, index) => (row?.mirrored === true ? [index] : []))
+    : [];
+  const effectiveFrames = Array.isArray(project.frames)
+    ? project.frames.filter(frame => frame?.excluded !== true).length
+    : 0;
+  return { effectiveFrames, repeatedRows, mirroredRows };
+}
+
+async function persistMotionSetExport(response, setId, context) {
+  if (!response.body) throw new Error("motion set export response did not include ZIP data");
+  const exportsRoot = await motionDirectory(context, "motion-exports", true);
+  const fileId = `${setId}-${Date.now()}-${randomUUID()}`;
+  const zipPath = motionIdPath(exportsRoot, fileId, ".zip");
+  let handle;
+  let created = false;
+  try {
+    handle = await fs.open(
+      zipPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+      0o600
+    );
+    created = true;
+    const hash = createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of Readable.fromWeb(response.body)) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      let offset = 0;
+      while (offset < buffer.byteLength) {
+        const { bytesWritten } = await handle.write(buffer, offset, buffer.byteLength - offset);
+        if (bytesWritten < 1) throw new Error("motion set export write made no progress");
+        offset += bytesWritten;
+      }
+      bytes += buffer.byteLength;
+      hash.update(buffer);
+    }
+    if (bytes < 1) throw new Error("motion set export response contained an empty ZIP");
+    return { zipPath, bytes, sha256: hash.digest("hex") };
+  } catch (error) {
+    if (created) await fs.unlink(zipPath).catch(() => {});
+    throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }
 
 async function openRegularMotionExport(zipPath) {
