@@ -229,7 +229,7 @@ Options:
   --duration            Optional duration. Default: API default
   --resolution          Optional resolution. Default: 720p
   --aspect              Optional aspect ratio passed as aspectRatio
-  --model               Optional Grok video model. Default: grok-imagine-video
+  --model               Optional Grok video model. Default: grok-imagine-video-1.5 (env SIONBANANA_GROK_VIDEO_MODEL로 변경)
   --proxy               Optional reminder value; set SIONBANANA_GROK_PROXY on the running server
   --port                Preferred localhost port. Default: 3002
 `);

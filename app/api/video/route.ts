@@ -4,10 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   DEFAULT_GROK_VIDEO_DURATION,
-  DEFAULT_GROK_VIDEO_MODEL,
   DEFAULT_GROK_VIDEO_RESOLUTION,
   generateGrokVideo,
-  GrokVideoError
+  GrokVideoError,
+  maxDurationForGrokVideoModel,
+  resolveDefaultGrokVideoModel
 } from "@/lib/grok-video";
 import { readImageById, saveVideoBuffer, saveVideoMetadata } from "@/lib/local/storage";
 import { generateId } from "@/lib/utils";
@@ -43,7 +44,18 @@ class VideoSourceImageError extends Error {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const payload = requestSchema.parse(await request.json());
-    const result = await executeVideoGeneration(request, payload);
+    const model = payload.model?.trim() || resolveDefaultGrokVideoModel();
+    const maxDuration = maxDurationForGrokVideoModel(model);
+    if (payload.duration !== undefined && payload.duration > maxDuration) {
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: `${model} supports videos up to ${maxDuration} seconds; requested ${payload.duration}.`
+        },
+        { status: 400 }
+      );
+    }
+    const result = await executeVideoGeneration(request, payload, model);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     const result = videoErrorResult(error);
@@ -51,7 +63,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 }
 
-async function executeVideoGeneration(request: NextRequest, payload: VideoPayload): Promise<Record<string, unknown>> {
+async function executeVideoGeneration(
+  request: NextRequest,
+  payload: VideoPayload,
+  model: string
+): Promise<Record<string, unknown>> {
   const sourceImage = await readLocalImageAsDataUri(payload.sourceImageId);
   const generated = await generateGrokVideo({
     sourceImageDataUri: sourceImage.dataUri,
@@ -59,7 +75,7 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
     duration: payload.duration,
     resolution: payload.resolution,
     aspectRatio: payload.aspectRatio,
-    model: payload.model,
+    model,
     proxyUrl: process.env.SIONBANANA_GROK_PROXY,
     signal: request.signal
   });
@@ -68,7 +84,7 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
   const saved = await saveVideoBuffer(id, generated.videoBuffer);
   const createdAtIso = new Date().toISOString();
   const requestId = generated.requestId;
-  const model = generated.model || payload.model || DEFAULT_GROK_VIDEO_MODEL;
+  const responseModel = generated.model || model;
   const duration = generated.duration || payload.duration || DEFAULT_GROK_VIDEO_DURATION;
   const resolution = generated.resolution || payload.resolution || DEFAULT_GROK_VIDEO_RESOLUTION;
   const aspectRatio = generated.aspectRatio || payload.aspectRatio || null;
@@ -78,7 +94,7 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
     {
       sourceImageId: payload.sourceImageId,
       prompt: payload.prompt,
-      model,
+      model: responseModel,
       duration,
       resolution,
       aspectRatio: aspectRatio ?? undefined,
@@ -96,7 +112,7 @@ async function executeVideoGeneration(request: NextRequest, payload: VideoPayloa
     storagePath: saved.relativePath,
     requestId,
     sourceImageId: payload.sourceImageId,
-    model,
+    model: responseModel,
     duration,
     resolution,
     aspectRatio,

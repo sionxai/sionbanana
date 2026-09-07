@@ -3,9 +3,12 @@ import "server-only";
 import { Buffer } from "node:buffer";
 
 export const DEFAULT_GROK_VIDEO_PROXY_URL = "http://127.0.0.1:18645/v1";
-export const DEFAULT_GROK_VIDEO_MODEL = "grok-imagine-video";
+export const FALLBACK_GROK_VIDEO_MODEL = "grok-imagine-video-1.5";
+export const DEFAULT_GROK_VIDEO_MODEL = resolveDefaultGrokVideoModel();
 export const DEFAULT_GROK_VIDEO_DURATION = 5;
 export const DEFAULT_GROK_VIDEO_RESOLUTION = "720p";
+export const GROK_VIDEO_MAX_DURATION_SECONDS = 30;
+export const GROK_VIDEO_15_MAX_DURATION_SECONDS = 15;
 
 const SUBMIT_TIMEOUT_MS = 60_000;
 const POLL_TIMEOUT_MS = 60_000;
@@ -70,6 +73,19 @@ export class GrokVideoError extends Error {
   }
 }
 
+export function resolveDefaultGrokVideoModel(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = typeof env.SIONBANANA_GROK_VIDEO_MODEL === "string"
+    ? env.SIONBANANA_GROK_VIDEO_MODEL.trim()
+    : "";
+  return configured || FALLBACK_GROK_VIDEO_MODEL;
+}
+
+export function maxDurationForGrokVideoModel(model: string): number {
+  return /(^|[^0-9])1\.5([^0-9]|$)/.test(model)
+    ? GROK_VIDEO_15_MAX_DURATION_SECONDS
+    : GROK_VIDEO_MAX_DURATION_SECONDS;
+}
+
 export async function generateGrokVideo(options: GenerateGrokVideoOptions): Promise<GenerateGrokVideoResult> {
   const prompt = options.prompt.trim();
   if (!prompt) {
@@ -86,7 +102,7 @@ export async function generateGrokVideo(options: GenerateGrokVideoOptions): Prom
     });
   }
 
-  const model = options.model?.trim() || DEFAULT_GROK_VIDEO_MODEL;
+  const model = options.model?.trim() || resolveDefaultGrokVideoModel();
   const duration = options.duration ?? DEFAULT_GROK_VIDEO_DURATION;
   const resolution = options.resolution?.trim() || DEFAULT_GROK_VIDEO_RESOLUTION;
   const aspectRatio = options.aspectRatio?.trim() || undefined;
