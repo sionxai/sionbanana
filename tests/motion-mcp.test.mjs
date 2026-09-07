@@ -8,18 +8,26 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 import {
+  applyMotionCandidate,
+  createMotionCandidate,
   createMotionSet,
   createMotion,
   exportMotionSet,
+  getMotionCandidate,
   getMotionSet,
   getMotion,
   listMotionSets,
   listMotion,
+  motionCandidateApplyInputSchema,
+  motionCandidateCreateInputSchema,
+  motionCandidateGetInputSchema,
+  motionCandidateRevertInputSchema,
   motionCreateInputSchema,
   motionSetCreateInputSchema,
   motionSetExportInputSchema,
   motionSetGetInputSchema,
   motionSetListInputSchema,
+  revertMotionFrames,
   TOOL_NAMES
 } from "../scripts/mcp-server.mjs";
 
@@ -465,4 +473,388 @@ test("TOOL_NAMES exposes all motion MCP tools", () => {
   assert.equal(TOOL_NAMES.includes("create_motion"), true);
   assert.equal(TOOL_NAMES.includes("get_motion"), true);
   assert.equal(TOOL_NAMES.includes("list_motion"), true);
+});
+
+test("motion candidate schemas are strict, reject ambiguous sources, and register all four tools", async t => {
+  const valid = {
+    projectId: "motion-project-1",
+    mode: "mask",
+    frames: [{ index: 0, imageDataUrl: "data:image/png;base64,AA==" }]
+  };
+  const getValid = { projectId: "motion-project-1", candidateId: "cand-1" };
+  const applyValid = { projectId: "motion-project-1", candidateId: "cand-1", frames: [0] };
+  const revertValid = { projectId: "motion-project-1", frames: [0] };
+  for (const [schema, input] of [
+    [motionCandidateCreateInputSchema, valid],
+    [motionCandidateGetInputSchema, getValid],
+    [motionCandidateApplyInputSchema, applyValid],
+    [motionCandidateRevertInputSchema, revertValid]
+  ]) {
+    assert.equal(schema.safeParse(input).success, true);
+    assert.equal(schema.safeParse({ ...input, extra: true }).success, false);
+  }
+  for (const [schema, input] of [
+    [motionCandidateCreateInputSchema, valid],
+    [motionCandidateGetInputSchema, getValid]
+  ]) {
+    for (const waitMs of [0, 30_000]) assert.equal(schema.safeParse({ ...input, waitMs }).success, true);
+    for (const waitMs of [-1, 30_001, 0.5]) assert.equal(schema.safeParse({ ...input, waitMs }).success, false);
+  }
+  for (const schema of [motionCandidateApplyInputSchema, motionCandidateRevertInputSchema]) {
+    for (const frames of [[], [-1], [0.5]]) {
+      assert.equal(schema.safeParse({ ...(schema === motionCandidateApplyInputSchema ? applyValid : revertValid), frames }).success, false);
+    }
+  }
+  assert.equal(
+    motionCandidateCreateInputSchema.safeParse({
+      ...valid,
+      frames: [{ index: 0, imagePath: "image.png", imageDataUrl: "data:image/png;base64,AA==" }]
+    }).success,
+    false
+  );
+  assert.equal(
+    motionCandidateGetInputSchema.safeParse({ ...getValid, projectId: "../project" }).success,
+    false
+  );
+  for (const name of [
+    "create_motion_candidate",
+    "get_motion_candidate",
+    "apply_motion_candidate",
+    "revert_motion_frames"
+  ]) {
+    assert.equal(TOOL_NAMES.includes(name), true, name);
+  }
+
+  const context = await motionFixture(t, true);
+  context.fetchImpl = async () => {
+    throw new Error("mock candidate tool must not fetch");
+  };
+  assert.deepEqual(await createMotionCandidate(valid, context), {
+    ok: true,
+    candidateId: "cand-mock",
+    status: "pending",
+    mocked: true
+  });
+});
+
+test("create_motion_candidate maps validated repo uploads into the candidate API body", async t => {
+  const context = await motionFixture(t);
+  const repoRoot = path.join(context.dataRoot, "repo");
+  context.repoRoot = repoRoot;
+  const image = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 250, g: 220, b: 40, alpha: 1 } }
+  })
+    .png()
+    .toBuffer();
+  const mask = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
+  })
+    .png()
+    .toBuffer();
+  await fs.mkdir(repoRoot, { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "image.png"), image);
+  await fs.writeFile(path.join(repoRoot, "mask.png"), mask);
+  const outsidePath = path.join(context.dataRoot, "outside.png");
+  await fs.writeFile(outsidePath, image);
+  await fs.writeFile(path.join(repoRoot, "invalid.png"), Buffer.from("not an image"));
+  const oversizedPath = path.join(repoRoot, "oversized.png");
+  await fs.writeFile(oversizedPath, Buffer.from([0]));
+  await fs.truncate(oversizedPath, 8 * 1024 * 1024 + 1);
+  await fs.symlink(context.dataRoot, path.join(repoRoot, "outside-link"));
+
+  let fetchCalls = 0;
+  context.fetchImpl = async () => {
+    fetchCalls += 1;
+    throw new Error("outside upload must fail before server discovery");
+  };
+  const rejectBeforeFetch = async (frames, expectedReason) => {
+    const result = await createMotionCandidate({ projectId: "motion-project-1", mode: "upload", frames }, context);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, expectedReason);
+  };
+  await rejectBeforeFetch([{ index: 0, imagePath: outsidePath }], /imagePath must stay inside repoRoot/);
+  await rejectBeforeFetch(
+    [{ index: 0, imagePath: "image.png", maskPath: outsidePath }],
+    /maskPath must stay inside repoRoot/
+  );
+  await rejectBeforeFetch([{ index: 0, imagePath: "invalid.png" }], /PNG or JPEG image/);
+  await rejectBeforeFetch([{ index: 0, imagePath: "oversized.png" }], /exceeds the 8MB limit/);
+  await rejectBeforeFetch([{ index: 0, imagePath: "outside-link/outside.png" }], /stay inside repoRoot/);
+  assert.equal(fetchCalls, 0);
+
+  let request;
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith("/api/motion/projects/motion-project-1/candidates") && options.method === "POST") {
+      request = JSON.parse(options.body);
+      return jsonResponse(
+        {
+          ok: true,
+          candidate: {
+            id: "cand-1",
+            projectId: "motion-project-1",
+            status: "pending",
+            frames: [{ index: 0, file: null, mask: "masks/f01.png" }]
+          }
+        },
+        201
+      );
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(
+    await createMotionCandidate(
+      {
+        projectId: "motion-project-1",
+        mode: "mask",
+        frames: [{ index: 0, imagePath: "image.png", maskPath: "mask.png" }],
+        instruction: "Repair the arm",
+        protect: ["face"],
+        waitMs: 0
+      },
+      context
+    ),
+    { ok: true, candidateId: "cand-1", status: "pending" }
+  );
+  assert.deepEqual(request, {
+    mode: "mask",
+    frames: [
+      {
+        index: 0,
+        image: `data:image/png;base64,${image.toString("base64")}`,
+        mask: `data:image/png;base64,${mask.toString("base64")}`
+      }
+    ],
+    instruction: "Repair the arm",
+    protect: ["face"]
+  });
+});
+
+test("create_motion_candidate polls terminal failures and returns persistent pending at its deadline", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-project-1";
+  const candidateId = "cand-1";
+  const postBodies = [];
+  const events = [];
+  let status = "failed";
+  let getCalls = 0;
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) {
+      events.push("health");
+      return jsonResponse({ ok: true });
+    }
+    if (value.endsWith(`/api/motion/projects/${projectId}/candidates`) && options.method === "POST") {
+      events.push("post");
+      postBodies.push(JSON.parse(options.body));
+      return jsonResponse({
+        ok: true,
+        candidate: { id: candidateId, projectId, status: "pending", frames: [{ index: 0, file: null, mask: null }] }
+      });
+    }
+    if (value.endsWith(`/api/motion/projects/${projectId}/candidates/${candidateId}`)) {
+      events.push("get");
+      getCalls += 1;
+      return jsonResponse({
+        ok: true,
+        candidate: {
+          id: candidateId,
+          projectId,
+          status,
+          reason: status === "failed" ? "generation-error" : null,
+          metrics: null,
+          frames: [{ index: 0, file: null, mask: null }]
+        }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  const input = {
+    projectId,
+    mode: "upload",
+    frames: [{ index: 0, imageDataUrl: "data:image/png;base64,AA==" }],
+    waitMs: 1
+  };
+  assert.deepEqual(await createMotionCandidate(input, context), {
+    ok: true,
+    candidateId,
+    status: "failed",
+    reason: "generation-error"
+  });
+  assert.deepEqual(events, ["health", "post", "get"]);
+
+  status = "pending";
+  events.length = 0;
+  getCalls = 0;
+  assert.deepEqual(await createMotionCandidate(input, context), {
+    ok: true,
+    candidateId,
+    status: "pending"
+  });
+  assert.deepEqual(events.slice(0, 3), ["health", "post", "get"]);
+  assert.ok(getCalls >= 1);
+  for (const body of postBodies) {
+    assert.equal(Object.hasOwn(body, "waitMs"), false);
+    assert.equal(Object.hasOwn(body, "projectId"), false);
+  }
+});
+
+test("get_motion_candidate polls and returns canonical ready paths without trusting API file paths", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-project-1";
+  const candidateId = "cand-1";
+  const framesDirectory = path.join(
+    context.dataRoot,
+    "motion-assets",
+    projectId,
+    "candidates",
+    candidateId,
+    "frames"
+  );
+  await fs.mkdir(framesDirectory, { recursive: true });
+  await fs.writeFile(path.join(framesDirectory, "f01.png"), Buffer.from("candidate frame"));
+  const framePath = await fs.realpath(path.join(framesDirectory, "f01.png"));
+
+  let getCalls = 0;
+  context.fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith(`/api/motion/projects/${projectId}/candidates/${candidateId}`)) {
+      getCalls += 1;
+      return jsonResponse({
+        ok: true,
+        candidate: {
+          id: candidateId,
+          projectId,
+          status: getCalls <= 2 ? "pending" : "ready",
+          reason: null,
+          metrics: { generated: 1 },
+          frames: [{ index: 0, file: "../../outside.png", mask: null }]
+        }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(await getMotionCandidate({ projectId, candidateId, waitMs: 0 }, context), {
+    ok: true,
+    status: "pending",
+    reason: null,
+    frames: [{ index: 0 }],
+    metrics: { generated: 1 }
+  });
+  assert.deepEqual(await getMotionCandidate({ projectId, candidateId, waitMs: 600 }, context), {
+    ok: true,
+    status: "ready",
+    reason: null,
+    frames: [{ index: 0, path: framePath }],
+    metrics: { generated: 1 }
+  });
+
+  const replacementFrames = path.join(context.dataRoot, "replacement-frames");
+  await fs.mkdir(replacementFrames);
+  await fs.writeFile(path.join(replacementFrames, "f01.png"), Buffer.from("outside candidate frame"));
+  await fs.rm(framesDirectory, { recursive: true, force: true });
+  await fs.symlink(replacementFrames, framesDirectory);
+  const escaped = await getMotionCandidate({ projectId, candidateId, waitMs: 0 }, context);
+  assert.equal(escaped.ok, false);
+  assert.match(escaped.reason, /motion candidate frames directory must stay inside its candidate/);
+});
+
+test("get_motion_candidate binds the response candidate id and preserves failure reasons", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-project-1";
+  let responseCandidateId = "cand-other";
+  context.fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith(`/api/motion/projects/${projectId}/candidates/cand-1`)) {
+      return jsonResponse({
+        ok: true,
+        candidate: {
+          id: responseCandidateId,
+          projectId,
+          status: "failed",
+          reason: "generation-error",
+          metrics: null,
+          frames: [{ index: 1, file: null, mask: null }]
+        }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  const mismatched = await getMotionCandidate({ projectId, candidateId: "cand-1" }, context);
+  assert.equal(mismatched.ok, false);
+  assert.match(mismatched.reason, /motion candidate response was incomplete/);
+
+  responseCandidateId = "cand-1";
+  assert.deepEqual(await getMotionCandidate({ projectId, candidateId: "cand-1" }, context), {
+    ok: true,
+    status: "failed",
+    reason: "generation-error",
+    frames: [{ index: 1 }],
+    metrics: null
+  });
+});
+
+test("apply and revert candidate tools omit optional selections and project active overrides", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-project-1";
+  const candidateId = "cand-1";
+  const requests = [];
+  let applyResponseId = projectId;
+  let revertResponseId = projectId;
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith(`/api/motion/projects/${projectId}/candidates/${candidateId}/apply`)) {
+      requests.push(JSON.parse(options.body));
+      return jsonResponse({
+        ok: true,
+        project: {
+          id: applyResponseId,
+          frames: [{ index: 0, override: null }, { index: 1, override: { candidateId } }]
+        }
+      });
+    }
+    if (value.endsWith(`/api/motion/projects/${projectId}/revert`)) {
+      requests.push(JSON.parse(options.body));
+      return jsonResponse({
+        ok: true,
+        project: { id: revertResponseId, frames: [{ index: 0, override: null }, { index: 1, override: null }] }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(await applyMotionCandidate({ projectId, candidateId }, context), {
+    ok: true,
+    projectId,
+    overriddenFrames: [1],
+    paths: {
+      sheet: path.join(context.dataRoot, "motion-assets", projectId, "derived", "sheet.png"),
+      frames: [
+        path.join(context.dataRoot, "motion-assets", projectId, "derived", "frames", "f01.png"),
+        path.join(context.dataRoot, "motion-assets", projectId, "derived", "frames", "f02.png")
+      ]
+    }
+  });
+  for (const invalidProjectId of [undefined, "motion-project-other"]) {
+    applyResponseId = invalidProjectId;
+    const invalid = await applyMotionCandidate({ projectId, candidateId }, context);
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.reason, /motion candidate project response was incomplete/);
+  }
+
+  assert.deepEqual(await revertMotionFrames({ projectId, frames: [1] }, context), {
+    ok: true,
+    projectId,
+    remainingOverrides: []
+  });
+  for (const invalidProjectId of [undefined, "motion-project-other"]) {
+    revertResponseId = invalidProjectId;
+    const invalid = await revertMotionFrames({ projectId, frames: [1] }, context);
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.reason, /motion candidate project response was incomplete/);
+  }
+  assert.deepEqual(requests, [{}, {}, {}, { frames: [1] }, { frames: [1] }, { frames: [1] }]);
 });

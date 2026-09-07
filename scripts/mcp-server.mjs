@@ -31,6 +31,9 @@ const MOTION_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MOTION_POLL_INTERVAL_MS = 500;
 const MOTION_ID_RE = /^[A-Za-z0-9._-]+$/;
 const MOTION_SET_ID_RE = /^[A-Za-z0-9-]+$/;
+const MOTION_CANDIDATE_ID_RE = /^[A-Za-z0-9-]+$/;
+const MOTION_CANDIDATE_POLL_INTERVAL_MS = 500;
+const MOTION_CANDIDATE_STATUSES = new Set(["pending", "running", "ready", "failed"]);
 const DEFAULT_VIDEO_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 const VIDEO_DEADLINE_BUFFER_MS = 30_000;
 const VIDEO_POLL_INTERVAL_MS = 500;
@@ -294,8 +297,66 @@ export const motionSetExportInputSchema = z
     gifFps: z.number().int().min(1).optional()
   })
   .strict();
+const motionCandidateFrameInputSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    imagePath: z.string().trim().min(1).optional(),
+    imageDataUrl: z.string().trim().min(1).optional(),
+    maskPath: z.string().trim().min(1).optional(),
+    maskDataUrl: z.string().trim().min(1).optional()
+  })
+  .strict()
+  .superRefine((frame, issueContext) => {
+    if (frame.imagePath && frame.imageDataUrl) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["imagePath"],
+        message: "imagePath and imageDataUrl cannot both be provided"
+      });
+    }
+    if (frame.maskPath && frame.maskDataUrl) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maskPath"],
+        message: "maskPath and maskDataUrl cannot both be provided"
+      });
+    }
+  });
+const motionCandidateIdSchema = z.string().trim().min(1).regex(MOTION_CANDIDATE_ID_RE);
+export const motionCandidateCreateInputSchema = z
+  .object({
+    projectId: motionCandidateIdSchema,
+    mode: z.enum(["mask", "strip", "upload"]),
+    frames: z.array(motionCandidateFrameInputSchema).min(1),
+    instruction: z.string().trim().max(4000).optional(),
+    protect: z.array(z.string().trim().min(1).max(200)).optional(),
+    waitMs: z.number().int().min(0).max(30_000).default(0)
+  })
+  .strict();
+export const motionCandidateGetInputSchema = z
+  .object({
+    projectId: motionCandidateIdSchema,
+    candidateId: motionCandidateIdSchema,
+    waitMs: z.number().int().min(0).max(30_000).default(0)
+  })
+  .strict();
+export const motionCandidateApplyInputSchema = z
+  .object({
+    projectId: motionCandidateIdSchema,
+    candidateId: motionCandidateIdSchema,
+    frames: z.array(z.number().int().nonnegative()).min(1).optional()
+  })
+  .strict();
+export const motionCandidateRevertInputSchema = z
+  .object({
+    projectId: motionCandidateIdSchema,
+    frames: z.array(z.number().int().nonnegative()).min(1).optional()
+  })
+  .strict();
 const MOTION_SET_TOOL_DESCRIPTION =
   "세트 = 한 캐릭터의 여러 동작을 순차 생성. 순환 프리셋은 반복 행 자동 제외(실효 4장 정상).";
+const MOTION_CANDIDATE_TOOL_DESCRIPTION =
+  "구간 수정 — mask는 셀 크기 마스크(알파 0=편집, 좁을수록 원본 보존), strip은 연속 구간을 이웃 앵커로 재생성. 적용 시 원본 셀 크기로 스케일·발 기준 정렬되며 원본 시트는 바뀌지 않는다.";
 
 const TOOL_NAMES = [
   "health_check",
@@ -312,6 +373,10 @@ const TOOL_NAMES = [
   "get_video",
   "export_motion",
   "list_motion",
+  "create_motion_candidate",
+  "get_motion_candidate",
+  "apply_motion_candidate",
+  "revert_motion_frames",
   "create_motion_set",
   "get_motion_set",
   "list_motion_sets",
@@ -625,6 +690,70 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => listMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "create_motion_candidate",
+    {
+      title: "Create Motion Candidate",
+      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      inputSchema: motionCandidateCreateInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => createMotionCandidate(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "get_motion_candidate",
+    {
+      title: "Get Motion Candidate",
+      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      inputSchema: motionCandidateGetInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => getMotionCandidate(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "apply_motion_candidate",
+    {
+      title: "Apply Motion Candidate",
+      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      inputSchema: motionCandidateApplyInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => applyMotionCandidate(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "revert_motion_frames",
+    {
+      title: "Revert Motion Frames",
+      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      inputSchema: motionCandidateRevertInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => revertMotionFrames(input, context)
   );
 
   registerJsonTool(
@@ -1369,6 +1498,374 @@ export async function exportMotion(input, context) {
   }
 
   return result;
+}
+
+export async function createMotionCandidate(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionCandidateCreateInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      candidateId: "cand-mock",
+      status: parsedInput.mode === "upload" ? "ready" : "pending",
+      mocked: true
+    };
+  }
+
+  let frames;
+  let baseUrl;
+  try {
+    frames = await Promise.all(
+      parsedInput.frames.map(frame => normalizeMotionCandidateFrame(frame, context))
+    );
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(parsedInput.projectId)}/candidates`;
+  let candidate;
+  try {
+    const body = await fetchMotionCandidateJson(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: parsedInput.mode,
+          frames,
+          ...(parsedInput.instruction !== undefined ? { instruction: parsedInput.instruction } : {}),
+          ...(parsedInput.protect !== undefined ? { protect: parsedInput.protect } : {})
+        })
+      },
+      context
+    );
+    candidate = readMotionCandidateResponse(body, parsedInput.projectId);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  if (parsedInput.waitMs > 0 && isMotionCandidatePolling(candidate.status)) {
+    const polled = await getMotionCandidateAtBaseUrl(
+      parsedInput.projectId,
+      candidate.id,
+      parsedInput.waitMs,
+      baseUrl,
+      context
+    );
+    return {
+      ok: polled.ok,
+      candidateId: candidate.id,
+      ...(typeof polled.status === "string" ? { status: polled.status } : {}),
+      ...(typeof polled.reason === "string" ? { reason: polled.reason } : {})
+    };
+  }
+  return { ok: true, candidateId: candidate.id, status: candidate.status };
+}
+
+export async function getMotionCandidate(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionCandidateGetInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      status: "pending",
+      reason: null,
+      frames: [],
+      metrics: null,
+      mocked: true
+    };
+  }
+
+  let baseUrl;
+  try {
+    ({ baseUrl } = await findMotionServer(context.fetchImpl));
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  return await getMotionCandidateAtBaseUrl(
+    parsedInput.projectId,
+    parsedInput.candidateId,
+    parsedInput.waitMs,
+    baseUrl,
+    context
+  );
+}
+
+export async function applyMotionCandidate(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionCandidateApplyInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      projectId: parsedInput.projectId,
+      overriddenFrames: parsedInput.frames ?? [],
+      paths: motionCandidateProjectPaths(parsedInput.projectId, parsedInput.frames ?? [], context),
+      mocked: true
+    };
+  }
+
+  try {
+    const { baseUrl } = await findMotionServer(context.fetchImpl);
+    const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(parsedInput.projectId)}/candidates/${encodeURIComponent(parsedInput.candidateId)}/apply`;
+    const body = await fetchMotionCandidateJson(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(parsedInput.frames === undefined ? {} : { frames: parsedInput.frames })
+      },
+      context
+    );
+    return motionCandidateProjectResult(body, parsedInput.projectId, "overriddenFrames", context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+export async function revertMotionFrames(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionCandidateRevertInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      projectId: parsedInput.projectId,
+      remainingOverrides: [],
+      mocked: true
+    };
+  }
+
+  try {
+    const { baseUrl } = await findMotionServer(context.fetchImpl);
+    const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(parsedInput.projectId)}/revert`;
+    const body = await fetchMotionCandidateJson(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(parsedInput.frames === undefined ? {} : { frames: parsedInput.frames })
+      },
+      context
+    );
+    return motionCandidateProjectResult(body, parsedInput.projectId, "remainingOverrides", context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+async function normalizeMotionCandidateFrame(frame, context) {
+  const [image, mask] = await Promise.all([
+    normalizeMotionCandidateSource(frame.imageDataUrl, frame.imagePath, "imagePath", context),
+    normalizeMotionCandidateSource(frame.maskDataUrl, frame.maskPath, "maskPath", context)
+  ]);
+  return {
+    index: frame.index,
+    ...(image ? { image: image.dataUrl } : {}),
+    ...(mask ? { mask: mask.dataUrl } : {})
+  };
+}
+
+async function normalizeMotionCandidateSource(dataUrl, imagePath, fieldName, context) {
+  if (dataUrl) {
+    return await normalizeMotionSource({ type: "upload", dataUrl }, context);
+  }
+  if (!imagePath) return null;
+
+  const resolvedPath = await resolveMotionUploadPath(imagePath, context);
+  const realRepoRoot = await fs.realpath(context.repoRoot);
+  assertPathInside(realRepoRoot, resolvedPath, `${fieldName} must stay inside repoRoot`);
+  return await normalizeMotionSource({ type: "upload", imagePath: resolvedPath }, context);
+}
+
+async function getMotionCandidateAtBaseUrl(projectId, candidateId, waitMs, baseUrl, context) {
+  const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(projectId)}/candidates/${encodeURIComponent(candidateId)}`;
+  try {
+    const readCandidate = async () => {
+      const body = await fetchMotionCandidateJson(url, { method: "GET" }, context);
+      return readMotionCandidateResponse(body, projectId, candidateId);
+    };
+    const waitUntil = Date.now() + waitMs;
+    let candidate = await readCandidate();
+    while (isMotionCandidatePolling(candidate.status) && Date.now() < waitUntil) {
+      const sleepMs = Math.min(MOTION_CANDIDATE_POLL_INTERVAL_MS, waitUntil - Date.now());
+      if (sleepMs <= 0) break;
+      await delay(sleepMs);
+      candidate = await readCandidate();
+    }
+    return await motionCandidateLookupResult(candidate, projectId, context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+async function fetchMotionCandidateJson(url, options, context) {
+  const response = await context.fetchImpl(url, options);
+  const text = await response.text();
+  const body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.reason === "string"
+        ? body.reason
+        : `${response.status} ${response.statusText || "motion candidate request failed"}`
+    );
+  }
+  return body;
+}
+
+function readMotionCandidateResponse(body, projectId, expectedCandidateId) {
+  const candidate = body?.candidate;
+  if (
+    body?.ok !== true ||
+    !candidate ||
+    !isMotionCandidateId(candidate.id) ||
+    candidate.projectId !== projectId ||
+    (expectedCandidateId !== undefined && candidate.id !== expectedCandidateId) ||
+    !MOTION_CANDIDATE_STATUSES.has(candidate.status) ||
+    !Array.isArray(candidate.frames)
+  ) {
+    throw new Error("motion candidate response was incomplete");
+  }
+  return candidate;
+}
+
+function isMotionCandidatePolling(status) {
+  return status === "pending" || status === "running";
+}
+
+async function motionCandidateLookupResult(candidate, projectId, context) {
+  const frameIndices = candidate.frames.map(frame => {
+    if (!Number.isInteger(frame?.index) || frame.index < 0) {
+      throw new Error("motion candidate response included an invalid frame index");
+    }
+    return frame.index;
+  });
+  const result = {
+    ok: true,
+    status: candidate.status,
+    reason: typeof candidate.reason === "string" ? candidate.reason : null,
+    frames: frameIndices.map(index => ({ index })),
+    metrics: candidate.metrics ?? null
+  };
+  if (candidate.status !== "ready") return result;
+
+  result.frames = await Promise.all(
+    frameIndices.map(async index => {
+      return {
+        index,
+        path: await resolveMotionCandidateFramePath(projectId, candidate.id, index, context)
+      };
+    })
+  );
+  return result;
+}
+
+async function resolveMotionCandidateFramePath(projectId, candidateId, index, context) {
+  const assetsRoot = await motionDirectory(context, "motion-assets", false);
+  if (!assetsRoot) throw new Error("motion-assets directory does not exist");
+  const projectDirectory = await realMotionCandidateChildDirectory(
+    assetsRoot,
+    projectId,
+    "motion project directory must stay inside motion-assets"
+  );
+  const candidatesDirectory = await realMotionCandidateChildDirectory(
+    projectDirectory,
+    "candidates",
+    "motion candidates directory must stay inside its project"
+  );
+  const candidateDirectory = await realMotionCandidateChildDirectory(
+    candidatesDirectory,
+    candidateId,
+    "motion candidate directory must stay inside candidates"
+  );
+  const framesDirectory = await realMotionCandidateChildDirectory(
+    candidateDirectory,
+    "frames",
+    "motion candidate frames directory must stay inside its candidate"
+  );
+  const fileName = `f${String(index + 1).padStart(2, "0")}.png`;
+  const candidatePath = path.resolve(framesDirectory, fileName);
+  if (path.dirname(candidatePath) !== framesDirectory) {
+    throw new Error("motion candidate frame path must stay inside candidate frames");
+  }
+  const stat = await fs.lstat(candidatePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("motion candidate frame must be a regular, non-symbolic-link file");
+  }
+  const realPath = await fs.realpath(candidatePath);
+  if (path.dirname(realPath) !== framesDirectory) {
+    throw new Error("motion candidate frame symlink escapes candidate frames");
+  }
+  return realPath;
+}
+
+async function realMotionCandidateChildDirectory(parent, name, message) {
+  const directory = path.resolve(parent, name);
+  if (path.dirname(directory) !== path.resolve(parent)) throw new Error(message);
+  const stat = await fs.lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(message);
+  const [realParent, realDirectory] = await Promise.all([fs.realpath(parent), fs.realpath(directory)]);
+  if (path.dirname(realDirectory) !== realParent) throw new Error(message);
+  return realDirectory;
+}
+
+function motionCandidateProjectPaths(projectId, frameIndices, context) {
+  const assetsRoot = path.resolve(context.dataRoot, "motion-assets");
+  const projectDirectory = path.resolve(assetsRoot, projectId);
+  assertPathInside(assetsRoot, projectDirectory, "motion project path must stay inside motion-assets");
+  return {
+    sheet: path.join(projectDirectory, "derived", "sheet.png"),
+    frames: frameIndices.map(index =>
+      path.join(projectDirectory, "derived", "frames", `f${String(index + 1).padStart(2, "0")}.png`)
+    )
+  };
+}
+
+function motionCandidateProjectResult(body, projectId, key, context) {
+  if (
+    body?.ok !== true ||
+    !body?.project ||
+    body.project.id !== projectId ||
+    !Array.isArray(body.project.frames)
+  ) {
+    throw new Error("motion candidate project response was incomplete");
+  }
+  const frameIndices = [];
+  const projectFrameIndices = [];
+  for (const frame of body.project.frames) {
+    if (!Number.isInteger(frame?.index) || frame.index < 0) {
+      throw new Error("motion candidate project response included an invalid frame index");
+    }
+    projectFrameIndices.push(frame.index);
+    if (frame.override) frameIndices.push(frame.index);
+  }
+  return {
+    ok: true,
+    projectId,
+    [key]: frameIndices,
+    ...(key === "overriddenFrames"
+      ? { paths: motionCandidateProjectPaths(projectId, projectFrameIndices, context) }
+      : {})
+  };
+}
+
+function isMotionCandidateId(value) {
+  return typeof value === "string" && MOTION_CANDIDATE_ID_RE.test(value);
 }
 
 export async function createMotionSet(input, context) {
