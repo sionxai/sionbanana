@@ -1,5 +1,6 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -16,7 +17,8 @@ import {
   detectRepeatedRows,
   normalizeFrames,
   packSheet,
-  sliceFrames
+  sliceFrames,
+  type FrameAnalysis
 } from "@/lib/motion/engine";
 import {
   animationSchema,
@@ -27,6 +29,7 @@ import {
   type Animation,
   type DuplicateDetection,
   type Frame,
+  type FrameRect,
   type GridSpec,
   type MatteSpec,
   type MirrorDetection,
@@ -34,11 +37,14 @@ import {
   type NormalizePivotX,
   type NormalizePivotY,
   type NormalizeScale,
+  type Pivot,
   type SliceMode
 } from "@/lib/motion/types";
 
 const PROJECT_ID_RE = /^[A-Za-z0-9-]+$/;
-const ASSET_PATH_RE = /^(?:raw\.png|derived\/(?:sheet\.png|debug-contact\.png|frames\/f[0-9]{2,}\.png))$/;
+const ASSET_PATH_RE = /^(?:raw\.png|overrides\/f[0-9]{2,}\.png|candidates\/[A-Za-z0-9-]+\/(?:frames|masks)\/f[0-9]{2,}\.png|derived\/(?:sheet\.png|debug-contact\.png|frames\/f[0-9]{2,}\.png))$/;
+const projectMutationScopes = new AsyncLocalStorage<Set<string>>();
+const projectMutationTails = new Map<string, Promise<void>>();
 
 export type MotionProjectSummary = {
   id: string;
@@ -92,6 +98,33 @@ function assertProjectId(id: string): void {
       "Motion project id must contain only letters, numbers, and hyphens.",
       400
     );
+  }
+}
+
+export async function withMotionProjectMutation<T>(
+  id: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  assertProjectId(id);
+  const active = projectMutationScopes.getStore();
+  if (active?.has(id)) return operation();
+
+  const previous = projectMutationTails.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const tail = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  projectMutationTails.set(id, tail);
+  void tail.finally(() => {
+    if (projectMutationTails.get(id) === tail) projectMutationTails.delete(id);
+  });
+  await previous.catch(() => undefined);
+  const scope = new Set(active ?? []);
+  scope.add(id);
+  try {
+    return await projectMutationScopes.run(scope, operation);
+  } finally {
+    release();
   }
 }
 
@@ -242,6 +275,7 @@ async function buildArtifacts(input: {
   animations: Animation[];
   animationsExplicit: boolean;
   defaultAnimation?: { fps?: number; loop?: Animation["loop"] };
+  overrides?: Map<number, Buffer>;
 }): Promise<BuildArtifacts> {
   const requestedGrid = gridSpecSchema.parse(input.grid);
   const matte = withDefaultKeyColor(input.matte);
@@ -311,6 +345,9 @@ async function buildArtifacts(input: {
       return flipX ? sharp(buffer).flop().png().toBuffer() : buffer;
     })
   );
+  for (const [index, override] of input.overrides ?? []) {
+    if (index >= 0 && index < oriented.length) oriented[index] = override;
+  }
   let duplicateDetection = input.previousDuplicateDetection;
   const autoExcluded = new Set<number>();
   if (input.autoExcludeRepeatedRows && !input.controlsExplicit) {
@@ -357,7 +394,8 @@ async function buildArtifacts(input: {
       appliedScale: frame.appliedScale,
       flipX: control?.flipX ?? autoFlipped.has(index),
       excluded: control?.excluded ?? autoExcluded.has(index),
-      durationMs: control?.durationMs ?? null
+      durationMs: control?.durationMs ?? null,
+      override: control?.override ?? null
     };
   });
   const animations = resolveAnimations(
@@ -564,7 +602,7 @@ export async function createProject(input: {
   }
 }
 
-export async function rebuildProject(
+async function rebuildProjectUnlocked(
   id: string,
   patch: MotionProjectPatch
 ): Promise<MotionProject> {
@@ -578,6 +616,22 @@ export async function rebuildProject(
   const grid = gridSpecSchema.parse(patch.grid ?? current.grid);
   const matte = withDefaultKeyColor(matteSpecSchema.parse(patch.matte ?? current.matte));
   const controls = (patch.frames ?? current.frames).map(frame => frameSchema.parse(frame));
+  const overrides = new Map<number, Buffer>();
+  for (const frame of controls) {
+    if (!frame.override) continue;
+    try {
+      overrides.set(frame.index, await readOverrideFile(directory, id, frame.index));
+    } catch (error) {
+      if (error instanceof MotionStorageError && error.code === "NOT_FOUND") {
+        throw new MotionStorageError(
+          "NOT_FOUND",
+          `Frame override f${String(frame.index + 1).padStart(2, "0")} is missing.`,
+          409
+        );
+      }
+      throw error;
+    }
+  }
   const animations = (patch.animations ?? current.animations).map(animation =>
     animationSchema.parse(animation)
   );
@@ -599,10 +653,364 @@ export async function rebuildProject(
     autoExcludeRepeatedRows: false,
     previousDuplicateDetection: current.duplicateDetection,
     animations,
-    animationsExplicit: patch.animations !== undefined
+    animationsExplicit: patch.animations !== undefined,
+    overrides
   });
   await replaceProject(directory, artifacts);
   return artifacts.project;
+}
+
+export async function rebuildProject(
+  id: string,
+  patch: MotionProjectPatch
+): Promise<MotionProject> {
+  return withMotionProjectMutation(id, () => rebuildProjectUnlocked(id, patch));
+}
+
+type OverrideSnapshot = { index: number; buffer: Buffer | null };
+
+function overrideName(index: number): string {
+  return `f${String(index + 1).padStart(2, "0")}.png`;
+}
+
+async function overridesDirectory(
+  directory: string,
+  id: string,
+  create: boolean
+): Promise<string | null> {
+  const target = path.join(directory, "overrides");
+  try {
+    if (create) await fs.mkdir(target);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+  }
+  try {
+    const entry = await fs.lstat(target);
+    if (entry.isSymbolicLink() || !entry.isDirectory()) {
+      throw new MotionStorageError("NOT_FOUND", `Motion project ${id} was not found.`, 404);
+    }
+    const realDirectory = await fs.realpath(target);
+    if (path.dirname(realDirectory) !== directory) {
+      throw new MotionStorageError("NOT_FOUND", `Motion project ${id} was not found.`, 404);
+    }
+    return realDirectory;
+  } catch (error) {
+    if (error instanceof MotionStorageError) throw error;
+    if (!create && (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR")) return null;
+    if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {
+      throw new MotionStorageError("NOT_FOUND", `Motion project ${id} was not found.`, 404);
+    }
+    throw error;
+  }
+}
+
+async function readOverrideFile(directory: string, id: string, index: number): Promise<Buffer> {
+  const overrides = await overridesDirectory(directory, id, false);
+  if (!overrides) {
+    throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+  }
+  const target = path.join(overrides, overrideName(index));
+  try {
+    const entry = await fs.lstat(target);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+    }
+    const realFile = await fs.realpath(target);
+    if (path.dirname(realFile) !== overrides) {
+      throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+    }
+    return await fs.readFile(realFile);
+  } catch (error) {
+    if (error instanceof MotionStorageError) throw error;
+    if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {
+      throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+    }
+    throw error;
+  }
+}
+
+async function snapshotOverride(
+  directory: string,
+  id: string,
+  index: number
+): Promise<OverrideSnapshot> {
+  try {
+    return { index, buffer: await readOverrideFile(directory, id, index) };
+  } catch (error) {
+    if (error instanceof MotionStorageError && error.code === "NOT_FOUND") {
+      const overrides = await overridesDirectory(directory, id, true);
+      const target = path.join(overrides!, overrideName(index));
+      try {
+        await fs.lstat(target);
+      } catch (statError) {
+        if (errorCode(statError) === "ENOENT") return { index, buffer: null };
+        throw statError;
+      }
+    }
+    throw error;
+  }
+}
+
+async function writeOverrideFile(
+  directory: string,
+  id: string,
+  index: number,
+  buffer: Buffer
+): Promise<void> {
+  const overrides = await overridesDirectory(directory, id, true);
+  const target = path.join(overrides!, overrideName(index));
+  try {
+    const existing = await fs.lstat(target);
+    if (existing.isSymbolicLink() || !existing.isFile()) {
+      throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+    }
+  } catch (error) {
+    if (error instanceof MotionStorageError) throw error;
+    if (errorCode(error) !== "ENOENT") throw error;
+  }
+  const temporary = path.join(overrides!, `.${overrideName(index)}-${randomUUID()}.tmp`);
+  try {
+    await fs.writeFile(temporary, buffer, { flag: "wx" });
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+async function removeOverrideFile(directory: string, id: string, index: number): Promise<void> {
+  const overrides = await overridesDirectory(directory, id, false);
+  if (!overrides) return;
+  const target = path.join(overrides, overrideName(index));
+  try {
+    const entry = await fs.lstat(target);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new MotionStorageError("NOT_FOUND", `Frame override ${overrideName(index)} was not found.`, 404);
+    }
+    await fs.rm(target);
+  } catch (error) {
+    if (error instanceof MotionStorageError) throw error;
+    if (errorCode(error) === "ENOENT") return;
+    throw error;
+  }
+}
+
+async function restoreOverrideSnapshots(
+  directory: string,
+  id: string,
+  snapshots: OverrideSnapshot[]
+): Promise<void> {
+  for (const snapshot of snapshots) {
+    if (snapshot.buffer) {
+      await writeOverrideFile(directory, id, snapshot.index, snapshot.buffer);
+    } else {
+      await removeOverrideFile(directory, id, snapshot.index);
+    }
+  }
+}
+
+function resolveOverrideIndices(
+  frameIndices: number[] | undefined,
+  available: number[],
+  frameCount: number
+): number[] {
+  const selected = frameIndices ?? available;
+  if (selected.length === 0) {
+    throw new MotionStorageError("INVALID_PATCH", "At least one frame index is required.", 400);
+  }
+  const unique = new Set<number>();
+  for (const index of selected) {
+    if (!Number.isInteger(index) || index < 0 || index >= frameCount || unique.has(index)) {
+      throw new MotionStorageError("INVALID_PATCH", "Frame indices must be unique project frame indices.", 400);
+    }
+    if (!available.includes(index)) {
+      throw new MotionStorageError("INVALID_PATCH", `Candidate does not include frame ${index}.`, 400);
+    }
+    unique.add(index);
+  }
+  return [...unique];
+}
+
+export async function readOrientedCell(
+  id: string,
+  index: number
+): Promise<{ buffer: Buffer; width: number; height: number; trim: FrameRect; pivot: Pivot }> {
+  const project = await readProject(id);
+  if (!Number.isInteger(index) || index < 0 || index >= project.frames.length) {
+    throw new MotionStorageError("NOT_FOUND", "Motion frame was not found.", 404);
+  }
+  const directory = await safeExistingProjectDirectory(id);
+  const raw = await fs.readFile(await safeProjectFile(directory, "raw.png", id));
+  const frame = project.frames[index];
+  const [sliced] = await sliceFrames(raw, [frame.source]);
+  const matted = await applyMatte(sliced, withDefaultKeyColor(project.matte));
+  const buffer = frame.flipX ? await sharp(matted).flop().png().toBuffer() : matted;
+  const analysis = await analyzeFrame(buffer);
+  return {
+    buffer,
+    width: frame.source.w,
+    height: frame.source.h,
+    trim: analysis.trim,
+    pivot: analysis.pivot
+  };
+}
+
+export async function fitToCell(
+  candidate: Buffer,
+  cell: { width: number; height: number; trim: FrameRect; pivot: Pivot },
+  analysis: FrameAnalysis
+): Promise<Buffer> {
+  if (analysis.trim.w < 1 || analysis.trim.h < 1) {
+    throw new RangeError("Candidate must contain a non-empty foreground bounding box.");
+  }
+  const scale = Math.min(4, Math.max(0.25, cell.trim.h / analysis.trim.h));
+  const crop = await sharp(candidate)
+    .extract({
+      left: analysis.trim.x,
+      top: analysis.trim.y,
+      width: analysis.trim.w,
+      height: analysis.trim.h
+    })
+    .resize({
+      width: Math.max(1, Math.round(analysis.trim.w * scale)),
+      height: Math.max(1, Math.round(analysis.trim.h * scale)),
+      kernel: sharp.kernel.lanczos3
+    })
+    .png()
+    .toBuffer();
+  const metadata = await sharp(crop).metadata();
+  const cropWidth = metadata.width!;
+  const cropHeight = metadata.height!;
+  let sourceLeft = 0;
+  let sourceTop = 0;
+  let destinationLeft = Math.round(cell.pivot.x - (analysis.pivot.x - analysis.trim.x) * scale);
+  let destinationTop = Math.round(cell.pivot.y - (analysis.pivot.y - analysis.trim.y) * scale);
+  if (destinationLeft < 0) {
+    sourceLeft = -destinationLeft;
+    destinationLeft = 0;
+  }
+  if (destinationTop < 0) {
+    sourceTop = -destinationTop;
+    destinationTop = 0;
+  }
+  const copyWidth = Math.min(cropWidth - sourceLeft, cell.width - destinationLeft);
+  const copyHeight = Math.min(cropHeight - sourceTop, cell.height - destinationTop);
+  const canvas = sharp({
+    create: { width: cell.width, height: cell.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
+  });
+  if (copyWidth < 1 || copyHeight < 1) return canvas.png().toBuffer();
+  const visible = await sharp(crop)
+    .extract({ left: sourceLeft, top: sourceTop, width: copyWidth, height: copyHeight })
+    .png()
+    .toBuffer();
+  return canvas.composite([{ input: visible, left: destinationLeft, top: destinationTop }]).png().toBuffer();
+}
+
+async function applyCandidateFramesUnlocked(
+  id: string,
+  candidateId: string,
+  frameIndices?: number[]
+): Promise<MotionProject> {
+  const candidates = await import("@/lib/motion/candidates");
+  const candidate = await candidates.readCandidate(id, candidateId);
+  if (candidate.status !== "ready") {
+    throw new MotionStorageError("INVALID_PATCH", "Candidate must be ready before it can be applied.", 409);
+  }
+  const current = await readProject(id);
+  const indices = resolveOverrideIndices(
+    frameIndices,
+    candidate.frames.map(frame => frame.index),
+    current.frames.length
+  );
+  const directory = await safeExistingProjectDirectory(id);
+  const snapshots: OverrideSnapshot[] = [];
+  let rebuilt = false;
+  try {
+    const frames = current.frames.map(frame => ({ ...frame }));
+    for (const index of indices) {
+      const source = await candidates.candidateFramePath(id, candidateId, index);
+      const candidateBuffer = await fs.readFile(source);
+      const cell = await readOrientedCell(id, index);
+      const fitted = await fitToCell(candidateBuffer, cell, await analyzeFrame(candidateBuffer));
+      snapshots.push(await snapshotOverride(directory, id, index));
+      await writeOverrideFile(directory, id, index, fitted);
+      frames[index] = {
+        ...frames[index],
+        override: {
+          candidateId,
+          mode: candidate.mode,
+          appliedAtIso: new Date().toISOString(),
+          instruction: candidate.instruction
+        }
+      };
+    }
+    const project = await rebuildProject(id, { frames });
+    rebuilt = true;
+    await candidates.updateCandidate(id, candidateId, value => ({
+      ...value,
+      appliedAtIso: new Date().toISOString()
+    }));
+    return project;
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    await restoreOverrideSnapshots(directory, id, snapshots).catch(rollbackError => {
+      rollbackErrors.push(rollbackError);
+    });
+    if (rebuilt) {
+      await rebuildProject(id, { frames: current.frames }).catch(rollbackError => {
+        rollbackErrors.push(rollbackError);
+      });
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Candidate apply and rollback failed.");
+    }
+    throw error;
+  }
+}
+
+export async function applyCandidateFrames(
+  id: string,
+  candidateId: string,
+  frameIndices?: number[]
+): Promise<MotionProject> {
+  return withMotionProjectMutation(id, () =>
+    applyCandidateFramesUnlocked(id, candidateId, frameIndices)
+  );
+}
+
+async function revertFrameOverridesUnlocked(
+  id: string,
+  frameIndices?: number[]
+): Promise<MotionProject> {
+  const current = await readProject(id);
+  const active = current.frames.filter(frame => frame.override).map(frame => frame.index);
+  const indices = resolveOverrideIndices(frameIndices, active, current.frames.length);
+  const directory = await safeExistingProjectDirectory(id);
+  const snapshots: OverrideSnapshot[] = [];
+  try {
+    const frames = current.frames.map(frame => ({ ...frame }));
+    for (const index of indices) {
+      snapshots.push(await snapshotOverride(directory, id, index));
+      await removeOverrideFile(directory, id, index);
+      frames[index] = { ...frames[index], override: null };
+    }
+    return await rebuildProject(id, { frames });
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    await restoreOverrideSnapshots(directory, id, snapshots).catch(rollbackError => {
+      rollbackErrors.push(rollbackError);
+    });
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Override revert and rollback failed.");
+    }
+    throw error;
+  }
+}
+
+export async function revertFrameOverrides(
+  id: string,
+  frameIndices?: number[]
+): Promise<MotionProject> {
+  return withMotionProjectMutation(id, () => revertFrameOverridesUnlocked(id, frameIndices));
 }
 
 export async function listProjects(): Promise<MotionProjectSummary[]> {

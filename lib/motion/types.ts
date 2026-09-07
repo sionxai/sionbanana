@@ -10,6 +10,8 @@ export const sliceModeValues = ["auto", "grid"] as const;
 export const normalizeScaleValues = ["none", "height", "area"] as const;
 export const normalizePivotXValues = ["foot", "centroid"] as const;
 export const normalizePivotYValues = ["pin", "preserve"] as const;
+export const candidateModeValues = ["mask", "strip", "upload"] as const;
+export const candidateStatusValues = ["pending", "running", "ready", "failed"] as const;
 
 const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
 
@@ -52,6 +54,15 @@ export const matteSpecSchema = z
   })
   .strict();
 
+export const frameOverrideSchema = z
+  .object({
+    candidateId: z.string().regex(/^[A-Za-z0-9-]+$/),
+    mode: z.enum(candidateModeValues),
+    appliedAtIso: z.string().datetime(),
+    instruction: z.string().max(4000).nullable().default(null)
+  })
+  .strict();
+
 export const frameSchema = z
   .object({
     index: z.number().int().nonnegative(),
@@ -61,7 +72,39 @@ export const frameSchema = z
     appliedScale: z.number().finite().positive().default(1),
     flipX: z.boolean().default(false),
     excluded: z.boolean().default(false),
-    durationMs: z.number().int().positive().nullable().default(null)
+    durationMs: z.number().int().positive().nullable().default(null),
+    override: frameOverrideSchema.nullable().default(null)
+  })
+  .strict();
+
+const candidateRelativePathSchema = z
+  .string()
+  .regex(/^(?:frames|masks)\/f[0-9]{2,}\.png$/, "Candidate file paths must be frame-relative PNG paths.");
+
+export const candidateSchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z0-9-]+$/),
+    projectId: z.string().regex(/^[A-Za-z0-9-]+$/),
+    mode: z.enum(candidateModeValues),
+    status: z.enum(candidateStatusValues),
+    frames: z
+      .array(
+        z
+          .object({
+            index: z.number().int().nonnegative(),
+            file: candidateRelativePathSchema.nullable().default(null),
+            mask: candidateRelativePathSchema.nullable().default(null)
+          })
+          .strict()
+      )
+      .min(1),
+    instruction: z.string().max(4000).nullable().default(null),
+    protect: z.array(z.string().trim().min(1).max(200)).default([]),
+    reason: z.string().nullable().default(null),
+    createdAtIso: z.string().datetime(),
+    updatedAtIso: z.string().datetime(),
+    appliedAtIso: z.string().datetime().nullable().default(null),
+    metrics: z.record(z.unknown()).nullable().default(null)
   })
   .strict();
 
@@ -145,6 +188,8 @@ export type FrameRect = z.infer<typeof frameRectSchema>;
 export type Pivot = z.infer<typeof pivotSchema>;
 export type MatteSpec = z.infer<typeof matteSpecSchema>;
 export type Frame = z.infer<typeof frameSchema>;
+export type FrameOverride = z.infer<typeof frameOverrideSchema>;
+export type Candidate = z.infer<typeof candidateSchema>;
 export type Animation = z.infer<typeof animationSchema>;
 export type MirrorDetection = z.infer<typeof mirrorDetectionSchema>;
 export type DuplicateDetection = z.infer<typeof duplicateDetectionSchema>;
@@ -203,4 +248,8 @@ export function parseMotionProject(input: unknown): MotionProject {
     mirrorDetection,
     duplicateDetection
   });
+}
+
+export function parseCandidate(input: unknown): Candidate {
+  return candidateSchema.parse(input);
 }
