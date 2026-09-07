@@ -43,6 +43,7 @@
 | SB WO-013 | 2026-09-07 | 후보 생성 모드 — 마스크 인페인팅·앵커 스트립 재생성 + 후보 워커 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 57/57 · 마스크 밖 보존 7 · 스트립 연속성 6/4/3 · 병합 20095e01 |
 | SB WO-014 | 2026-09-07 | 구간 선택·마스크 브러시·후보 생성·전후 비교·적용/되돌리기 UI | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름(생성→적용→되돌리기) · 병합 84472070 |
 | SB WO-015 | 2026-09-07 | MCP 후보 도구 4종 + 스킬 문서 (구간 수정 외부 노출) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 26/26 · MCP 4도구 실호출(생성→적용→되돌리기) · 병합 067a4963 |
+| SB WO-005 | 2026-09-07 | 영상 기본 모델 Grok Imagine 1.5 승격 + env 오버라이드 + 모델별 길이 상한 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -538,6 +539,23 @@
 - 2026-09-07 15:3x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-015-motion-candidate-mcp` (`@ 84472070`) 생성, Maker 위임 가동.
 - 2026-09-07 15:52 KST — Maker 반환(정확히 2파일). 이번 회차는 Maker가 Deno로 우회 검증해 MCP·batch 24건 통과를 자체 보고 → CEO Node 재실행 **26/26 · `node --check` OK · tsc 0**.
 - 2026-09-07 15:53~15:58 KST — CEO 실기(MCP 모듈 직접 호출, 서버 발견을 3012로 재작성): `create_motion_candidate`(strip, 프레임 7) → pending → `get_motion_candidate` 폴링 5회 → ready(attempts 1·신뢰도 1·3×1·앵커 6·8, 프레임 절대경로 반환) → `apply_motion_candidate` → 오버라이드 [1..6] → `revert_motion_frames` → 잔여 [1..5] → 커밋 `8c6cec09`, 병합 `067a4963` → `완료`. 전역 브리지 스킬에 구간 수정 절 추가(CEO 직접).
+
+### SB WO-005 — 영상 기본 모델 Grok Imagine 1.5 승격
+
+- **ID:** `SB WO-005` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** 대표 승인(2026-09-07 "영상기본모델 그록1.5는 해줘야지"), 2026-09-02 진단(기본값이 구형 `grok-imagine-video`로 하드코딩), xAI 1.5 사양(1~15초 · 480p/720p/1080p · 7개 화면비)
+- **목표:** (1) 기본 모델 `grok-imagine-video-1.5`, 환경변수 `SIONBANANA_GROK_VIDEO_MODEL`로 덮어쓰기 (2) 모델별 최대 길이 단일 관리 — 1.5 계열 15초, 그 외 30초. 초과 요청은 **생성 호출 전에** 400으로 거부하고 사유에 모델·상한 명시 (3) 호출부가 `model`을 주면 그 값 우선(기존 동작 유지).
+- **배경:** 다른 세션은 `model` 파라미터로 이미 1.5를 쓰고 새 스킬 문서도 1.5 기준인데 엔진 기본값만 구형이라, 명시를 잊으면 조용히 구버전이 쓰였다. 1.5는 15초 상한이므로 라우트의 기존 30초 허용과 충돌 — 모델별 상한으로 해소한다.
+- **변경 범위:** `lib/grok-video.ts`, `app/api/video/route.ts`, `scripts/agent-video.mjs`(도움말 문구), `tests/grok-video-model.test.mjs`(신규) 4파일. 스펙 전문: 스크래치패드 `wo005-spec.md`.
+- **완료 기준:** 신규·회귀 3파일 PASS · tsc 0 (CEO 재실행) / 코드 정독 / CEO 실기: 재기동한 상주 서버에서 모델 미지정 5초 영상 1건 생성 → 응답·사이드카 `model`이 1.5인지 확인, 20초 요청은 400.
+- **금지:** 4파일 밖 수정, commit·push, npm install, MCP 스키마 변경, 테스트에서 외부 API 호출.
+- **위험등급:** R2(생성 기본값 변경 — 길이 상한이 30→15로 좁아지는 사용자 가시 변화) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 폐기 또는 env로 구모델 지정.
+- **보고 형식:** WO-015와 동일.
+
+#### 상태 이력
+
+- 2026-09-07 16:0x KST — 대표 승인으로 `발행`. 워크트리 `.claude/worktrees/sb-wo-005-grok-video-15` 생성, Maker 위임 가동.
 
 ## 검수 로그
 
