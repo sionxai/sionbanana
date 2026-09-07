@@ -37,7 +37,8 @@
 | SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 반전·행 반복 자동 제외 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 84/84 · 실생성 9장 스모크 · 병합 89ee900f(서버 재기동 대기) |
 | SB WO-008 | 2026-09-07 | 모션 프리셋 10종·동작별 재생 기본값·프레임 정보 표시·슬로모션·MCP 감지 요약 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 95/95 · 장전·피격 실생성 · 브라우저 실물 · 병합 875133b7 |
 | SB WO-009 | 2026-09-07 | 모션 세트 서버측 — 베이스 결속·다중 동작 순차 생성·공통 설정+예외·상태 추적 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 93/93 · 세트 실기 3/3+왼쪽 반전 · 병합 e20bfe35 |
-| SB WO-010 | 2026-09-07 | 모션 세트 UI — 세트 만들기·공통 설정+동작별 예외·상태판 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-010 | 2026-09-07 | 모션 세트 UI — 세트 만들기·공통 설정+동작별 예외·상태판 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름 실물 · 병합 62e4c98e |
+| SB WO-011 | 2026-09-07 | 세트 통합 내보내기(시트+JSON) · MCP 세트 도구 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -439,7 +440,25 @@
 
 #### 상태 이력
 
-- 2026-09-07 12:0x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-010-motion-set-ui` (`claude/sb-wo-010-motion-set-ui` @ `e20bfe35`) 생성 예정, Maker 위임 가동.
+- 2026-09-07 12:0x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-010-motion-set-ui` (`claude/sb-wo-010-motion-set-ui` @ `e20bfe35`) 생성, Maker 위임 가동.
+- 2026-09-07 12:21 KST — Maker 반환(정확히 3파일, 검증 미실행). CEO: tsc 오류(세트 다이얼로그 open 상태 변수명 `setCreateOpen` 충돌) 4줄 직접 수정 → **tsc 0 · next lint 0 · 회귀 33/33**.
+- 2026-09-07 12:24~12:30 KST — 브라우저 실물(격리 dev 서버 3012, in-app 브라우저): 새 세트 다이얼로그(이름·설명·2×2·대기+장전 체크) → 생성 → 세트 탭 상태판(pending→ready 2/2, 썸네일, 실효 4장) → 열기(플레이어 `wo010-ui-set · 대기`, `4장 / 12 FPS / 0.33초`) → 재생성(장전 pending→ready, 기존 프로젝트 유지) → 세트 삭제(목록 비움, 프로젝트 3건 유지). 숨김 패널에서는 폴링을 건너뛰어 수동 새로고침으로 확인(설계대로). → 커밋 `da9ac1a9`, 병합 `62e4c98e` → `완료`.
+
+### SB WO-011 — 세트 통합 내보내기(스프라이트 시트+JSON) · MCP 세트 도구
+
+- **ID:** `SB WO-011` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** SB WO-009·010 병합(`62e4c98e`), 기존 `lib/motion/export.ts` 번들 절차, MCP motion 도구 패턴, 제안 항목 6(스프라이트 시트+JSON 내보내기)·2단계(MCP 세트 노출)
+- **목표:** (1) `lib/motion/set-export.ts` — ready 멤버 전부를 한 시트(동작당 한 행, 합집합 캔버스, 지면선 정렬, 스케일 미정규화·sizeReport 명시)+`animation.json`(동작별 애니메이션·fps·loop)+frames/+README(+GIF)로 번들 (2) `GET /api/motion/sets/[id]/export-file` (3) MCP `create_motion_set`·`get_motion_set`·`list_motion_sets`·`export_motion_set` (4) 상태판 `통합 내보내기` 버튼.
+- **변경 범위:** `lib/motion/set-export.ts`(신규), `app/api/motion/sets/[id]/export-file/route.ts`(신규), `scripts/mcp-server.mjs`, `components/studio/motion/motion-set-board.tsx`, `tests/motion-set-export.test.mjs`(신규), `tests/motion-mcp.test.mjs` 6파일. 스펙 전문: 스크래치패드 `wo011-spec.md`.
+- **완료 기준:** 신규·회귀 테스트 5파일 PASS · tsc 0 · `node --check` MCP · lint 상태판 (CEO 재실행) / CEO 실기: 격리 서버에서 세트 통합 ZIP 내려받아 시트·JSON 검증 + MCP 세트 도구 스키마 회귀.
+- **금지:** 6파일 밖 수정, commit·push, npm install, 기존 프로젝트 export 계약 변경, 새 의존성.
+- **위험등급:** R2(MCP 공유 파일) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-011-motion-set-export` 폐기.
+- **보고 형식:** WO-010과 동일.
+
+#### 상태 이력
+
+- 2026-09-07 12:3x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-011-motion-set-export` (`claude/sb-wo-011-motion-set-export` @ `62e4c98e`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
@@ -615,3 +634,13 @@
 - (b) 앵커 스트립: 원본 walk(4×2)의 f4·f1을 앵커로 6×1 스트립(앵커 A · 수정 4포즈 · 앵커 B)을 참조 3장(원본 시트+앵커 2)으로 10회 생성 → 자동 슬라이싱 6칸 유효 **5/10**(무효 5회는 인접 셀 손·발 접촉으로 3~5칸 병합, sliceConfidence 0.3). 유효 5회: 앵커 A 거리 4·7·6·8·4, B 11·8·9·8·7(연속 판정 ≤12 **5/5**, 근사동일 ≤8 3/5), 평균색 차 3~6(정체성 유지), 수정 의도(팔 스윙 확대) 반영(원본 대비 9~21), 스트립 캐릭터 크기 +16~22%(중앙값 1.18, 일정 → 앵커 높이 정규화로 보정 가능).
 - 결론: 항목 5·6은 **구현 가능**. 부분 수정(손·무기·장비)은 마스크 모드, 동작 연결·자세 구간은 앵커 스트립 모드(3×2 배치·고정 격자·재시도·스케일 보정 필요). 원본 보존·후보 비교·적용/되돌리기는 프레임 오버라이드 계층으로(기존 재빌드 파이프라인 재사용). 범위 확정은 T-07.
 - 부수 산출: 기억 `reference_codex_image_mask_edit.md`, `reference_motion_asset_tuning.md` 갱신. 실험 데이터는 세션 스크래치패드(격리 데이터 디렉터리, 운영 데이터 무오염).
+
+### SB WO-010 — 모션 세트 UI
+
+- 검수 기준: 워크트리 `claude/sb-wo-010-motion-set-ui` base `e20bfe35`, 시작 porcelain 0줄 → Maker 정확히 3파일. 범위 위반 0건. 왕복 1회.
+- Maker 보고 — "구현 완료 / 검증 미실행"(키체인 -50). 가정: 캐릭터 라이브러리 이미지 URL은 브라우저에서 접근 가능한 PNG/JPEG.
+- CEO 재실행 — `tsc --noEmit` 0(변수명 충돌 4줄 직접 수정 후) · `next lint` 3컴포넌트 0 · 회귀 `motion-sets`+`motion-storage` 33/33.
+- 코드 정독 — 세트 API 계약 준수(`POST /api/motion/sets` start:true, `PATCH {regenerate,start}`, `DELETE`), 폴링 5초·hidden 건너뜀, ready 멤버 메트릭 1회 지연 로드(실효 프레임·감지 배지), 열기는 기존 `selectProject` 재사용, 서버 코드 변경 없음.
+- 실기 — in-app 브라우저 전 흐름 통과(상태 이력 참조). 관찰: 멤버 상태 라벨 `대기`(pending)가 동작 라벨 `대기`(idle)와 같은 단어라 표에서 혼동 여지 — 후속 UX 정리 후보(`대기 중`으로 변경).
+- 커밋 — WO `da9ac1a9`, 병합 `62e4c98e`(로컬 전용). 상주 서버 재기동 대기.
+- **판정: PASS · 완료.** 제안 항목 1·2·4의 UI 충족(베이스 등록 화면, 동작 체크·동작별 설정·기본 재생 방식, 동작별 생성 상태·결과 표시).
