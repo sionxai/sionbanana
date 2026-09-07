@@ -13,6 +13,8 @@ import {
 import {
   buildSheetPrompt,
   isCyclicAction,
+  MOTION_ACTION_PRESETS,
+  motionActionPresetValues,
   type MotionActionPreset
 } from "@/lib/motion/prompt";
 import {
@@ -21,6 +23,7 @@ import {
   MotionStorageError
 } from "@/lib/motion/storage";
 import {
+  animationLoopValues,
   gridSpecSchema,
   matteSpecSchema,
   normalizePivotXValues,
@@ -37,7 +40,7 @@ const MAX_DATA_URL_CHARS = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 128;
 const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
 const MAX_REFERENCE_DATA_CHARS = Math.ceil((MAX_REFERENCE_BYTES * 4) / 3) + 1024;
 
-const actionSchema = z.enum(["walk", "run", "idle", "jump", "attack", "custom"]);
+const actionSchema = z.enum(motionActionPresetValues);
 const referenceObjectSchema = z
   .object({
     data: z.string().min(1).max(MAX_REFERENCE_DATA_CHARS).optional(),
@@ -83,6 +86,8 @@ const createProjectSchema = z
     normalizePivotY: z.enum(normalizePivotYValues).optional(),
     autoFlipRows: z.boolean().optional(),
     autoExcludeRepeatedRows: z.boolean().optional(),
+    fps: z.number().int().min(1).max(60).optional(),
+    loop: z.enum(animationLoopValues).optional(),
     grid: gridSpecSchema,
     matte: matteSpecSchema.optional(),
     source: sourceSchema
@@ -251,6 +256,12 @@ export async function GET(): Promise<Response> {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const payload = createProjectSchema.parse(await readRequestJson(request));
+    if (payload.source.type !== "upload" && payload.grid.cols * payload.grid.rows > 12) {
+      throw new MotionRequestError(
+        "Generated sprite sheets support at most 12 frames (measured quality drops beyond 8).",
+        400
+      );
+    }
     const defaultKeyColor =
       payload.source.type === "upload"
         ? "#FF00FF"
@@ -296,6 +307,11 @@ export async function POST(request: NextRequest): Promise<Response> {
             choke: 1
           }
     );
+    const loop =
+      payload.loop ??
+      (payload.source.type !== "upload" && payload.source.action
+        ? MOTION_ACTION_PRESETS[payload.source.action].defaultLoop
+        : "loop");
     const project = await createProject({
       name: payload.name,
       sheetBuffer,
@@ -310,6 +326,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           payload.source.action !== undefined &&
           payload.source.action !== "custom" &&
           isCyclicAction(payload.source.action)),
+      defaultAnimation: { fps: payload.fps, loop },
       grid: payload.grid,
       matte
     });

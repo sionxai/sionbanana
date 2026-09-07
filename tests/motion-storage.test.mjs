@@ -536,3 +536,74 @@ test("motion project uploads only exclude repeated rows after an explicit opt-in
   assert.equal(enabledBody.project.duplicateDetection.enabled, true);
   assert.deepEqual(enabledBody.project.duplicateDetection.excludedFrames, [2, 3]);
 });
+
+test("createProject applies provided default animation values to its fallback animation", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "One-shot default",
+    sheetBuffer: await testSheet(),
+    defaultAnimation: { loop: "once" },
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+
+  assert.equal(project.animations[0].loop, "once");
+  assert.equal(project.animations[0].fps, 12);
+});
+
+test("motion project upload routes default and preserve requested animation settings", async t => {
+  await useTempDataDir(t);
+  const { POST } = await loadMotionRouteHandlers();
+  const sheet = await testSheet();
+  const requestBody = animation => ({
+    name: `Upload animation ${animation?.loop ?? "default"}`,
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte(),
+    ...animation,
+    source: { type: "upload", dataUrl: `data:image/png;base64,${sheet.toString("base64")}` }
+  });
+
+  const defaultResponse = await POST(
+    new Request("http://localhost/api/motion/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody(undefined))
+    })
+  );
+  const defaultBody = await defaultResponse.json();
+  assert.equal(defaultResponse.status, 201);
+  assert.equal(defaultBody.project.animations[0].loop, "loop");
+  assert.equal(defaultBody.project.animations[0].fps, 12);
+
+  const requestedResponse = await POST(
+    new Request("http://localhost/api/motion/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody({ loop: "once", fps: 8 }))
+    })
+  );
+  const requestedBody = await requestedResponse.json();
+  assert.equal(requestedResponse.status, 201);
+  assert.equal(requestedBody.project.animations[0].loop, "once");
+  assert.equal(requestedBody.project.animations[0].fps, 8);
+});
+
+test("motion project generation rejects grids larger than twelve frames before generating", async () => {
+  const { POST } = await loadMotionRouteHandlers();
+  const response = await POST(
+    new Request("http://localhost/api/motion/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Too many generated frames",
+        grid: { cols: 4, rows: 4 },
+        source: { type: "generate", prompt: "a banana mascot runs", action: "run" }
+      })
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.match(body.reason, /at most 12 frames/);
+});

@@ -38,6 +38,7 @@ export function MotionPlayer({
   const animationFrameRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
   const directionRef = useRef<1 | -1>(1);
+  const currentFrameRef = useRef<MotionProject["frames"][number] | null>(null);
   const settingsProjectRef = useRef("");
   const initialAnimation = project.animations[0];
   const [fps, setFps] = useState(initialAnimation?.fps ?? 12);
@@ -49,6 +50,7 @@ export function MotionPlayer({
   const [isLoadingImages, setIsLoadingImages] = useState(true);
   const [imageError, setImageError] = useState<string | null>(null);
   const [showChecker, setShowChecker] = useState(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState<0.25 | 0.5 | 1>(1);
 
   const activeFrames = useMemo(
     () => project.frames.filter(frame => !frame.excluded),
@@ -56,6 +58,17 @@ export function MotionPlayer({
   );
   const activeFrameSignature = activeFrames.map(frame => frame.index).join(",");
   const currentFrame = activeFrames[currentPosition] ?? activeFrames[0] ?? null;
+  currentFrameRef.current = currentFrame;
+  const durationSeconds = useMemo(
+    () =>
+      activeFrames.reduce(
+        (total, frame) => total + (frame.durationMs ?? 1000 / fps),
+        0
+      ) / 1000,
+    [activeFrames, fps]
+  );
+  const excludedDuplicateFrames = project.duplicateDetection?.excludedFrames.length ?? 0;
+  const hasMirroredRows = project.mirrorDetection?.rows.some(row => row.mirrored) ?? false;
 
   useEffect(() => {
     if (settingsProjectRef.current === project.id) return;
@@ -134,7 +147,7 @@ export function MotionPlayer({
 
     const animate = (timestamp: number) => {
       if (lastFrameTimeRef.current === null) lastFrameTimeRef.current = timestamp;
-      const frameDuration = 1000 / fps;
+      const frameDuration = (currentFrameRef.current?.durationMs ?? 1000 / fps) / playbackSpeed;
       if (timestamp - lastFrameTimeRef.current >= frameDuration) {
         lastFrameTimeRef.current = timestamp;
         setCurrentPosition(previous => {
@@ -172,7 +185,7 @@ export function MotionPlayer({
       }
       lastFrameTimeRef.current = null;
     };
-  }, [activeFrames.length, fps, imageError, isLoadingImages, isPlaying, loopMode]);
+  }, [activeFrames.length, fps, imageError, isLoadingImages, isPlaying, loopMode, playbackSpeed]);
 
   useEffect(
     () => () => {
@@ -302,6 +315,33 @@ export function MotionPlayer({
           <span className="ml-2 text-sm tabular-nums text-muted-foreground">
             {currentFrame ? `프레임 ${currentFrame.index + 1} / ${project.frames.length}` : "프레임 없음"}
           </span>
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {activeFrames.length}장 / {fps} FPS / {durationSeconds.toFixed(2)}초
+          </span>
+          {excludedDuplicateFrames > 0 ? (
+            <Badge variant="secondary">중복 행 제외 {excludedDuplicateFrames}장</Badge>
+          ) : null}
+          {hasMirroredRows ? <Badge variant="secondary">2행 반전 보정</Badge> : null}
+          <ToggleGroup
+            type="single"
+            value={String(playbackSpeed)}
+            onValueChange={value => {
+              if (value === "0.25" || value === "0.5" || value === "1") {
+                setPlaybackSpeed(Number(value) as 0.25 | 0.5 | 1);
+                lastFrameTimeRef.current = null;
+              }
+            }}
+          >
+            <ToggleGroupItem value="0.25" aria-label="0.25배 속도">
+              0.25×
+            </ToggleGroupItem>
+            <ToggleGroupItem value="0.5" aria-label="0.5배 속도">
+              0.5×
+            </ToggleGroupItem>
+            <ToggleGroupItem value="1" aria-label="1배 속도">
+              1×
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         <div className="space-y-3">
@@ -311,7 +351,7 @@ export function MotionPlayer({
           </div>
           <Slider
             min={1}
-            max={30}
+            max={60}
             step={1}
             value={[fps]}
             onValueChange={value => setFps(Math.round(value[0] ?? 12))}
