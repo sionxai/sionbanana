@@ -38,7 +38,7 @@
 | SB WO-008 | 2026-09-07 | 모션 프리셋 10종·동작별 재생 기본값·프레임 정보 표시·슬로모션·MCP 감지 요약 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 95/95 · 장전·피격 실생성 · 브라우저 실물 · 병합 875133b7 |
 | SB WO-009 | 2026-09-07 | 모션 세트 서버측 — 베이스 결속·다중 동작 순차 생성·공통 설정+예외·상태 추적 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 93/93 · 세트 실기 3/3+왼쪽 반전 · 병합 e20bfe35 |
 | SB WO-010 | 2026-09-07 | 모션 세트 UI — 세트 만들기·공통 설정+동작별 예외·상태판 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름 실물 · 병합 62e4c98e |
-| SB WO-011 | 2026-09-07 | 세트 통합 내보내기(시트+JSON) · MCP 세트 도구 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-011 | 2026-09-07 | 세트 통합 내보내기(시트+JSON) · MCP 세트 도구 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 47/47 · ZIP 실기 · MCP 4도구 실호출 · 병합 2d7ea239 |
 
 ## 지시서
 
@@ -459,6 +459,8 @@
 #### 상태 이력
 
 - 2026-09-07 12:3x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-011-motion-set-export` (`claude/sb-wo-011-motion-set-export` @ `62e4c98e`) 생성, Maker 위임 가동.
+- 2026-09-07 12:56 KST — Maker 반환(정확히 6파일, 검증 미실행). CEO 재실행: 테스트 5파일 **47/47** · tsc 0 · MCP 구문 OK · lint 0. 직접 수정 0건.
+- 2026-09-07 12:57~13:05 KST — 실기(격리 dev 서버 3012): 참조 포함 세트(대기·피격 2×2) 생성→ready → `export-file?gif=1` ZIP 4.77MB: `sprite-sheet.png` 1952×1216(4열×2행, 동작당 한 행), `animation.json` 8프레임·애니메이션 2개(대기 loop 12fps·피격 once)·sizeReport, `frames/<action>/`, README, `preview-idle.gif`·`preview-hit.gif` / MCP 모듈 직접 호출(서버 발견을 3012로 재작성): `list_motion_sets`·`get_motion_set`(effectiveFrames 4/4, 감지 요약)·`export_motion_set`(ZIP 4.26MB 저장)·`create_motion_set`(업로드 참조, 1멤버)→폴링→ready(실효 2장: 2×2 대기의 반복 행 자동 제외) 전부 PASS → 커밋 `6ba23d7c`, 병합 `2d7ea239` → `완료`.
 
 ## 검수 로그
 
@@ -644,3 +646,13 @@
 - 실기 — in-app 브라우저 전 흐름 통과(상태 이력 참조). 관찰: 멤버 상태 라벨 `대기`(pending)가 동작 라벨 `대기`(idle)와 같은 단어라 표에서 혼동 여지 — 후속 UX 정리 후보(`대기 중`으로 변경).
 - 커밋 — WO `da9ac1a9`, 병합 `62e4c98e`(로컬 전용). 상주 서버 재기동 대기.
 - **판정: PASS · 완료.** 제안 항목 1·2·4의 UI 충족(베이스 등록 화면, 동작 체크·동작별 설정·기본 재생 방식, 동작별 생성 상태·결과 표시).
+
+### SB WO-011 — 세트 통합 내보내기 · MCP 세트 도구
+
+- 검수 기준: 워크트리 `claude/sb-wo-011-motion-set-export` base `62e4c98e`, 시작 porcelain 0줄 → Maker 정확히 6파일. 범위 위반 0건. 왕복 1회.
+- Maker 보고 — "구현 완료 / 검증 미실행"(키체인 -50). 가정: 프로젝트 첫 애니메이션의 fps·loop 사용, 소수 기준점은 캔버스 바깥 올림 + 최근접 픽셀 배치 — CEO 채택.
+- CEO 재실행 — `motion-set-export`·`motion-export`·`motion-mcp`·`mcp-server-batch`·`motion-sets` **47/47** · tsc 0 · `node --check` OK · lint 0.
+- 코드 정독 — 합집합 캔버스(left/right/top/bottom = 프로젝트별 pivotX·groundY(median) 기준 최대치), 프레임을 세트 캔버스에 오프셋 합성(수직 반동 보존), 시트는 행=동작·열=프레임·빈 셀 투명, animation.json 인덱스 연속·pivot 공통, sizeReport·README 한계 명시, GIF 실패는 경고, ZIP 절차는 프로젝트 export와 동일; 라우트 쿼리 검증·404/409·cleanup; MCP 4도구 strict 스키마, imageId 참조 조회는 dataRoot realpath 봉쇄, get은 project.json에서 실효 프레임·감지 요약 계산.
+- 실기 — 상태 이력 참조(ZIP 실물 + MCP 4도구 실호출 PASS). 관찰: `export_motion_set`에 `destPath`를 줘도 반환 `zipPath`는 dataRoot `motion-exports/` 경로였음(복사 여부 미확인 — 후속 확인 항목, 기능 자체는 정상).
+- 커밋 — WO `6ba23d7c`, 병합 `2d7ea239`(로컬 전용). 상주 서버 재기동 대기.
+- **판정: PASS · 완료.** 제안 항목 6(스프라이트 시트+JSON 내보내기, 세트 단위)과 2단계 MCP 노출 충족. 이로써 대표 승인 권장 순서의 1·2단계 전부와 3단계 스파이크가 완료됐고, 남은 결정은 T-07(항목 5·6 구현 범위).
