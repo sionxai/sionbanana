@@ -77,6 +77,7 @@ const createProjectSchema = z
     normalizeScale: z.enum(normalizeScaleValues).optional(),
     normalizePivotX: z.enum(normalizePivotXValues).optional(),
     normalizePivotY: z.enum(normalizePivotYValues).optional(),
+    autoFlipRows: z.boolean().optional(),
     grid: gridSpecSchema,
     matte: matteSpecSchema.optional(),
     source: sourceSchema
@@ -297,6 +298,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       normalizeScale: payload.normalizeScale ?? "area",
       normalizePivotX: payload.normalizePivotX ?? "centroid",
       normalizePivotY: payload.normalizePivotY ?? "preserve",
+      autoFlipRows: payload.autoFlipRows ?? (payload.source.type === "upload" ? false : true),
       grid: payload.grid,
       matte
     });

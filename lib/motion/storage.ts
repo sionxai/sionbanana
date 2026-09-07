@@ -12,6 +12,7 @@ import {
   applyMatte,
   computeGrid,
   detectFrameRects,
+  detectMirroredRows,
   normalizeFrames,
   packSheet,
   sliceFrames
@@ -26,6 +27,7 @@ import {
   type Frame,
   type GridSpec,
   type MatteSpec,
+  type MirrorDetection,
   type MotionProject,
   type NormalizePivotX,
   type NormalizePivotY,
@@ -230,6 +232,8 @@ async function buildArtifacts(input: {
   matte: MatteSpec;
   controls: Frame[];
   controlsExplicit: boolean;
+  autoFlipRows: boolean;
+  previousMirrorDetection: MirrorDetection | null;
   animations: Animation[];
   animationsExplicit: boolean;
 }): Promise<BuildArtifacts> {
@@ -276,13 +280,31 @@ async function buildArtifacts(input: {
     sliced = await sliceFrames(input.raw, sourceRects);
   }
   const controls = frameControls(input.controls, sourceRects.length, input.controlsExplicit);
+  const matted =
+    input.sliceMode === "auto"
+      ? sliced
+      : await Promise.all(sliced.map(buffer => applyMatte(buffer, matte)));
+  let mirrorDetection = input.previousMirrorDetection;
+  const autoFlipped = new Set<number>();
+  if (input.autoFlipRows && !input.controlsExplicit) {
+    const detected = await detectMirroredRows(matted, grid.cols);
+    mirrorDetection = { enabled: true, rows: detected.rows };
+    for (let row = 1; row < detected.rows.length; row += 1) {
+      if (!detected.rows[row].mirrored) continue;
+      const start = row * grid.cols;
+      const end = Math.min(start + grid.cols, matted.length);
+      for (let index = start; index < end; index += 1) {
+        if (!controls.has(index)) autoFlipped.add(index);
+      }
+    }
+  }
   const prepared = await Promise.all(
-    sliced.map(async (buffer, index) => {
+    matted.map(async (buffer, index) => {
       const control = controls.get(index);
-      const oriented = control?.flipX ? await sharp(buffer).flop().png().toBuffer() : buffer;
-      const matted = input.sliceMode === "auto" ? oriented : await applyMatte(oriented, matte);
-      const analysis = await analyzeFrame(matted);
-      return { buf: matted, ...analysis, sourceY: sourceRects[index].y };
+      const flipX = control?.flipX ?? autoFlipped.has(index);
+      const oriented = flipX ? await sharp(buffer).flop().png().toBuffer() : buffer;
+      const analysis = await analyzeFrame(oriented);
+      return { buf: oriented, ...analysis, sourceY: sourceRects[index].y };
     })
   );
   const normalized = await normalizeFrames(prepared, {
@@ -305,7 +327,7 @@ async function buildArtifacts(input: {
       trim: frame.trim,
       pivot: frame.pivot,
       appliedScale: frame.appliedScale,
-      flipX: control?.flipX ?? false,
+      flipX: control?.flipX ?? autoFlipped.has(index),
       excluded: control?.excluded ?? false,
       durationMs: control?.durationMs ?? null
     };
@@ -329,6 +351,7 @@ async function buildArtifacts(input: {
     grid,
     canvas: normalized.canvas,
     matte,
+    mirrorDetection,
     frames,
     animations
   });
@@ -466,6 +489,7 @@ export async function createProject(input: {
   normalizeScale?: NormalizeScale;
   normalizePivotX?: NormalizePivotX;
   normalizePivotY?: NormalizePivotY;
+  autoFlipRows?: boolean;
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -492,6 +516,8 @@ export async function createProject(input: {
       matte: input.matte,
       controls: [],
       controlsExplicit: false,
+      autoFlipRows: input.autoFlipRows ?? false,
+      previousMirrorDetection: null,
       animations: [],
       animationsExplicit: false
     });
@@ -533,6 +559,8 @@ export async function rebuildProject(
     matte,
     controls,
     controlsExplicit: patch.frames !== undefined,
+    autoFlipRows: false,
+    previousMirrorDetection: current.mirrorDetection,
     animations,
     animationsExplicit: patch.animations !== undefined
   });
