@@ -11,9 +11,9 @@
 - [ ] T-01 **UNAPPROVED — implement 금지.** 미션 확장 개정안(v0.2.0) 승인 여부 결정 — "AI 고품질 미디어 제작 전반(이미지·영상·영화·CF·PPT + 스토리·시나리오)" 반영은 대표가 별도 승인하기 전 제안일 뿐이며 구현 범위가 아니다.
 - [x] T-02 1차 exact cleanup 승인·실행 — R3 Checker PASS 후 완전 병합·미사용 로컬 브랜치 2개만 `git branch -d`로 삭제했다. ignored 파일 또는 고유 커밋이 있는 worktree 3개와 연결 branch는 보존하며, 추가 삭제·prune·push는 새 승인 전까지 금지한다.
 - [ ] T-03 자격증명 노출 대응안 승인 여부 결정 — 사용처 확인 및 필요한 교체 범위를 먼저 확정한다.
-- [ ] T-04 모션에셋 결함 수정안 승인 여부 결정 — 4위상 프롬프트 중복과 2행 시트 미러링 진단을 바탕으로 수정 범위를 확정한다.
+- [x] T-04 모션에셋 결함 수정안 승인 — 2026-09-07 대표 지시("권장순서대로 수정해줘", 모션 디벨롭 제안 6항목 판정의 1순위)로 승인. 수정 범위 = `SB WO-007`(walk/run/idle 8위상 배분·jump/attack 단발 종료 문장·행 방향 지시 강화·2행 미러링 자동 감지→`flipX`). 후속 단계(프리셋 10종·재생 기본값·프레임 표시 → 모션 세트·베이스 결속·통합 내보내기 → 구간 재생성 스파이크)는 WO-008 이후로 순차 발행한다.
 - [ ] T-05 웹 유입 추진 여부 결정 — 현재 로컬·미배포 방침을 유지하면 보류한다. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.
-- [ ] T-06 `~/.codex/config.toml` 스키마 충돌 대응 방향 결정 — `[agents]` 블록(ChatGPT 데스크톱 앱 기록)이 codex CLI 0.144.0 파서와 충돌해 **codex CLI·MCP 기동 불능** (2026-08-21 실측, CEO는 임시 CODEX_HOME으로 우회 중). 앱이 소유한 파일이라 임의 수정 보류 — 앱 업데이트 대기 / CLI 채널 갱신 / 블록 수동 조정 중 택일 필요.
+- [ ] T-06 `~/.codex/config.toml` 스키마 충돌 대응 방향 결정 — `[agents]` 블록(ChatGPT 데스크톱 앱 기록)이 codex CLI 0.144.0 파서와 충돌해 **codex CLI·MCP 기동 불능** (2026-08-21 실측, CEO는 임시 CODEX_HOME으로 우회 중). 앱이 소유한 파일이라 임의 수정 보류 — 앱 업데이트 대기 / CLI 채널 갱신 / 블록 수동 조정 중 택일 필요. **2026-09-07 추가 실측:** codex CLI 0.153.4에서 동일 config로 `codex exec` 정상 기동(우회 불필요). 대표 확인 후 닫기 후보.
 
 > T-02의 위 exact local cleanup만 2026-08-17 대표 결정으로 승인·실행됐다. T-01·T-03~T-06과
 > T-02의 추가 삭제·prune·push는 미승인이며, 정식 작업지시는 아래 상태표에 `SB WO-###`로 기록한다.
@@ -22,7 +22,7 @@
 
 | 이름 | 전담 영역 | 현재 임무 | 이력 |
 |---|---|---|---|
-| CEO | 기획·전략·작업지시·검수·정본 관리 | SB WO-004 완료 · 후속(source 유니온·전역 스킬 영상 절) 백로그 관리 | 2026-08-07 취임 |
+| CEO | 기획·전략·작업지시·검수·정본 관리 | 모션에셋 디벨롭 프로그램 진행 — SB WO-007(T-04 수정) → WO-008(프리셋·재생·표시) → 세트/내보내기 → 구간 재생성 스파이크 | 2026-08-07 취임 |
 
 ## 상태표
 
@@ -33,6 +33,7 @@
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
 | SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 완료 | PASS · 체이닝 스모크 YAVG 3.16 · 병합 1ffdc4b3 |
+| SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 감지 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -361,6 +362,23 @@
 - 2026-09-02 21:1x KST — 대표 승인으로 `발행`. 워크트리 `.claude/worktrees/sb-wo-006-video-upload` (`claude/sb-wo-006-video-upload` @ `9dd7bfdb`) 생성, Maker 위임 가동.
 - 2026-09-02 21:3x KST — Maker 반환, porcelain 정확히 2파일 확인 → `검수`.
 - 2026-09-02 21:4x KST — CEO 재검증(구문·mcp-video 9/9·회귀 11/11) + 코드 정독 + 실기 스모크 PASS → `완료`. WO 커밋 `f389c72d`, 병합 `1ffdc4b3`.
+
+### SB WO-007 — 모션에셋 T-04 결함 수정 (4위상 중복 · 2행 미러링)
+
+- **ID:** `SB WO-007` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** T-04 진단(4위상 프롬프트 중복·2행 시트 미러링, 현황판 2026-08-12), 대표 승인(2026-09-07 "권장순서대로 수정해줘" — 모션 디벨롭 제안 6항목 판정의 권장 순서 1단계), `lib/motion/*` 현행 파이프라인
+- **목표:** (1) walk/run/idle 8위상 목록 + 프레임 수 균등 배분 + N>위상 수일 때 중간 포즈 문장으로 연속 중복 제거 (2) jump/attack에 루프 문장 대신 단발 종료 문장 (3) Direction 지시문의 행 단위 미러링 금지 강화(기존 "Do not mirror" 문장 유지) (4) 엔진 `detectMirroredRows`로 2행 이후 좌우 반전을 자동 감지해 해당 행 `flipX` 자동 적용 + `project.mirrorDetection` 기록(라우트 `autoFlipRows` 옵션, 업로드 시트 기본 비활성, 재빌드 시 재감지 없이 보존).
+- **배경:** COMPANY.md NOW-004(프리셋·모션 실물 검수)·DEC-005(모션은 핵심 자산의 후속 출력). 원인은 2026-08-12 진단으로 확정됐고 수정 범위만 T-04로 대기 중이었다. 이후 단계(프리셋 10종·세트·구간 재생성 스파이크)의 모든 생성 품질이 이 결함에 종속되므로 1순위.
+- **변경 범위:** `lib/motion/{prompt,engine,storage,types}.ts`, `app/api/motion/projects/route.ts`, `tests/motion-{prompt,engine,storage}.test.mjs` 8파일. MCP 스키마·UI·custom 프리셋 불변. 스펙 전문은 세션 스크래치패드 `wo007-spec.md`(감지 알고리즘: 48×48 alpha/luma descriptor, 행0 기준 dSame/dFlip 최소거리 비교, 행 점수 > 0.12 && 과반 양수).
+- **완료 기준:** 모션 테스트 5파일(`motion-prompt/engine/storage/mcp/export`) PASS + `tsc --noEmit` exit 0 (CEO 재실행) / 코드 정독(범위·결정성·하위호환) / CEO 실기 스모크: 워크트리 개발 서버(별도 포트·격리 데이터 디렉터리)로 walk·run·idle 4×2 실생성 → 프레임 간 근사중복 수(구 프롬프트 3002 서버 대비)·2행 방향·`mirrorDetection` 확인.
+- **금지:** 8파일 밖 수정, commit·push, npm install, 프리셋 추가, MCP 스키마 변경, 테스트 삭제·완화.
+- **위험등급:** R2 — 프롬프트 변경은 생성 품질에 직접 영향, 자동 반전은 오판 시 행 전체 반전(단 `flipX`로 사용자 가시·수동 복구 가능, 업로드 기본 비활성) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-007-motion-t04` 폐기.
+- **보고 형식:** WO-006과 동일.
+
+#### 상태 이력
+
+- 2026-09-07 10:3x KST — 대표 지시로 `발행`. 워크트리 `.claude/worktrees/sb-wo-007-motion-t04` (`claude/sb-wo-007-motion-t04` @ `104e894d`, base `feature/webtoon-studio`) 생성, 시작 porcelain 0줄, Maker 위임 가동. codex CLI 0.153.4가 사용자 config로 직접 기동됨(T-06 우회 불필요).
 
 ## 검수 로그
 
