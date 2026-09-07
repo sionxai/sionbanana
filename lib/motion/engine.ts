@@ -62,6 +62,30 @@ export type DetectedFrameRects = {
   confidence: number;
 };
 
+export type MirrorRowResult = {
+  mirrored: boolean;
+  score: number;
+};
+
+export type MirrorDetectionResult = {
+  rows: MirrorRowResult[];
+};
+
+export type RepeatedRowResult = {
+  repeated: boolean;
+  ratio: number;
+};
+
+export type RepeatedRowDetectionResult = {
+  rows: RepeatedRowResult[];
+};
+
+type MirrorDescriptor = {
+  alpha: Uint8Array;
+  luma: Float32Array;
+  size: number;
+};
+
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new RangeError(`${name} must be an integer greater than zero.`);
@@ -313,6 +337,195 @@ async function decodeRgba(imageBuf: Buffer): Promise<ImageInfo> {
     width: result.info.width,
     height: result.info.height
   };
+}
+
+async function createMirrorDescriptor(
+  frame: Buffer,
+  size: number
+): Promise<MirrorDescriptor | null> {
+  const image = await decodeRgba(frame);
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let index = 0; index < image.width * image.height; index += 1) {
+    if (image.data[index * 4 + 3] <= ALPHA_THRESHOLD) continue;
+    const x = index % image.width;
+    const y = Math.floor(index / image.width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (maxX < 0) return null;
+
+  const resized = await sharp(frame)
+    .ensureAlpha()
+    .extract({ left: minX, top: minY, width: maxX - minX + 1, height: maxY - minY + 1 })
+    .resize({
+      width: size,
+      height: size,
+      fit: "contain",
+      kernel: sharp.kernel.lanczos3,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const alpha = new Uint8Array(size * size);
+  const luma = new Float32Array(size * size);
+  for (let index = 0; index < alpha.length; index += 1) {
+    const offset = index * resized.info.channels;
+    const opacity = resized.data[offset + 3] / 255;
+    if (resized.data[offset + 3] <= ALPHA_THRESHOLD) continue;
+    alpha[index] = 1;
+    luma[index] =
+      ((0.2126 * resized.data[offset] +
+        0.7152 * resized.data[offset + 1] +
+        0.0722 * resized.data[offset + 2]) /
+        255) *
+      opacity;
+  }
+  return { alpha, luma, size };
+}
+
+function mirrorDescriptorDistance(
+  first: MirrorDescriptor,
+  second: MirrorDescriptor,
+  firstFlopped: boolean
+): number {
+  let alphaDistance = 0;
+  let lumaDistance = 0;
+  for (let y = 0; y < first.size; y += 1) {
+    for (let x = 0; x < first.size; x += 1) {
+      const firstIndex = y * first.size + (firstFlopped ? first.size - 1 - x : x);
+      const secondIndex = y * second.size + x;
+      alphaDistance += Math.abs(first.alpha[firstIndex] - second.alpha[secondIndex]);
+      lumaDistance += Math.abs(first.luma[firstIndex] - second.luma[secondIndex]);
+    }
+  }
+  const count = first.size * first.size;
+  return alphaDistance / count + 0.5 * (lumaDistance / count);
+}
+
+export async function detectMirroredRows(
+  frames: Buffer[],
+  cols: number,
+  opts: { size?: number; threshold?: number; minDistance?: number } = {}
+): Promise<MirrorDetectionResult> {
+  assertPositiveInteger(cols, "cols");
+  if (frames.length === 0) return { rows: [] };
+
+  const size = opts.size ?? 48;
+  assertPositiveInteger(size, "opts.size");
+  const threshold = opts.threshold ?? 0.12;
+  if (!Number.isFinite(threshold)) {
+    throw new RangeError("opts.threshold must be finite.");
+  }
+  // Absolute distance floor: near-identical frames cannot produce large normalized scores from resampling noise.
+  const minDistance = opts.minDistance ?? 0.02;
+  if (!Number.isFinite(minDistance) || minDistance <= 0) {
+    throw new RangeError("opts.minDistance must be a positive finite number.");
+  }
+
+  const descriptors = await Promise.all(frames.map(frame => createMirrorDescriptor(frame, size)));
+  const rowCount = Math.ceil(frames.length / cols);
+  const rows: MirrorRowResult[] = [{ mirrored: false, score: 0 }];
+  const referenceFrames = descriptors.slice(0, Math.min(cols, descriptors.length)).filter(
+    (descriptor): descriptor is MirrorDescriptor => descriptor !== null
+  );
+
+  for (let row = 1; row < rowCount; row += 1) {
+    const start = row * cols;
+    const currentFrames = descriptors
+      .slice(start, Math.min(start + cols, descriptors.length))
+      .filter((descriptor): descriptor is MirrorDescriptor => descriptor !== null);
+    if (referenceFrames.length === 0 || currentFrames.length === 0) {
+      rows.push({ mirrored: false, score: 0 });
+      continue;
+    }
+
+    const scores = currentFrames.map(frame => {
+      const same = Math.min(
+        ...referenceFrames.map(reference => mirrorDescriptorDistance(frame, reference, false))
+      );
+      const flipped = Math.min(
+        ...referenceFrames.map(reference => mirrorDescriptorDistance(frame, reference, true))
+      );
+      return (same - flipped) / Math.max(same, flipped, minDistance);
+    });
+    const score = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    rows.push({
+      mirrored: score > threshold && scores.filter(value => value > 0).length > scores.length / 2,
+      score
+    });
+  }
+  return { rows };
+}
+
+export async function detectRepeatedRows(
+  frames: Buffer[],
+  cols: number,
+  opts: { size?: number; threshold?: number; minDistance?: number } = {}
+): Promise<RepeatedRowDetectionResult> {
+  assertPositiveInteger(cols, "cols");
+  if (frames.length === 0) return { rows: [] };
+
+  const size = opts.size ?? 48;
+  assertPositiveInteger(size, "opts.size");
+  const threshold = opts.threshold ?? 0.4;
+  if (!Number.isFinite(threshold)) {
+    throw new RangeError("opts.threshold must be finite.");
+  }
+  const minDistance = opts.minDistance ?? 0.02;
+  if (!Number.isFinite(minDistance) || minDistance <= 0) {
+    throw new RangeError("opts.minDistance must be a positive finite number.");
+  }
+
+  const descriptors = await Promise.all(frames.map(frame => createMirrorDescriptor(frame, size)));
+  const rowCount = Math.ceil(frames.length / cols);
+  const rows: RepeatedRowResult[] = Array.from({ length: rowCount }, () => ({
+    repeated: false,
+    ratio: 0
+  }));
+  const withinDistances: number[] = [];
+
+  for (let row = 0; row < rowCount; row += 1) {
+    const start = row * cols;
+    const end = Math.min(start + cols, descriptors.length);
+    for (let index = start + 1; index < end; index += 1) {
+      const previous = descriptors[index - 1];
+      const current = descriptors[index];
+      if (previous && current) {
+        withinDistances.push(mirrorDescriptorDistance(previous, current, false));
+      }
+    }
+  }
+
+  if (withinDistances.length === 0) return { rows };
+  const withinMean =
+    withinDistances.reduce((sum, distance) => sum + distance, 0) / withinDistances.length;
+  if (withinMean < minDistance) return { rows };
+
+  for (let row = 1; row < rowCount; row += 1) {
+    const start = row * cols;
+    const end = Math.min(start + cols, descriptors.length);
+    const acrossDistances: number[] = [];
+    for (let index = start; index < end; index += 1) {
+      const reference = descriptors[index - start];
+      const current = descriptors[index];
+      if (reference && current) {
+        acrossDistances.push(mirrorDescriptorDistance(reference, current, false));
+      }
+    }
+    if (acrossDistances.length === 0) continue;
+
+    const acrossMean =
+      acrossDistances.reduce((sum, distance) => sum + distance, 0) / acrossDistances.length;
+    const ratio = acrossMean / withinMean;
+    rows[row] = { repeated: ratio < threshold, ratio };
+  }
+  return { rows };
 }
 
 function encodeRgba(image: ImageInfo): Promise<Buffer> {

@@ -6,22 +6,34 @@ export type MotionActionPreset = "walk" | "run" | "idle" | "jump" | "attack" | "
 
 const ACTION_PHASES: Record<Exclude<MotionActionPreset, "custom">, readonly string[]> = {
   walk: [
-    "contact pose with the leading heel touching down and the trailing toe extended",
-    "down pose as the body absorbs weight over the leading foot",
-    "passing pose with the rear foot moving past the planted leg",
-    "up pose with the body lifted and the next heel reaching forward"
+    "contact pose, right foot forward with the heel just touching down, left toe extended behind",
+    "down pose, body at its lowest as the right leg absorbs the weight",
+    "passing pose, left foot lifted and swinging past the planted right leg, body rising",
+    "up pose, body at its highest on the ball of the right foot, left leg reaching forward",
+    "contact pose, left foot forward with the heel just touching down, right toe extended behind",
+    "down pose, body at its lowest as the left leg absorbs the weight",
+    "passing pose, right foot lifted and swinging past the planted left leg, body rising",
+    "up pose, body at its highest on the ball of the left foot, right leg reaching forward"
   ],
   run: [
-    "run contact pose with one foot landing ahead of the body",
-    "compression pose as the landing leg absorbs the impact",
-    "passing pose as the free leg drives forward beneath the body",
-    "airborne pose with both feet clear of the ground"
+    "run contact pose, right foot landing ahead of the body, left leg trailing far behind",
+    "compression pose, right leg bending deeply as it absorbs the landing",
+    "drive pose, right leg pushing off behind, left knee driving forward and up",
+    "airborne pose, both feet off the ground, right leg trailing, left leg reaching forward",
+    "run contact pose, left foot landing ahead of the body, right leg trailing far behind",
+    "compression pose, left leg bending deeply as it absorbs the landing",
+    "drive pose, left leg pushing off behind, right knee driving forward and up",
+    "airborne pose, both feet off the ground, left leg trailing, right leg reaching forward"
   ],
   idle: [
-    "neutral idle pose at the top of a gentle breath",
-    "subtle settling pose as the torso begins to lower",
-    "lowest breathing pose with relaxed secondary motion",
-    "subtle rising pose returning toward neutral"
+    "neutral idle pose at the top of a breath, chest lifted",
+    "slight settling pose, shoulders beginning to relax downward",
+    "lowering pose, chest sinking as the breath goes out",
+    "lowest breathing pose, shoulders dropped, hair and cloth settling",
+    "slight lifting pose, chest beginning to rise again",
+    "rising pose, shoulders lifting with the incoming breath",
+    "near-top pose, chest almost fully lifted, hair and cloth trailing",
+    "top pose with a tiny weight shift, returning toward the neutral stance"
   ],
   jump: [
     "anticipation crouch before takeoff",
@@ -58,16 +70,28 @@ function requirePositiveInteger(value: number, name: string): void {
   }
 }
 
+export function isCyclicAction(action: MotionActionPreset): boolean {
+  return action === "walk" || action === "run" || action === "idle";
+}
+
 function buildPresetSequence(action: Exclude<MotionActionPreset, "custom">, frameCount: number): string {
   const phases = ACTION_PHASES[action];
-  const isCyclic = action === "walk" || action === "run" || action === "idle";
+  const isCyclic = isCyclicAction(action);
+  let previousPhaseIndex = -1;
   const descriptions = Array.from({ length: frameCount }, (_, index) => {
     const phaseIndex = isCyclic
-      ? index % phases.length
+      ? Math.floor((index * phases.length) / frameCount)
       : frameCount === 1
         ? 0
         : Math.round((index * (phases.length - 1)) / (frameCount - 1));
-    return `${index + 1}. ${phases[phaseIndex]}`;
+    const next = isCyclic
+      ? (phaseIndex + 1) % phases.length
+      : Math.min(phaseIndex + 1, phases.length - 1);
+    const description = phaseIndex === previousPhaseIndex
+      ? `a pose halfway between (${phases[phaseIndex]}) and (${phases[next]})`
+      : phases[phaseIndex];
+    previousPhaseIndex = phaseIndex;
+    return `${index + 1}. ${description}`;
   });
   return `Render this ${frameCount}-frame ${action} sequence in order: ${descriptions.join(" ")}`;
 }
@@ -102,8 +126,10 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
       `Render ${frameCount} consecutive frames of the described action in chronological order. ` +
       "The final frame must flow naturally back into the first frame as a seamless loop.";
   }
-  if (input.frames || (input.action && input.action !== "custom")) {
+  if (input.frames || (input.action && isCyclicAction(input.action))) {
     sequence += " The final frame must flow naturally back into the first frame as a seamless loop.";
+  } else if (input.action && input.action !== "custom") {
+    sequence += " This is a one-shot action: the last frame is the settled end pose and must not return to the first frame.";
   }
 
   const style = input.style?.trim() || DEFAULT_STYLE;
@@ -115,7 +141,7 @@ export function buildSheetPrompt(input: BuildSheetPromptInput): string {
       `No gradients, shadows, texture, lighting variation, or anti-background decoration. The subject itself must contain no ${name}.`,
     `Layout: exactly ${input.cols}x${input.rows} equal cells with one complete subject per cell and the same scale in every cell. ` +
       "No grid lines, borders, labels, numbers, captions, or other text.",
-    "Direction: every frame must face the same direction, with the head pointing right. Do not mirror any row or any frame.",
+    "Direction: the subject faces the RIGHT edge of the canvas in every cell of every row, including the second and later rows; nose, gaze, and leading foot all point right. Read the cells left-to-right, then top-to-bottom; row 2 continues the sequence facing the same way as row 1 (no snake order, no return trip). Do not mirror any row or any frame.",
     sequence,
     "Identity: show the exact same subject in every frame, preserving colors, proportions, and size; only the pose may change."
   ];

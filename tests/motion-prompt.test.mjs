@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildSheetPrompt } from "@/lib/motion/prompt";
+import { buildSheetPrompt, isCyclicAction } from "@/lib/motion/prompt";
+
+function presetDescriptions(action, cols, rows) {
+  const prompt = buildSheetPrompt({ description: action, cols, rows, action });
+  const sequence = prompt.split("\n").find(line => line.startsWith("Render this "));
+  const numbered = sequence
+    .replace(/^.*?sequence in order: /, "")
+    .replace(/ (?:The final frame|This is a one-shot action:).*$/, "");
+  return numbered.split(/(?:^| )\d+\. /).slice(1);
+}
 
 test("reference directive is prepended only when hasReference is true", () => {
   const referenced = buildSheetPrompt({
@@ -76,6 +85,11 @@ test("custom action keeps the description generic instead of forcing preset phas
 
   assert.match(prompt, /6 consecutive frames/);
   assert.doesNotMatch(prompt, /contact pose|compression pose|anticipation crouch|impact pose/i);
+  assert.match(prompt, /seamless loop/);
+  assert.equal(
+    prompt,
+    buildSheetPrompt({ description: "spins an umbrella", cols: 3, rows: 2 })
+  );
 });
 
 test("all prompt modes default to character green and retain unified direction requirements", () => {
@@ -95,7 +109,9 @@ test("all prompt modes default to character green and retain unified direction r
     assert.match(prompt, /#00FF00/);
     assert.match(prompt, /green/);
     assert.doesNotMatch(prompt, /#FF00FF|magenta/);
-    assert.match(prompt, /same direction/i);
+    assert.match(prompt, /every cell of every row/i);
+    assert.match(prompt, /facing the same way as row 1/i);
+    assert.match(prompt, /no snake order/i);
     assert.match(prompt, /Do not mirror/i);
   }
 });
@@ -112,4 +128,77 @@ test("explicit frame descriptions take precedence over an action preset", () => 
   assert.match(prompt, /1\. first authored pose/);
   assert.match(prompt, /2\. second authored pose/);
   assert.doesNotMatch(prompt, /contact pose|down pose|passing pose|up pose/i);
+  assert.match(prompt, /seamless loop/);
+});
+
+test("cyclic presets use eight distinct phase descriptions", () => {
+  for (const action of ["walk", "run", "idle"]) {
+    const descriptions = presetDescriptions(action, 4, 2);
+    assert.equal(descriptions.length, 8);
+    assert.equal(new Set(descriptions).size, 8, action);
+    assert.ok(descriptions.every(description => !description.includes("halfway between")));
+  }
+});
+
+test("four-frame walk evenly samples the eight phases without interpolation", () => {
+  const descriptions = presetDescriptions("walk", 2, 2);
+  assert.equal(new Set(descriptions).size, 4);
+  assert.deepEqual(descriptions, [
+    "contact pose, right foot forward with the heel just touching down, left toe extended behind",
+    "passing pose, left foot lifted and swinging past the planted right leg, body rising",
+    "contact pose, left foot forward with the heel just touching down, right toe extended behind",
+    "passing pose, right foot lifted and swinging past the planted left leg, body rising"
+  ]);
+});
+
+test("twelve-frame walk interpolates repeated phase slots without adjacent duplicates", () => {
+  const descriptions = presetDescriptions("walk", 4, 3);
+  assert.equal(descriptions.length, 12);
+  assert.ok(descriptions.some(description => description.includes("halfway between")));
+  for (let index = 1; index < descriptions.length; index += 1) {
+    assert.notEqual(descriptions[index], descriptions[index - 1]);
+  }
+});
+
+test("one-shot presets settle at the end while cyclic presets loop", () => {
+  for (const action of ["jump", "attack"]) {
+    const prompt = buildSheetPrompt({ description: action, cols: 4, rows: 2, action });
+    assert.doesNotMatch(prompt, /seamless loop/);
+    assert.match(prompt, /one-shot action/);
+    assert.match(prompt, /last frame is the settled end pose and must not return to the first frame/);
+  }
+  const walk = buildSheetPrompt({ description: "walk", cols: 4, rows: 2, action: "walk" });
+  assert.match(walk, /seamless loop/);
+  assert.doesNotMatch(walk, /one-shot/);
+});
+
+test("explicit frames keep loop instructions even with a one-shot action", () => {
+  const prompt = buildSheetPrompt({
+    description: "authored jump",
+    cols: 2,
+    rows: 1,
+    action: "jump",
+    frames: ["first authored pose", "second authored pose"]
+  });
+  assert.match(prompt, /seamless loop/);
+  assert.doesNotMatch(prompt, /one-shot action/);
+});
+
+test("one-shot phase sampling preserves the first and last poses", () => {
+  assert.deepEqual(presetDescriptions("jump", 1, 1), ["anticipation crouch before takeoff"]);
+  assert.deepEqual(presetDescriptions("jump", 2, 2), [
+    "anticipation crouch before takeoff",
+    "airborne ascent approaching the apex",
+    "descending pose preparing for ground contact",
+    "recovery pose rising back toward the starting stance"
+  ]);
+  assert.deepEqual(presetDescriptions("attack", 2, 1), [
+    "anticipation pose winding up the attack",
+    "recovery pose returning toward the starting stance"
+  ]);
+});
+
+test("isCyclicAction recognizes only walk, run and idle", () => {
+  for (const action of ["walk", "run", "idle"]) assert.equal(isCyclicAction(action), true);
+  for (const action of ["jump", "attack", "custom"]) assert.equal(isCyclicAction(action), false);
 });

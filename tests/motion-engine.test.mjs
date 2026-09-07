@@ -13,6 +13,8 @@ import {
   applyMatte,
   computeGrid,
   detectFrameRects,
+  detectMirroredRows,
+  detectRepeatedRows,
   normalizeFrames
 } from "@/lib/motion/engine";
 import { createProject, rebuildProject } from "@/lib/motion/storage";
@@ -87,6 +89,29 @@ async function rgbaPng(width, height, paint) {
     data[offset + 3] = alpha;
   });
   return sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function gammaFrame(y0, flipped = false) {
+  const frame = await rgbaPng(48, 48, (data, set) => {
+    const setGammaPixel = (x, y) => set(flipped ? 47 - x : x, y, 20, 80, 180);
+    for (let y = 8; y <= 40; y += 1) {
+      for (let x = 10; x <= 14; x += 1) setGammaPixel(x, y);
+    }
+    for (let y = y0; y <= y0 + 4; y += 1) {
+      for (let x = 14; x <= 30; x += 1) setGammaPixel(x, y);
+    }
+  });
+  return frame;
+}
+
+async function circleFrame() {
+  return rgbaPng(48, 48, (data, set) => {
+    for (let y = 0; y < 48; y += 1) {
+      for (let x = 0; x < 48; x += 1) {
+        if ((x - 23.5) ** 2 + (y - 23.5) ** 2 <= 12 ** 2) set(x, y, 20, 80, 180);
+      }
+    }
+  });
 }
 
 async function twoFrameSheet() {
@@ -276,6 +301,106 @@ test("detectFrameRects reports low confidence when expected grid does not match"
     expectedRows: 2
   });
   assert.equal(detected.confidence, 0.3);
+});
+
+test("detectMirroredRows flags a horizontally mirrored second row of asymmetric frames", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const mirroredRow = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0, true)));
+  const result = await detectMirroredRows([...row, ...mirroredRow], 4);
+
+  assert.equal(result.rows[0].mirrored, false);
+  assert.equal(result.rows[1].mirrored, true);
+  assert.ok(result.rows[1].score > 0.12);
+});
+
+test("detectMirroredRows leaves matching rows, symmetric rows, and empty rows unflagged", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const matching = await detectMirroredRows([...row, ...row], 4);
+  assert.equal(matching.rows[1].mirrored, false);
+
+  const circle = await circleFrame();
+  const symmetric = await detectMirroredRows(Array.from({ length: 8 }, () => circle), 4);
+  assert.equal(symmetric.rows[0].mirrored, false);
+  assert.equal(symmetric.rows[1].mirrored, false);
+  // Identical symmetric frames give dSame = 0 while the resampler leaves a small mirror asymmetry,
+  // so the normalized score is <= 0 (never positive) rather than exactly 0.
+  assert.ok(symmetric.rows[1].score <= 0);
+
+  const blank = await rgbaPng(48, 48, () => {});
+  const empty = await detectMirroredRows([...row, blank, blank, blank, blank], 4);
+  assert.deepEqual(empty.rows[1], { mirrored: false, score: 0 });
+});
+
+test("detectMirroredRows handles empty references, partial rows, and strict thresholds", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const mirrored = await Promise.all([8, 12].map(y0 => gammaFrame(y0, true)));
+  const blank = await rgbaPng(48, 48, () => {});
+
+  const missingReference = await detectMirroredRows([blank, blank, blank, blank, ...mirrored], 4);
+  assert.deepEqual(missingReference.rows[1], { mirrored: false, score: 0 });
+
+  const partial = await detectMirroredRows([...row, ...mirrored], 4);
+  assert.equal(partial.rows.length, 2);
+  assert.equal(partial.rows[1].mirrored, true);
+
+  const strictThreshold = await detectMirroredRows([...row, ...mirrored], 4, { threshold: 1 });
+  assert.equal(strictThreshold.rows[1].mirrored, false);
+
+  const minorityMirrored = await detectMirroredRows(
+    [...row, await gammaFrame(8, true), await gammaFrame(12), await gammaFrame(16)],
+    4
+  );
+  assert.equal(minorityMirrored.rows[1].mirrored, false);
+});
+
+test("detectMirroredRows rejects a nonpositive column count", async () => {
+  await assert.rejects(detectMirroredRows([], 0), RangeError);
+});
+
+test("detectRepeatedRows compares each row against the first row's motion", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const cloned = await detectRepeatedRows([...row, ...row], 4);
+  assert.deepEqual(cloned.rows[0], { repeated: false, ratio: 0 });
+  assert.equal(cloned.rows[1].repeated, true);
+  assert.ok(cloned.rows[1].ratio < 0.1);
+
+  const variant = await Promise.all([9, 13, 17, 21].map(y0 => gammaFrame(y0)));
+  const nearClone = await detectRepeatedRows([...row, ...variant], 4);
+  assert.equal(nearClone.rows[1].repeated, true);
+  assert.ok(nearClone.rows[1].ratio < 0.4);
+
+  const distinct = await Promise.all([28, 32, 36, 40].map(y0 => gammaFrame(y0)));
+  const differentRow = await detectRepeatedRows([...row, ...distinct], 4);
+  assert.equal(differentRow.rows[1].repeated, false);
+  assert.ok(differentRow.rows[1].ratio > 0.6);
+});
+
+test("detectRepeatedRows handles blank descriptors, partial rows, and option boundaries", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const circle = await circleFrame();
+  const symmetric = await detectRepeatedRows(Array.from({ length: 8 }, () => circle), 4);
+  assert.deepEqual(symmetric.rows, [
+    { repeated: false, ratio: 0 },
+    { repeated: false, ratio: 0 }
+  ]);
+
+  const blank = await rgbaPng(48, 48, () => {});
+  const blankRow = await detectRepeatedRows([...row, blank, blank, blank, blank], 4);
+  assert.deepEqual(blankRow.rows[1], { repeated: false, ratio: 0 });
+  assert.deepEqual(await detectRepeatedRows([], 4), { rows: [] });
+
+  const partial = await detectRepeatedRows([...row, ...row.slice(0, 2)], 4);
+  assert.equal(partial.rows.length, 2);
+  assert.equal(partial.rows[1].repeated, true);
+
+  const thresholdBoundary = await detectRepeatedRows([...row, ...row], 4, {
+    threshold: 0
+  });
+  assert.equal(thresholdBoundary.rows[1].repeated, false);
+  await assert.rejects(detectRepeatedRows([], 0), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { size: 0 }), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { threshold: Number.NaN }), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { minDistance: 0 }), RangeError);
 });
 
 test("parseMotionProject treats projects without slicing fields as legacy grid mode", () => {
