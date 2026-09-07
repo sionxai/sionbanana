@@ -62,6 +62,7 @@ const sourceSchema = z.discriminatedUnion("type", [
       type: z.literal("generate"),
       prompt: z.string().trim().min(1).max(20_000),
       action: actionSchema.optional(),
+      style: z.string().trim().max(400).optional(),
       subjectType: z.enum(subjectTypeValues).default("character")
     })
     .strict(),
@@ -70,6 +71,7 @@ const sourceSchema = z.discriminatedUnion("type", [
       type: z.literal("reference"),
       prompt: z.string().trim().min(1).max(20_000),
       action: actionSchema.optional(),
+      style: z.string().trim().max(400).optional(),
       subjectType: z.enum(subjectTypeValues).default("character"),
       referenceImage: referenceSourceSchema
     })
@@ -180,6 +182,7 @@ async function generateSheet(
   rows: number,
   options: {
     action?: MotionActionPreset;
+    style?: string;
     subjectType?: SubjectType;
     referenceImage?: z.infer<typeof referenceSourceSchema>;
   } = {}
@@ -191,6 +194,7 @@ async function generateSheet(
     rows,
     hasReference,
     action: options.action,
+    style: options.style,
     subjectType: options.subjectType
   });
   const headers = new Headers(request.headers);
@@ -277,6 +281,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         payload.grid.rows,
         {
           action: payload.source.action,
+          style: payload.source.style,
           subjectType: payload.source.subjectType,
           referenceImage: payload.source.referenceImage
         }
@@ -287,7 +292,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         payload.source.prompt,
         payload.grid.cols,
         payload.grid.rows,
-        { action: payload.source.action, subjectType: payload.source.subjectType }
+        {
+          action: payload.source.action,
+          style: payload.source.style,
+          subjectType: payload.source.subjectType
+        }
       );
     }
     const matte = matteSpecSchema.parse(
