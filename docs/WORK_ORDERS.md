@@ -33,7 +33,7 @@
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
 | SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 완료 | PASS · 체이닝 스모크 YAVG 3.16 · 병합 1ffdc4b3 |
-| SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 감지 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 감지·행 반복 자동 제외 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 검수(2차 라운드 진행) | 1차 79/79·미러링 실물 검증 1/1 |
 
 ## 지시서
 
@@ -379,6 +379,8 @@
 #### 상태 이력
 
 - 2026-09-07 10:3x KST — 대표 지시로 `발행`. 워크트리 `.claude/worktrees/sb-wo-007-motion-t04` (`claude/sb-wo-007-motion-t04` @ `104e894d`, base `feature/webtoon-studio`) 생성, 시작 porcelain 0줄, Maker 위임 가동. codex CLI 0.153.4가 사용자 config로 직접 기동됨(T-06 우회 불필요).
+- 2026-09-07 10:45 KST — Maker 1차 반환(정확히 8파일, "구현 완료 / 검증 미실행" — 샌드박스 키체인 -50). CEO 재실행: 79건 중 1건 실패(대칭 도형 점수 단언). 원인 = sharp 리샘플의 좌우 미세 비대칭으로 동일 프레임 행은 dSame=0 → 정규화 점수가 -1로 고정. 조치: 엔진 분모에 절대 하한 0.02 추가(잡음 기반 반전 차단, CEO 직접 4줄) + 테스트 단언 `|score|<0.05` → `score<=0`(양수 금지, 보호 조건 유지·이유 주석). → **79/79 · tsc 0** → `검수`. 1차 체크포인트 커밋 `3d4be759`.
+- 2026-09-07 10:46~10:55 KST — CEO 실기 스모크(워크트리 dev 서버 3012, 격리 데이터 디렉터리; 구 프롬프트 기준선은 3002). **미러링:** 신 프롬프트 walk-1 원본 2행이 실제로 왼쪽을 향함 → `mirrorDetection` 점수 0.71로 자동 반전, 파생 8프레임 전부 오른쪽 향함(결함 B 실물 검증 1/1; 구 2건·신 나머지 6건은 미러링 없음, 점수 -0.53~-0.91). **복제:** 행 반복 비율(행간 (i,i+4) 평균거리 ÷ 행내 인접 평균거리) — 구 walk 0.46·0.34 / 신 walk 0.28·0.47 / 근·원 다리 문구 walk 0.46·0.37 / 신 run **0.08**(2행이 1행과 픽셀 동일) / idle 1.37·attack 2.00·reload 1.28. 결론: **4위상 복제는 프롬프트 문구가 아니라 모델 성향**(8위상·근원다리 문구 모두 무효, 7/7). → 결함 A 실효 수정을 위해 같은 워크트리에서 **2차 라운드 발행**: 엔진 `detectRepeatedRows`(비율<0.4) + `project.duplicateDetection` + 순환 프리셋 생성 시 반복 행 자동 `excluded`(라우트 `autoExcludeRepeatedRows`, 업로드·단발·custom 기본 off). 스펙 `wo007-round2-spec.md`, 왕복 2/2.
 
 ## 검수 로그
 
