@@ -186,7 +186,8 @@ function resolveAnimations(
   animations: Animation[],
   frameCount: number,
   explicit: boolean,
-  fallbackName: string
+  fallbackName: string,
+  defaultAnimation?: { fps?: number; loop?: Animation["loop"] }
 ): Animation[] {
   const parsed = animations.map(animation => animationSchema.parse(animation));
   if (explicit) {
@@ -215,8 +216,8 @@ function resolveAnimations(
     {
       name: fallbackName,
       frameIndices: Array.from({ length: frameCount }, (_, index) => index),
-      fps: 12,
-      loop: "loop"
+      fps: defaultAnimation?.fps ?? 12,
+      loop: defaultAnimation?.loop ?? "loop"
     }
   ];
 }
@@ -240,6 +241,7 @@ async function buildArtifacts(input: {
   previousDuplicateDetection: DuplicateDetection | null;
   animations: Animation[];
   animationsExplicit: boolean;
+  defaultAnimation?: { fps?: number; loop?: Animation["loop"] };
 }): Promise<BuildArtifacts> {
   const requestedGrid = gridSpecSchema.parse(input.grid);
   const matte = withDefaultKeyColor(input.matte);
@@ -362,7 +364,8 @@ async function buildArtifacts(input: {
     input.animations,
     frames.length,
     input.animationsExplicit,
-    input.name
+    input.name,
+    input.defaultAnimation
   );
   const project = parseMotionProject({
     id: input.id,
@@ -518,6 +521,7 @@ export async function createProject(input: {
   normalizePivotY?: NormalizePivotY;
   autoFlipRows?: boolean;
   autoExcludeRepeatedRows?: boolean;
+  defaultAnimation?: { fps?: number; loop?: "loop" | "pingpong" | "once" };
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -549,7 +553,8 @@ export async function createProject(input: {
       autoExcludeRepeatedRows: input.autoExcludeRepeatedRows ?? false,
       previousDuplicateDetection: null,
       animations: [],
-      animationsExplicit: false
+      animationsExplicit: false,
+      defaultAnimation: input.defaultAnimation
     });
     await installNewProject(directory, artifacts);
     return artifacts.project;

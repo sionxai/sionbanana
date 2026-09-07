@@ -9,6 +9,7 @@ import {
   createMotion,
   getMotion,
   listMotion,
+  motionCreateInputSchema,
   TOOL_NAMES
 } from "../scripts/mcp-server.mjs";
 
@@ -56,6 +57,67 @@ test("create_motion mock returns a running job without a worker", async t => {
     mocked: true
   });
   await assert.rejects(fs.access(path.join(context.dataRoot, "motion-jobs")));
+});
+
+test("create_motion input accepts new presets and rejects unknown actions", () => {
+  for (const action of ["reload", "getup"]) {
+    const result = motionCreateInputSchema.safeParse({
+      name: action,
+      grid: { cols: 4, rows: 2 },
+      source: { type: "generate", prompt: action, action }
+    });
+    assert.equal(result.success, true, action);
+  }
+  assert.equal(
+    motionCreateInputSchema.safeParse({
+      name: "dance",
+      grid: { cols: 4, rows: 2 },
+      source: { type: "generate", prompt: "dance", action: "dance" }
+    }).success,
+    false
+  );
+});
+
+test("create_motion sends advanced motion controls to the route request body", async t => {
+  const context = await motionFixture(t);
+  context.spawnImpl = () => ({
+    once() {
+      return this;
+    },
+    unref() {}
+  });
+  const result = await createMotion(
+    {
+      name: "advanced reload",
+      grid: { cols: 4, rows: 2 },
+      source: { type: "generate", prompt: "reload", action: "reload" },
+      advanced: {
+        autoFlipRows: true,
+        autoExcludeRepeatedRows: true,
+        fps: 8,
+        loop: "once"
+      }
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "motion-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.deepEqual(
+    {
+      autoFlipRows: job.request.autoFlipRows,
+      autoExcludeRepeatedRows: job.request.autoExcludeRepeatedRows,
+      fps: job.request.fps,
+      loop: job.request.loop
+    },
+    {
+      autoFlipRows: true,
+      autoExcludeRepeatedRows: true,
+      fps: 8,
+      loop: "once"
+    }
+  );
 });
 
 test("get_motion resolves an expired running job without a worker", async t => {
@@ -110,6 +172,15 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
     createdAtIso: "2026-07-22T00:00:00.000Z",
     sliceConfidence: 0.91,
     canvas: { w: 128, h: 128 },
+    mirrorDetection: {
+      enabled: true,
+      rows: [{ mirrored: false, score: 0.1 }, { mirrored: true, score: 0.98 }]
+    },
+    duplicateDetection: {
+      enabled: true,
+      rows: [{ repeated: false, ratio: 0.1 }, { repeated: true, ratio: 0.99 }],
+      excludedFrames: [2, 3]
+    },
     frames: [{ index: 0 }, { index: 1 }]
   };
   await writeJson(path.join(context.dataRoot, "motion-jobs", `${jobId}.json`), {
@@ -125,6 +196,8 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
   assert.equal(result.ok, true);
   assert.equal(result.status, "ready");
   assert.deepEqual(result.project, project);
+  assert.deepEqual(result.mirrorDetection, { mirroredRows: [1] });
+  assert.deepEqual(result.duplicateDetection, { repeatedRows: [1], excludedFrames: [2, 3] });
   assert.equal(result.sliceConfidence, 0.91);
   assert.equal(path.isAbsolute(result.paths.dir), true);
   assert.equal(path.isAbsolute(result.paths.sheet), true);

@@ -57,7 +57,20 @@ const generateManyJobSchema = z.object({
   referenceSlug: optionalText(),
   referenceGallerySlugs: stringListSchema
 });
-const motionActionSchema = z.enum(["walk", "run", "idle", "jump", "attack", "custom"]);
+// Keep this in sync with lib/motion/prompt.ts: motionActionPresetValues.
+const motionActionSchema = z.enum([
+  "idle",
+  "walk",
+  "run",
+  "jump",
+  "attack",
+  "reload",
+  "hit",
+  "fall",
+  "stun",
+  "getup",
+  "custom"
+]);
 const motionUploadSourceSchema = z
   .object({
     type: z.literal("upload"),
@@ -110,9 +123,25 @@ const motionAdvancedSchema = z
     normalizeScale: z.enum(["none", "height", "area"]).optional(),
     normalizePivotX: z.enum(["foot", "centroid"]).optional(),
     normalizePivotY: z.enum(["pin", "preserve"]).optional(),
-    matte: motionMatteSchema.optional()
+    matte: motionMatteSchema.optional(),
+    autoFlipRows: z.boolean().optional(),
+    autoExcludeRepeatedRows: z.boolean().optional(),
+    fps: z.number().int().min(1).max(60).optional(),
+    loop: z.enum(["loop", "pingpong", "once"]).optional()
   })
   .strict();
+export const motionCreateInputSchema = z.object({
+  name: z.string().trim().min(1),
+  grid: z
+    .object({
+      cols: z.number().int().min(1).max(12),
+      rows: z.number().int().min(1).max(12)
+    })
+    .strict(),
+  source: motionSourceSchema,
+  advanced: motionAdvancedSchema.optional(),
+  waitMs: z.number().int().min(0).max(30_000).default(0)
+});
 const videoImageIdSchema = z.string().trim().min(1).max(160).regex(VIDEO_ID_RE);
 const videoDurationSchema = z.union([
   z.number().int().positive().max(30),
@@ -366,19 +395,8 @@ export function createSionBananaMcpServer(options = {}) {
     {
       title: "Create Motion",
       description:
-        "Starts motion-project generation in a detached worker and immediately returns a pollable job id.",
-      inputSchema: {
-        name: z.string().trim().min(1),
-        grid: z
-          .object({
-            cols: z.number().int().min(1).max(12),
-            rows: z.number().int().min(1).max(12)
-          })
-          .strict(),
-        source: motionSourceSchema,
-        advanced: motionAdvancedSchema.optional(),
-        waitMs: z.number().int().min(0).max(30_000).default(0)
-      },
+        "Starts motion-project generation in a detached worker and immediately returns a pollable job id. Presets: idle, walk, run, jump, attack, reload, hit, fall, stun, getup, custom; movement presets loop and one-shot presets play once by default.",
+      inputSchema: motionCreateInputSchema.shape,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -788,6 +806,12 @@ async function listImages(input, context) {
 }
 
 export async function createMotion(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionCreateInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
   const jobId = `motion-job-${Date.now()}-${randomUUID()}`;
   if (context.mock) {
     return {
@@ -801,7 +825,7 @@ export async function createMotion(input, context) {
   let jobPath;
   let job;
   try {
-    const source = await normalizeMotionSource(input.source, context);
+    const source = await normalizeMotionSource(parsedInput.source, context);
     const createdAt = Date.now();
     const createdAtIso = new Date(createdAt).toISOString();
     const deadlineIso = new Date(
@@ -810,10 +834,10 @@ export async function createMotion(input, context) {
         MOTION_DEADLINE_BUFFER_MS
     ).toISOString();
     const request = {
-      name: input.name,
-      grid: input.grid,
+      name: parsedInput.name,
+      grid: parsedInput.grid,
       source,
-      ...(input.advanced ?? {})
+      ...(parsedInput.advanced ?? {})
     };
     const jobsRoot = await motionDirectory(context, "motion-jobs", true);
     jobPath = motionIdPath(jobsRoot, jobId, ".json");
@@ -827,7 +851,7 @@ export async function createMotion(input, context) {
 
     try {
       const workerScript = path.join(context.repoRoot, "scripts", "motion-worker.mjs");
-      const worker = spawn(process.execPath, [workerScript, jobId], {
+      const worker = (context.spawnImpl ?? spawn)(process.execPath, [workerScript, jobId], {
         cwd: context.repoRoot,
         detached: true,
         stdio: "ignore",
@@ -856,8 +880,8 @@ export async function createMotion(input, context) {
       await atomicWriteJson(jobPath, job).catch(() => {});
     }
 
-    if ((input.waitMs ?? 0) > 0 && job.status === "running") {
-      const polled = await getMotion({ jobId, waitMs: input.waitMs }, context);
+    if (parsedInput.waitMs > 0 && job.status === "running") {
+      const polled = await getMotion({ jobId, waitMs: parsedInput.waitMs }, context);
       return {
         ok: polled.ok,
         jobId,
@@ -1599,6 +1623,15 @@ async function readyMotionResult(jobId, job, context) {
   if (project.id !== job.projectId) {
     throw new Error("motion project id does not match its directory");
   }
+  const mirroredRows = Array.isArray(project.mirrorDetection?.rows)
+    ? project.mirrorDetection.rows.flatMap((row, index) => (row?.mirrored === true ? [index] : []))
+    : [];
+  const repeatedRows = Array.isArray(project.duplicateDetection?.rows)
+    ? project.duplicateDetection.rows.flatMap((row, index) => (row?.repeated === true ? [index] : []))
+    : [];
+  const excludedFrames = Array.isArray(project.duplicateDetection?.excludedFrames)
+    ? project.duplicateDetection.excludedFrames.filter(index => Number.isInteger(index) && index >= 0)
+    : [];
   const frameCount = Array.isArray(project.frames) ? project.frames.length : 0;
   const frames = Array.from({ length: frameCount }, (_, index) =>
     path.join(directory, "derived", "frames", `f${String(index + 1).padStart(2, "0")}.png`)
@@ -1609,6 +1642,8 @@ async function readyMotionResult(jobId, job, context) {
     status: "ready",
     projectId: job.projectId,
     project,
+    mirrorDetection: { mirroredRows },
+    duplicateDetection: { repeatedRows, excludedFrames },
     paths: {
       dir: directory,
       sheet: path.join(directory, "derived", "sheet.png"),

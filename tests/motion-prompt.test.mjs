@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildSheetPrompt, isCyclicAction } from "@/lib/motion/prompt";
+import {
+  buildSheetPrompt,
+  isCyclicAction,
+  MOTION_ACTION_PRESETS,
+  motionActionPresetValues
+} from "@/lib/motion/prompt";
 
 function presetDescriptions(action, cols, rows) {
   const prompt = buildSheetPrompt({ description: action, cols, rows, action });
@@ -11,6 +16,17 @@ function presetDescriptions(action, cols, rows) {
     .replace(/ (?:The final frame|This is a one-shot action:).*$/, "");
   return numbered.split(/(?:^| )\d+\. /).slice(1);
 }
+
+test("motion action presets keep their values and metadata in one complete set", () => {
+  assert.equal(motionActionPresetValues.length, 11);
+  assert.deepEqual(Object.keys(MOTION_ACTION_PRESETS).sort(), [...motionActionPresetValues].sort());
+
+  for (const action of motionActionPresetValues) {
+    if (action === "custom") continue;
+    const prompt = buildSheetPrompt({ description: action, cols: 1, rows: 1, action });
+    assert.match(prompt, /sequence in order:/, action);
+  }
+});
 
 test("reference directive is prepended only when hasReference is true", () => {
   const referenced = buildSheetPrompt({
@@ -132,12 +148,37 @@ test("explicit frame descriptions take precedence over an action preset", () => 
 });
 
 test("cyclic presets use eight distinct phase descriptions", () => {
-  for (const action of ["walk", "run", "idle"]) {
+  for (const action of ["walk", "run", "idle", "stun"]) {
     const descriptions = presetDescriptions(action, 4, 2);
     assert.equal(descriptions.length, 8);
     assert.equal(new Set(descriptions).size, 8, action);
     assert.ok(descriptions.every(description => !description.includes("halfway between")));
   }
+});
+
+test("new preset phases preserve distinct 4x2 sequences and their playback wording", () => {
+  for (const action of ["reload", "hit", "fall", "stun", "getup"]) {
+    const descriptions = presetDescriptions(action, 4, 2);
+    assert.equal(descriptions.length, 8, action);
+    assert.equal(new Set(descriptions).size, 8, action);
+
+    const prompt = buildSheetPrompt({ description: action, cols: 4, rows: 2, action });
+    if (action === "stun") {
+      assert.match(prompt, /seamless loop/);
+      assert.doesNotMatch(prompt, /one-shot action/);
+    } else {
+      assert.match(prompt, /one-shot action/);
+      assert.doesNotMatch(prompt, /seamless loop/);
+    }
+  }
+  assert.match(
+    buildSheetPrompt({ description: "getup", cols: 4, rows: 2, action: "getup" }),
+    /8-frame get-up sequence/
+  );
+  assert.match(
+    buildSheetPrompt({ description: "hit", cols: 4, rows: 2, action: "hit" }),
+    /8-frame hit-reaction sequence/
+  );
 });
 
 test("four-frame walk evenly samples the eight phases without interpolation", () => {
@@ -198,7 +239,9 @@ test("one-shot phase sampling preserves the first and last poses", () => {
   ]);
 });
 
-test("isCyclicAction recognizes only walk, run and idle", () => {
+test("isCyclicAction resolves cyclic metadata", () => {
+  assert.equal(isCyclicAction("stun"), true);
+  assert.equal(isCyclicAction("reload"), false);
   for (const action of ["walk", "run", "idle"]) assert.equal(isCyclicAction(action), true);
   for (const action of ["jump", "attack", "custom"]) assert.equal(isCyclicAction(action), false);
 });

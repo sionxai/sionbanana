@@ -12,18 +12,18 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { loadCharacters, type Character } from "@/lib/characters";
-import type { MotionActionPreset } from "@/lib/motion/prompt";
+import {
+  MOTION_ACTION_PRESETS,
+  motionActionPresetValues,
+  type MotionActionPreset
+} from "@/lib/motion/prompt";
 import type { MotionProject } from "@/lib/motion/types";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const ACTION_OPTIONS: { value: MotionActionPreset; label: string }[] = [
-  { value: "walk", label: "걷기" },
-  { value: "run", label: "달리기" },
-  { value: "idle", label: "대기" },
-  { value: "jump", label: "점프" },
-  { value: "attack", label: "공격" },
-  { value: "custom", label: "직접 입력" }
-];
+const ACTION_OPTIONS = motionActionPresetValues.map(value => ({
+  value,
+  ...MOTION_ACTION_PRESETS[value]
+}));
 
 type MotionCreateDialogProps = {
   open: boolean;
@@ -55,6 +55,11 @@ export function MotionCreateDialog({ open, onClose, onCreated }: MotionCreateDia
   const [cols, setCols] = useState(4);
   const [rows, setRows] = useState(2);
   const [isCreating, setIsCreating] = useState(false);
+  const selectedAction = MOTION_ACTION_PRESETS[referenceAction];
+  const frameCount =
+    Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0
+      ? Math.floor(cols) * Math.floor(rows)
+      : 0;
 
   useEffect(() => {
     if (open) setCharacters(loadCharacters());
@@ -126,6 +131,10 @@ export function MotionCreateDialog({ open, onClose, onCreated }: MotionCreateDia
     }
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) {
       toast.error("격자 열과 행은 1 이상의 정수여야 합니다.");
+      return;
+    }
+    if (sourceType !== "upload" && normalizedCols * normalizedRows > 12) {
+      toast.error("생성 스프라이트 시트는 최대 12장까지 지원합니다.");
       return;
     }
     if (sourceType === "generate" && !prompt.trim()) {
@@ -320,8 +329,12 @@ export function MotionCreateDialog({ open, onClose, onCreated }: MotionCreateDia
                       disabled={isCreating}
                       aria-pressed={referenceAction === option.value}
                       onClick={() => setReferenceAction(option.value)}
+                      className="h-auto min-h-12 flex-col gap-0.5 py-2"
                     >
-                      {option.label}
+                      <span>{option.label}</span>
+                      <span className="text-[10px] font-normal opacity-80">
+                        {option.defaultLoop === "loop" ? "반복" : "단발"} · 권장 {option.recommendedFrames}장
+                      </span>
                     </Button>
                   ))}
                 </div>
@@ -391,9 +404,14 @@ export function MotionCreateDialog({ open, onClose, onCreated }: MotionCreateDia
               />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">
-            총 {Number.isFinite(cols * rows) && cols > 0 && rows > 0 ? Math.floor(cols) * Math.floor(rows) : 0}프레임
-          </p>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <p>
+              열×행 = {frameCount}장 · 권장 8장 · 생성 상한 12장
+            </p>
+            {sourceType === "reference" && selectedAction.cyclic ? (
+              <p>반복 행은 자동 제외됩니다(실효 4장일 수 있음)</p>
+            ) : null}
+          </div>
 
           {isCreating ? (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 text-sm">

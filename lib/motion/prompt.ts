@@ -2,7 +2,53 @@ import { keyColorForSubject, type SubjectType } from "@/lib/motion/matte-color";
 
 const DEFAULT_STYLE = "detailed hand-painted 2D game asset, clean crisp silhouette";
 
-export type MotionActionPreset = "walk" | "run" | "idle" | "jump" | "attack" | "custom";
+export type MotionActionPreset =
+  | "walk"
+  | "run"
+  | "idle"
+  | "jump"
+  | "attack"
+  | "reload"
+  | "hit"
+  | "fall"
+  | "stun"
+  | "getup"
+  | "custom";
+
+export const motionActionPresetValues = [
+  "idle",
+  "walk",
+  "run",
+  "jump",
+  "attack",
+  "reload",
+  "hit",
+  "fall",
+  "stun",
+  "getup",
+  "custom"
+] as const;
+
+export type MotionActionMeta = {
+  label: string;
+  cyclic: boolean;
+  defaultLoop: "loop" | "once";
+  recommendedFrames: number;
+};
+
+export const MOTION_ACTION_PRESETS: Record<MotionActionPreset, MotionActionMeta> = {
+  idle: { label: "대기", cyclic: true, defaultLoop: "loop", recommendedFrames: 8 },
+  walk: { label: "이동", cyclic: true, defaultLoop: "loop", recommendedFrames: 8 },
+  run: { label: "질주", cyclic: true, defaultLoop: "loop", recommendedFrames: 8 },
+  jump: { label: "점프", cyclic: false, defaultLoop: "once", recommendedFrames: 8 },
+  attack: { label: "공격", cyclic: false, defaultLoop: "once", recommendedFrames: 6 },
+  reload: { label: "장전", cyclic: false, defaultLoop: "once", recommendedFrames: 6 },
+  hit: { label: "피격", cyclic: false, defaultLoop: "once", recommendedFrames: 5 },
+  fall: { label: "넘어짐", cyclic: false, defaultLoop: "once", recommendedFrames: 8 },
+  stun: { label: "스턴", cyclic: true, defaultLoop: "loop", recommendedFrames: 8 },
+  getup: { label: "일어나기", cyclic: false, defaultLoop: "once", recommendedFrames: 6 },
+  custom: { label: "직접 입력", cyclic: false, defaultLoop: "loop", recommendedFrames: 8 }
+};
 
 const ACTION_PHASES: Record<Exclude<MotionActionPreset, "custom">, readonly string[]> = {
   walk: [
@@ -50,6 +96,48 @@ const ACTION_PHASES: Record<Exclude<MotionActionPreset, "custom">, readonly stri
     "impact pose at the strongest point of the strike",
     "follow-through pose carrying the attack momentum",
     "recovery pose returning toward the starting stance"
+  ],
+  reload: [
+    "ready stance with the weapon raised, beginning to lower it slightly",
+    "weapon tilted down as the free hand reaches for the fresh magazine at the hip",
+    "spent magazine dropping free while the fresh magazine comes up in the free hand",
+    "fresh magazine being seated into the weapon with a firm push",
+    "charging handle or slide being racked back with the free hand",
+    "weapon raised back into the ready stance, both hands on the grip"
+  ],
+  hit: [
+    "impact pose, head snapping back and shoulders jolting from the hit",
+    "body pushed backward with arms flung slightly outward",
+    "staggering step backward with the torso bent and weight on the rear foot",
+    "catching balance, torso straightening while the front foot steps in",
+    "recovery pose returning toward the ready stance"
+  ],
+  fall: [
+    "losing balance with arms flailing and the torso tipping backward",
+    "toppling backward as the feet begin to leave the ground",
+    "body nearly horizontal in the air, arms spread",
+    "hitting the ground on the back with legs still in the air",
+    "bouncing slightly as the legs come down",
+    "settling flat on the ground, arms out to the sides",
+    "lying still flat on the back, the end pose"
+  ],
+  stun: [
+    "dazed pose leaning left with the head lolling and eyes unfocused",
+    "wobbling upright with knees bent and shoulders slumped",
+    "dazed pose leaning right with the head lolling and eyes unfocused",
+    "wobbling upright with knees bent, arms hanging loosely",
+    "leaning left again a little less, head tilted",
+    "swaying upright, weight shifting to the toes",
+    "leaning right again a little less, head tilted",
+    "swaying upright, weight settling back toward the heels"
+  ],
+  getup: [
+    "lying flat on the back, the starting pose",
+    "rolling onto one side and pushing up on one arm",
+    "kneeling on one knee with a hand on the ground",
+    "pushing up with both legs, torso still bent forward",
+    "rising to standing with the torso straightening",
+    "standing back in the ready stance, the end pose"
   ]
 };
 
@@ -71,7 +159,7 @@ function requirePositiveInteger(value: number, name: string): void {
 }
 
 export function isCyclicAction(action: MotionActionPreset): boolean {
-  return action === "walk" || action === "run" || action === "idle";
+  return MOTION_ACTION_PRESETS[action].cyclic;
 }
 
 function buildPresetSequence(action: Exclude<MotionActionPreset, "custom">, frameCount: number): string {
@@ -93,7 +181,8 @@ function buildPresetSequence(action: Exclude<MotionActionPreset, "custom">, fram
     previousPhaseIndex = phaseIndex;
     return `${index + 1}. ${description}`;
   });
-  return `Render this ${frameCount}-frame ${action} sequence in order: ${descriptions.join(" ")}`;
+  const promptAction = action === "getup" ? "get-up" : action === "hit" ? "hit-reaction" : action;
+  return `Render this ${frameCount}-frame ${promptAction} sequence in order: ${descriptions.join(" ")}`;
 }
 
 export function buildSheetPrompt(input: BuildSheetPromptInput): string {
