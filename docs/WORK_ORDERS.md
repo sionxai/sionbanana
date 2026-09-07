@@ -33,7 +33,8 @@
 | SB WO-003 | 2026-08-16 | 저장소·맥락 1차 안정화 | CEO(Sol) / Maker(Terra) / 독립 Checker | P0 | 2026-08-16(KST) | 완료 | PASS · CANONICAL_CONFIRMED |
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
 | SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 완료 | PASS · 체이닝 스모크 YAVG 3.16 · 병합 1ffdc4b3 |
-| SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 감지·행 반복 자동 제외 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 검수(2차 라운드 진행) | 1차 79/79·미러링 실물 검증 1/1 |
+| SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 반전·행 반복 자동 제외 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 84/84 · 실생성 9장 스모크 · 병합 89ee900f(서버 재기동 대기) |
+| SB WO-008 | 2026-09-07 | 모션 프리셋 10종·동작별 재생 기본값·프레임 정보 표시·슬로모션·MCP 감지 요약 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -381,6 +382,24 @@
 - 2026-09-07 10:3x KST — 대표 지시로 `발행`. 워크트리 `.claude/worktrees/sb-wo-007-motion-t04` (`claude/sb-wo-007-motion-t04` @ `104e894d`, base `feature/webtoon-studio`) 생성, 시작 porcelain 0줄, Maker 위임 가동. codex CLI 0.153.4가 사용자 config로 직접 기동됨(T-06 우회 불필요).
 - 2026-09-07 10:45 KST — Maker 1차 반환(정확히 8파일, "구현 완료 / 검증 미실행" — 샌드박스 키체인 -50). CEO 재실행: 79건 중 1건 실패(대칭 도형 점수 단언). 원인 = sharp 리샘플의 좌우 미세 비대칭으로 동일 프레임 행은 dSame=0 → 정규화 점수가 -1로 고정. 조치: 엔진 분모에 절대 하한 0.02 추가(잡음 기반 반전 차단, CEO 직접 4줄) + 테스트 단언 `|score|<0.05` → `score<=0`(양수 금지, 보호 조건 유지·이유 주석). → **79/79 · tsc 0** → `검수`. 1차 체크포인트 커밋 `3d4be759`.
 - 2026-09-07 10:46~10:55 KST — CEO 실기 스모크(워크트리 dev 서버 3012, 격리 데이터 디렉터리; 구 프롬프트 기준선은 3002). **미러링:** 신 프롬프트 walk-1 원본 2행이 실제로 왼쪽을 향함 → `mirrorDetection` 점수 0.71로 자동 반전, 파생 8프레임 전부 오른쪽 향함(결함 B 실물 검증 1/1; 구 2건·신 나머지 6건은 미러링 없음, 점수 -0.53~-0.91). **복제:** 행 반복 비율(행간 (i,i+4) 평균거리 ÷ 행내 인접 평균거리) — 구 walk 0.46·0.34 / 신 walk 0.28·0.47 / 근·원 다리 문구 walk 0.46·0.37 / 신 run **0.08**(2행이 1행과 픽셀 동일) / idle 1.37·attack 2.00·reload 1.28. 결론: **4위상 복제는 프롬프트 문구가 아니라 모델 성향**(8위상·근원다리 문구 모두 무효, 7/7). → 결함 A 실효 수정을 위해 같은 워크트리에서 **2차 라운드 발행**: 엔진 `detectRepeatedRows`(비율<0.4) + `project.duplicateDetection` + 순환 프리셋 생성 시 반복 행 자동 `excluded`(라우트 `autoExcludeRepeatedRows`, 업로드·단발·custom 기본 off). 스펙 `wo007-round2-spec.md`, 왕복 2/2.
+- 2026-09-07 11:07~11:15 KST — Maker 2차 반환(정확히 6파일, 검증 미실행 보고) → CEO 재실행 **84/84 · tsc 0** → 보관 원본 8장 재등록 스모크(아래 검수 로그) → 2차 커밋 `d9a8bde7`, 병합 `89ee900f` → `완료`. T-04 닫힘.
+
+### SB WO-008 — 모션 프리셋 10종 · 동작별 재생 기본값 · 프레임 정보 표시 · 슬로모션 · MCP 감지 요약
+
+- **ID:** `SB WO-008` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** SB WO-007 병합 `89ee900f`(`isCyclicAction`·`autoFlipRows`·`autoExcludeRepeatedRows`·감지 기록), 대표 승인(2026-09-07 "권장순서대로" — 1단계), 모션 디벨롭 제안 항목 2·3·4
+- **목표:** (1) 프리셋 10종+custom(대기·이동·질주·점프·공격·장전·피격·넘어짐·스턴·일어나기)과 메타데이터(라벨·순환·기본 재생·권장 프레임)를 단일 원천으로 두고 라우트·MCP·UI가 공유 (2) 생성 시 기본 애니메이션 loop가 프리셋 기본(이동 계열 loop/단발 once)을 따르고 요청 `fps`·`loop`가 우선 (3) 플레이어 `N장 / F FPS / T초` 표시 + 감지 요약 배지(중복 행 제외·2행 반전 보정) + 0.25×/0.5×/1× 슬로모션 (4) 다이얼로그 `열×행=N장` 안내와 생성 소스 12장 상한(실측 근거) (5) MCP create_motion 프리셋 10종·`autoFlipRows`·`autoExcludeRepeatedRows`·`fps`·`loop` 전달, get_motion ready 응답에 `mirroredRows`·`repeatedRows`·`excludedFrames` 요약.
+- **배경:** 제안 항목 2(모션 체크 10종·동작별 설정·기본 재생 방식)·3(프레임 설정 표시, 24장은 실측과 충돌 → 8 기본/12 상한)·4(슬로모션). 세트·공통설정·상태판은 WO-009/010.
+- **변경 범위:** `lib/motion/prompt.ts`, `lib/motion/storage.ts`, `app/api/motion/projects/route.ts`, `scripts/mcp-server.mjs`, `components/studio/motion/motion-create-dialog.tsx`, `components/studio/motion/motion-player.tsx`, `tests/motion-{prompt,mcp,storage}.test.mjs` 9파일. 스펙 전문: 스크래치패드 `wo008-spec.md`.
+- **완료 기준:** 모션 테스트 5파일 + `mcp-server-batch` PASS · `tsc --noEmit` 0 · `next lint` 대상 2컴포넌트 0 · `node --check scripts/mcp-server.mjs` (CEO 재실행) / 코드 정독 / CEO 실기: 격리 dev 서버에서 새 프리셋 2종(장전·피격) 실생성 + 브라우저로 다이얼로그·플레이어 표시 확인 + MCP 스키마 회귀.
+- **금지:** 9파일 밖 수정, commit·push, npm install, 세트/배치 기능(별도 WO), WO-007 규칙 변경, 테스트 삭제·완화.
+- **위험등급:** R2(MCP 공유 파일·UI) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-008-motion-presets` 폐기.
+- **보고 형식:** WO-007과 동일.
+
+#### 상태 이력
+
+- 2026-09-07 11:2x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-008-motion-presets` (`claude/sb-wo-008-motion-presets` @ `89ee900f`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
@@ -514,3 +533,17 @@
 - 커밋 — WO `f389c72d`, 병합 `1ffdc4b3`(로컬 전용, push·배포·브랜치 삭제 없음). 상주 서버 재기동 불필요(MCP 프로세스는 세션마다 스폰). 위임 왕복 1회.
 - **판정: PASS · 완료.** 파트 A(스킬 정본 `e99ccc73` + 전역 브리지)와 짝으로 프레임 체이닝이 도구·문서 양쪽에서 1급 지원됨. 후속(백로그): 컷 경계 BGM 연속성 실측, 체이닝 다단(3컷+) 드리프트 측정.
 
+### SB WO-007 — 모션에셋 T-04 결함 수정 (4위상 중복 · 2행 미러링)
+
+- 검수 기준: 워크트리 `claude/sb-wo-007-motion-t04` base `104e894d`, 시작 porcelain 0줄 → Maker 1차 정확히 8파일, 2차 정확히 6파일(모두 스펙 목록 내). 범위 위반 0건. 왕복 2/2(2차는 CEO 실측이 밝힌 모델 성향에 대한 스펙 보강).
+- Maker(Codex exec, gpt-6-astra, effort high) 보고 — 두 라운드 모두 "구현 완료 / 검증 미실행"(샌드박스 키체인 -50 / exit 139, PASS 자기판정 거부).
+- CEO 재실행 — 1차 79/79(아래 정정 후) · 2차 **84/84** · `tsc --noEmit` exit 0(두 라운드).
+- CEO 직접 수정 2건 — (a) 엔진 정규화 분모에 절대 하한 0.02(4줄): 동일 프레임 행에서 리샘플 미세 비대칭만으로 점수가 튀는 것 차단 (b) 테스트 단언 1건 `|score|<0.05` → `score<=0`(대칭 행은 절대 양수가 될 수 없다는 보호 조건으로 강화, 사유 주석). 그 외 0건.
+- 코드 정독 — descriptor·거리 함수 공유(중복 구현 없음), 결정적(무작위 없음), 반전 적용 후 버퍼로 반복 감지(이중 flop 없음), 재빌드는 재감지 없이 `flipX`·`excluded`·감지 기록 보존, 명시 control 우선, 레거시 project.json은 `null` 기본값으로 파싱, 라우트 기본값(자동 반전: 생성 소스 on / 자동 제외: 생성 소스+순환 프리셋 on / 업로드·단발·custom off).
+- 실기 스모크(gpt-image-2 실생성 9장: 구 프롬프트 2장은 3002, 신 프롬프트 7장은 격리 dev 서버 3012) —
+  · 미러링: 신 walk-1 원본 2행이 왼쪽을 향함 → `mirrorDetection` 0.71 → 자동 반전, 파생 8장 전부 오른쪽(1/1). 나머지 8장 미러링 없음(-0.53~-0.91).
+  · 복제(행 반복 비율): 구 walk 0.46·0.34 / 신 8위상 walk 0.28·0.47 / 근·원 다리 문구 walk 0.46·0.37 / 신 run 0.08 / idle 1.37 / 기존 attack 2.00·reload 1.28 → **문구와 무관한 모델 성향**(7/7).
+  · 최종 엔진 판정(보관 원본 8장 업로드 재등록, 48px): old-walk-2 0.31·new-run-1 0.10·new-walk-1 0.34(반전+제외 동시) → 2행 자동 제외 / old-walk-1 0.47·new-walk-2 0.42 경계 유지 / idle 0.86·attack 1.80·reload 1.63 미제외.
+- 결함별 결론 — B(2행 미러링): 자동 반전으로 실효 수정. A(4위상 복제): 프롬프트 구조 수정(8위상·균등 배분·단발 종료)은 완료했으나 생성 결과에는 무효 → 2차 라운드의 반복 행 자동 제외로 실효 확보(명확 케이스 3/3, 경계 2건은 UI 수동 제외).
+- 커밋 — 1차 `3d4be759`, 2차 `d9a8bde7`, 병합 `89ee900f`(로컬 전용, push·배포·브랜치 삭제 없음). **상주 서버(3002)는 프로덕션 빌드라 재빌드·재기동 전까지 구 코드** — 다른 세션이 사용 중일 수 있어 대표 확인 후 재기동. 운영 데이터에 만든 기준선 프로젝트 2건은 분석 후 DELETE로 정리(원본 시트는 스크래치패드 보관).
+- **판정: PASS · 완료.** T-04 닫힘. 후속: 임계 0.4 조정은 표본 누적 후 / MCP get_motion 감지 요약·UI 배지(WO-008) / 순환 프리셋 실효 프레임 4장 전제의 권장값 검토.
