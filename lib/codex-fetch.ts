@@ -29,6 +29,7 @@ export type CodexImageOptions = {
   size?: string;
   moderation?: CodexImageModeration;
   output_format?: CodexImageFormat;
+  input_image_mask?: string;
 };
 
 export type CodexCallOptions = {
@@ -88,6 +89,9 @@ export async function callCodexResponses(options: CodexCallOptions): Promise<Cod
           };
           if (options.imageOptions?.output_format) {
             tool.output_format = options.imageOptions.output_format;
+          }
+          if (options.imageOptions?.input_image_mask) {
+            tool.input_image_mask = { image_url: options.imageOptions.input_image_mask };
           }
           return tool;
         })()

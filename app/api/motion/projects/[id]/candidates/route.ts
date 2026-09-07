@@ -8,6 +8,7 @@ import {
   createCandidate,
   listCandidates
 } from "@/lib/motion/candidates";
+import { spawnCandidateWorker } from "@/lib/motion/candidate-generate";
 import { MotionStorageError } from "@/lib/motion/storage";
 import { candidateModeValues } from "@/lib/motion/types";
 
@@ -32,7 +33,8 @@ const payloadSchema = z
       )
       .min(1),
     instruction: z.string().max(4000).nullable().optional(),
-    protect: z.array(z.string().trim().min(1).max(200)).optional()
+    protect: z.array(z.string().trim().min(1).max(200)).optional(),
+    start: z.boolean().default(true)
   })
   .strict();
 
@@ -104,6 +106,7 @@ async function normalizeDataUrl(dataUrl: string): Promise<Buffer> {
 }
 
 type RouteContext = { params: { id: string } };
+type RouteDeps = { spawnCandidateWorker?: typeof spawnCandidateWorker };
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<Response> {
   try {
@@ -113,7 +116,11 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
   }
 }
 
-export async function POST(request: NextRequest, { params }: RouteContext): Promise<Response> {
+export async function POST(
+  request: NextRequest,
+  { params }: RouteContext,
+  deps: RouteDeps = {}
+): Promise<Response> {
   try {
     const payload = payloadSchema.parse(await readJson(request));
     const frames = await Promise.all(
@@ -129,6 +136,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
       instruction: payload.instruction,
       protect: payload.protect
     });
+    if (payload.mode !== "upload" && payload.start !== false) {
+      (deps.spawnCandidateWorker ?? spawnCandidateWorker)(params.id, candidate.id, request.nextUrl.origin);
+    }
     return NextResponse.json({ ok: true, candidate }, { status: 201 });
   } catch (error) {
     return errorResponse(error, "/api/motion/projects/[id]/candidates POST error");
