@@ -14,6 +14,7 @@ import {
   computeGrid,
   detectFrameRects,
   detectMirroredRows,
+  detectRepeatedRows,
   normalizeFrames
 } from "@/lib/motion/engine";
 import { createProject, rebuildProject } from "@/lib/motion/storage";
@@ -354,6 +355,52 @@ test("detectMirroredRows handles empty references, partial rows, and strict thre
 
 test("detectMirroredRows rejects a nonpositive column count", async () => {
   await assert.rejects(detectMirroredRows([], 0), RangeError);
+});
+
+test("detectRepeatedRows compares each row against the first row's motion", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const cloned = await detectRepeatedRows([...row, ...row], 4);
+  assert.deepEqual(cloned.rows[0], { repeated: false, ratio: 0 });
+  assert.equal(cloned.rows[1].repeated, true);
+  assert.ok(cloned.rows[1].ratio < 0.1);
+
+  const variant = await Promise.all([9, 13, 17, 21].map(y0 => gammaFrame(y0)));
+  const nearClone = await detectRepeatedRows([...row, ...variant], 4);
+  assert.equal(nearClone.rows[1].repeated, true);
+  assert.ok(nearClone.rows[1].ratio < 0.4);
+
+  const distinct = await Promise.all([28, 32, 36, 40].map(y0 => gammaFrame(y0)));
+  const differentRow = await detectRepeatedRows([...row, ...distinct], 4);
+  assert.equal(differentRow.rows[1].repeated, false);
+  assert.ok(differentRow.rows[1].ratio > 0.6);
+});
+
+test("detectRepeatedRows handles blank descriptors, partial rows, and option boundaries", async () => {
+  const row = await Promise.all([8, 12, 16, 20].map(y0 => gammaFrame(y0)));
+  const circle = await circleFrame();
+  const symmetric = await detectRepeatedRows(Array.from({ length: 8 }, () => circle), 4);
+  assert.deepEqual(symmetric.rows, [
+    { repeated: false, ratio: 0 },
+    { repeated: false, ratio: 0 }
+  ]);
+
+  const blank = await rgbaPng(48, 48, () => {});
+  const blankRow = await detectRepeatedRows([...row, blank, blank, blank, blank], 4);
+  assert.deepEqual(blankRow.rows[1], { repeated: false, ratio: 0 });
+  assert.deepEqual(await detectRepeatedRows([], 4), { rows: [] });
+
+  const partial = await detectRepeatedRows([...row, ...row.slice(0, 2)], 4);
+  assert.equal(partial.rows.length, 2);
+  assert.equal(partial.rows[1].repeated, true);
+
+  const thresholdBoundary = await detectRepeatedRows([...row, ...row], 4, {
+    threshold: 0
+  });
+  assert.equal(thresholdBoundary.rows[1].repeated, false);
+  await assert.rejects(detectRepeatedRows([], 0), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { size: 0 }), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { threshold: Number.NaN }), RangeError);
+  await assert.rejects(detectRepeatedRows(row, 4, { minDistance: 0 }), RangeError);
 });
 
 test("parseMotionProject treats projects without slicing fields as legacy grid mode", () => {

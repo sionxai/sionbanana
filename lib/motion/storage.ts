@@ -13,6 +13,7 @@ import {
   computeGrid,
   detectFrameRects,
   detectMirroredRows,
+  detectRepeatedRows,
   normalizeFrames,
   packSheet,
   sliceFrames
@@ -24,6 +25,7 @@ import {
   matteSpecSchema,
   parseMotionProject,
   type Animation,
+  type DuplicateDetection,
   type Frame,
   type GridSpec,
   type MatteSpec,
@@ -234,6 +236,8 @@ async function buildArtifacts(input: {
   controlsExplicit: boolean;
   autoFlipRows: boolean;
   previousMirrorDetection: MirrorDetection | null;
+  autoExcludeRepeatedRows: boolean;
+  previousDuplicateDetection: DuplicateDetection | null;
   animations: Animation[];
   animationsExplicit: boolean;
 }): Promise<BuildArtifacts> {
@@ -298,13 +302,35 @@ async function buildArtifacts(input: {
       }
     }
   }
-  const prepared = await Promise.all(
+  const oriented = await Promise.all(
     matted.map(async (buffer, index) => {
       const control = controls.get(index);
       const flipX = control?.flipX ?? autoFlipped.has(index);
-      const oriented = flipX ? await sharp(buffer).flop().png().toBuffer() : buffer;
-      const analysis = await analyzeFrame(oriented);
-      return { buf: oriented, ...analysis, sourceY: sourceRects[index].y };
+      return flipX ? sharp(buffer).flop().png().toBuffer() : buffer;
+    })
+  );
+  let duplicateDetection = input.previousDuplicateDetection;
+  const autoExcluded = new Set<number>();
+  if (input.autoExcludeRepeatedRows && !input.controlsExplicit) {
+    const detected = await detectRepeatedRows(oriented, grid.cols);
+    for (let row = 1; row < detected.rows.length; row += 1) {
+      if (!detected.rows[row].repeated) continue;
+      const start = row * grid.cols;
+      const end = Math.min(start + grid.cols, oriented.length);
+      for (let index = start; index < end; index += 1) {
+        if (!controls.has(index)) autoExcluded.add(index);
+      }
+    }
+    duplicateDetection = {
+      enabled: true,
+      rows: detected.rows,
+      excludedFrames: [...autoExcluded]
+    };
+  }
+  const prepared = await Promise.all(
+    oriented.map(async (buffer, index) => {
+      const analysis = await analyzeFrame(buffer);
+      return { buf: buffer, ...analysis, sourceY: sourceRects[index].y };
     })
   );
   const normalized = await normalizeFrames(prepared, {
@@ -328,7 +354,7 @@ async function buildArtifacts(input: {
       pivot: frame.pivot,
       appliedScale: frame.appliedScale,
       flipX: control?.flipX ?? autoFlipped.has(index),
-      excluded: control?.excluded ?? false,
+      excluded: control?.excluded ?? autoExcluded.has(index),
       durationMs: control?.durationMs ?? null
     };
   });
@@ -352,6 +378,7 @@ async function buildArtifacts(input: {
     canvas: normalized.canvas,
     matte,
     mirrorDetection,
+    duplicateDetection,
     frames,
     animations
   });
@@ -490,6 +517,7 @@ export async function createProject(input: {
   normalizePivotX?: NormalizePivotX;
   normalizePivotY?: NormalizePivotY;
   autoFlipRows?: boolean;
+  autoExcludeRepeatedRows?: boolean;
   grid: GridSpec;
   matte: MatteSpec;
 }): Promise<MotionProject> {
@@ -518,6 +546,8 @@ export async function createProject(input: {
       controlsExplicit: false,
       autoFlipRows: input.autoFlipRows ?? false,
       previousMirrorDetection: null,
+      autoExcludeRepeatedRows: input.autoExcludeRepeatedRows ?? false,
+      previousDuplicateDetection: null,
       animations: [],
       animationsExplicit: false
     });
@@ -561,6 +591,8 @@ export async function rebuildProject(
     controlsExplicit: patch.frames !== undefined,
     autoFlipRows: false,
     previousMirrorDetection: current.mirrorDetection,
+    autoExcludeRepeatedRows: false,
+    previousDuplicateDetection: current.duplicateDetection,
     animations,
     animationsExplicit: patch.animations !== undefined
   });

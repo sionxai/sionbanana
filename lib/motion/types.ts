@@ -103,6 +103,21 @@ export const mirrorDetectionSchema = z
   })
   .strict();
 
+export const duplicateDetectionSchema = z
+  .object({
+    enabled: z.boolean(),
+    rows: z.array(
+      z
+        .object({
+          repeated: z.boolean(),
+          ratio: z.number().finite()
+        })
+        .strict()
+    ),
+    excludedFrames: z.array(z.number().int().nonnegative())
+  })
+  .strict();
+
 export const motionProjectSchema = z
   .object({
     id: z.string().trim().min(1),
@@ -118,6 +133,7 @@ export const motionProjectSchema = z
     canvas: motionCanvasSchema,
     matte: matteSpecSchema,
     mirrorDetection: mirrorDetectionSchema.nullable().default(null),
+    duplicateDetection: duplicateDetectionSchema.nullable().default(null),
     frames: z.array(frameSchema),
     animations: z.array(animationSchema)
   })
@@ -131,6 +147,7 @@ export type MatteSpec = z.infer<typeof matteSpecSchema>;
 export type Frame = z.infer<typeof frameSchema>;
 export type Animation = z.infer<typeof animationSchema>;
 export type MirrorDetection = z.infer<typeof mirrorDetectionSchema>;
+export type DuplicateDetection = z.infer<typeof duplicateDetectionSchema>;
 export type MotionProject = z.infer<typeof motionProjectSchema>;
 export type SliceMode = z.infer<typeof motionProjectSchema>["sliceMode"];
 export type NormalizeScale = z.infer<typeof motionProjectSchema>["normalizeScale"];
@@ -171,6 +188,11 @@ export function parseMotionProject(input: unknown): MotionProject {
     project.mirrorDetection === undefined
       ? null
       : project.mirrorDetection;
+  const duplicateDetection =
+    !Object.prototype.hasOwnProperty.call(project, "duplicateDetection") ||
+    project.duplicateDetection === undefined
+      ? null
+      : project.duplicateDetection;
   return motionProjectSchema.parse({
     ...project,
     sliceMode,
@@ -178,6 +200,7 @@ export function parseMotionProject(input: unknown): MotionProject {
     normalizeScale,
     normalizePivotX,
     normalizePivotY,
-    mirrorDetection
+    mirrorDetection,
+    duplicateDetection
   });
 }

@@ -71,6 +71,15 @@ export type MirrorDetectionResult = {
   rows: MirrorRowResult[];
 };
 
+export type RepeatedRowResult = {
+  repeated: boolean;
+  ratio: number;
+};
+
+export type RepeatedRowDetectionResult = {
+  rows: RepeatedRowResult[];
+};
+
 type MirrorDescriptor = {
   alpha: Uint8Array;
   luma: Float32Array;
@@ -450,6 +459,71 @@ export async function detectMirroredRows(
       mirrored: score > threshold && scores.filter(value => value > 0).length > scores.length / 2,
       score
     });
+  }
+  return { rows };
+}
+
+export async function detectRepeatedRows(
+  frames: Buffer[],
+  cols: number,
+  opts: { size?: number; threshold?: number; minDistance?: number } = {}
+): Promise<RepeatedRowDetectionResult> {
+  assertPositiveInteger(cols, "cols");
+  if (frames.length === 0) return { rows: [] };
+
+  const size = opts.size ?? 48;
+  assertPositiveInteger(size, "opts.size");
+  const threshold = opts.threshold ?? 0.4;
+  if (!Number.isFinite(threshold)) {
+    throw new RangeError("opts.threshold must be finite.");
+  }
+  const minDistance = opts.minDistance ?? 0.02;
+  if (!Number.isFinite(minDistance) || minDistance <= 0) {
+    throw new RangeError("opts.minDistance must be a positive finite number.");
+  }
+
+  const descriptors = await Promise.all(frames.map(frame => createMirrorDescriptor(frame, size)));
+  const rowCount = Math.ceil(frames.length / cols);
+  const rows: RepeatedRowResult[] = Array.from({ length: rowCount }, () => ({
+    repeated: false,
+    ratio: 0
+  }));
+  const withinDistances: number[] = [];
+
+  for (let row = 0; row < rowCount; row += 1) {
+    const start = row * cols;
+    const end = Math.min(start + cols, descriptors.length);
+    for (let index = start + 1; index < end; index += 1) {
+      const previous = descriptors[index - 1];
+      const current = descriptors[index];
+      if (previous && current) {
+        withinDistances.push(mirrorDescriptorDistance(previous, current, false));
+      }
+    }
+  }
+
+  if (withinDistances.length === 0) return { rows };
+  const withinMean =
+    withinDistances.reduce((sum, distance) => sum + distance, 0) / withinDistances.length;
+  if (withinMean < minDistance) return { rows };
+
+  for (let row = 1; row < rowCount; row += 1) {
+    const start = row * cols;
+    const end = Math.min(start + cols, descriptors.length);
+    const acrossDistances: number[] = [];
+    for (let index = start; index < end; index += 1) {
+      const reference = descriptors[index - start];
+      const current = descriptors[index];
+      if (reference && current) {
+        acrossDistances.push(mirrorDescriptorDistance(reference, current, false));
+      }
+    }
+    if (acrossDistances.length === 0) continue;
+
+    const acrossMean =
+      acrossDistances.reduce((sum, distance) => sum + distance, 0) / acrossDistances.length;
+    const ratio = acrossMean / withinMean;
+    rows[row] = { repeated: ratio < threshold, ratio };
   }
   return { rows };
 }

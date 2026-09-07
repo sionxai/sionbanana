@@ -111,6 +111,37 @@ async function mirroredGammaSheet() {
   return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
+async function repeatedGammaSheet() {
+  const width = 96;
+  const height = 96;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  const set = (x, y) => {
+    const offset = (y * width + x) * 4;
+    pixels[offset] = 20;
+    pixels[offset + 1] = 80;
+    pixels[offset + 2] = 180;
+  };
+  const drawGamma = (originX, originY, y0) => {
+    for (let y = 8; y <= 40; y += 1) {
+      for (let x = 10; x <= 14; x += 1) set(originX + x, originY + y);
+    }
+    for (let y = y0; y <= y0 + 4; y += 1) {
+      for (let x = 14; x <= 30; x += 1) set(originX + x, originY + y);
+    }
+  };
+  drawGamma(0, 0, 8);
+  drawGamma(48, 0, 16);
+  drawGamma(0, 48, 8);
+  drawGamma(48, 48, 16);
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
 function gammaMatte() {
   return {
     mode: "keyColor",
@@ -401,4 +432,107 @@ test("motion project upload routes default autoFlipRows off and accept an explic
   assert.equal(enabledResponse.status, 201);
   assert.equal(enabledBody.project.mirrorDetection.enabled, true);
   assert.equal(enabledBody.project.mirrorDetection.rows[1].mirrored, true);
+});
+
+test("autoExcludeRepeatedRows excludes cloned rows and rebuilds preserve its metadata", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Repeated gamma",
+    sheetBuffer: await repeatedGammaSheet(),
+    sliceMode: "grid",
+    autoFlipRows: true,
+    autoExcludeRepeatedRows: true,
+    grid: { cols: 2, rows: 2, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+
+  assert.deepEqual(project.frames.map(frame => frame.excluded), [false, false, true, true]);
+  assert.equal(project.duplicateDetection?.enabled, true);
+  assert.equal(project.duplicateDetection?.rows[1].repeated, true);
+  assert.deepEqual(project.duplicateDetection?.excludedFrames, [2, 3]);
+
+  const rebuilt = await rebuildProject(project.id, {
+    matte: { ...project.matte, tolerance: 1 }
+  });
+  assert.deepEqual(rebuilt.frames.map(frame => frame.excluded), [false, false, true, true]);
+  assert.deepEqual(rebuilt.mirrorDetection, project.mirrorDetection);
+  assert.deepEqual(rebuilt.duplicateDetection, project.duplicateDetection);
+
+  const explicit = await rebuildProject(project.id, {
+    frames: project.frames.map(frame => ({ ...frame, excluded: false }))
+  });
+  assert.ok(explicit.frames.every(frame => frame.excluded === false));
+  assert.deepEqual(explicit.duplicateDetection, project.duplicateDetection);
+});
+
+test("autoExcludeRepeatedRows is opt-in and legacy projects receive null detection", async t => {
+  await useTempDataDir(t);
+  const createInput = {
+    name: "Unexcluded gamma",
+    sheetBuffer: await repeatedGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 2, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  };
+  const omitted = await createProject(createInput);
+  const disabled = await createProject({ ...createInput, autoExcludeRepeatedRows: false });
+  assert.ok(omitted.frames.every(frame => frame.excluded === false));
+  assert.ok(disabled.frames.every(frame => frame.excluded === false));
+  assert.equal(omitted.duplicateDetection, null);
+  assert.equal(disabled.duplicateDetection, null);
+
+  const legacyProject = {
+    id: "legacy-duplicate",
+    name: "Legacy duplicate",
+    createdAtIso: "2026-09-07T00:00:00.000Z",
+    sourceImage: { path: "raw.png", width: 48, height: 48 },
+    grid: { cols: 1, rows: 1 },
+    canvas: { w: 48, h: 48 },
+    matte: { mode: "none" },
+    frames: [],
+    animations: []
+  };
+  assert.equal(parseMotionProject(legacyProject).duplicateDetection, null);
+  assert.equal(
+    parseMotionProject({ ...legacyProject, duplicateDetection: undefined }).duplicateDetection,
+    null
+  );
+});
+
+test("motion project uploads only exclude repeated rows after an explicit opt-in", async t => {
+  await useTempDataDir(t);
+  const { POST } = await loadMotionRouteHandlers();
+  const sheet = await repeatedGammaSheet();
+  const requestBody = autoExcludeRepeatedRows => ({
+    name: `Route repeated gamma ${autoExcludeRepeatedRows}`,
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 2, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte(),
+    ...(autoExcludeRepeatedRows === undefined ? {} : { autoExcludeRepeatedRows }),
+    source: { type: "upload", dataUrl: `data:image/png;base64,${sheet.toString("base64")}` }
+  });
+
+  const defaultResponse = await POST(
+    new Request("http://localhost/api/motion/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody(undefined))
+    })
+  );
+  const defaultBody = await defaultResponse.json();
+  assert.equal(defaultResponse.status, 201);
+  assert.equal(defaultBody.project.duplicateDetection, null);
+
+  const enabledResponse = await POST(
+    new Request("http://localhost/api/motion/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody(true))
+    })
+  );
+  const enabledBody = await enabledResponse.json();
+  assert.equal(enabledResponse.status, 201);
+  assert.deepEqual(enabledBody.project.frames.map(frame => frame.excluded), [false, false, true, true]);
+  assert.equal(enabledBody.project.duplicateDetection.enabled, true);
+  assert.deepEqual(enabledBody.project.duplicateDetection.excludedFrames, [2, 3]);
 });

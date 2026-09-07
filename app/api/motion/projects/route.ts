@@ -10,7 +10,11 @@ import {
   subjectTypeValues,
   type SubjectType
 } from "@/lib/motion/matte-color";
-import { buildSheetPrompt, type MotionActionPreset } from "@/lib/motion/prompt";
+import {
+  buildSheetPrompt,
+  isCyclicAction,
+  type MotionActionPreset
+} from "@/lib/motion/prompt";
 import {
   createProject,
   listProjects,
@@ -78,6 +82,7 @@ const createProjectSchema = z
     normalizePivotX: z.enum(normalizePivotXValues).optional(),
     normalizePivotY: z.enum(normalizePivotYValues).optional(),
     autoFlipRows: z.boolean().optional(),
+    autoExcludeRepeatedRows: z.boolean().optional(),
     grid: gridSpecSchema,
     matte: matteSpecSchema.optional(),
     source: sourceSchema
@@ -299,6 +304,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       normalizePivotX: payload.normalizePivotX ?? "centroid",
       normalizePivotY: payload.normalizePivotY ?? "preserve",
       autoFlipRows: payload.autoFlipRows ?? (payload.source.type === "upload" ? false : true),
+      autoExcludeRepeatedRows:
+        payload.autoExcludeRepeatedRows ??
+        (payload.source.type !== "upload" &&
+          payload.source.action !== undefined &&
+          payload.source.action !== "custom" &&
+          isCyclicAction(payload.source.action)),
       grid: payload.grid,
       matte
     });
