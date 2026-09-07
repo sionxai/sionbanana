@@ -10,14 +10,20 @@ import sharp from "sharp";
 
 import { buildSheetPrompt } from "@/lib/motion/prompt";
 import {
+  applyCandidateFrames,
   createProject,
   deleteProject,
+  fitToCell,
   motionRoot,
   projectDir,
   readAssetFile,
+  readOrientedCell,
   readProject,
-  rebuildProject
+  rebuildProject,
+  revertFrameOverrides
 } from "@/lib/motion/storage";
+import { createCandidate } from "@/lib/motion/candidates";
+import { analyzeFrame } from "@/lib/motion/engine";
 import { parseMotionProject } from "@/lib/motion/types";
 
 let routeImportHooksRegistered = false;
@@ -606,4 +612,257 @@ test("motion project generation rejects grids larger than twelve frames before g
 
   assert.equal(response.status, 400);
   assert.match(body.reason, /at most 12 frames/);
+});
+
+async function gammaCell(color, scale = 1) {
+  const width = 48 * scale;
+  const height = 48 * scale;
+  const pixels = Buffer.alloc(width * height * 4);
+  const set = (x, y) => {
+    const offset = (y * width + x) * 4;
+    pixels[offset] = color[0];
+    pixels[offset + 1] = color[1];
+    pixels[offset + 2] = color[2];
+    pixels[offset + 3] = 255;
+  };
+  for (let y = 8 * scale; y <= 40 * scale; y += 1) {
+    for (let x = 10 * scale; x <= 14 * scale; x += 1) set(x, y);
+  }
+  for (let y = 8 * scale; y <= 12 * scale; y += 1) {
+    for (let x = 14 * scale; x <= 30 * scale; x += 1) set(x, y);
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function twoCellGammaSheet() {
+  const left = await gammaCell([20, 80, 180]);
+  const right = await gammaCell([20, 80, 180]);
+  const magenta = Buffer.alloc(96 * 48 * 4);
+  for (let offset = 0; offset < magenta.length; offset += 4) {
+    magenta[offset] = 255;
+    magenta[offset + 1] = 0;
+    magenta[offset + 2] = 255;
+    magenta[offset + 3] = 255;
+  }
+  return sharp(magenta, { raw: { width: 96, height: 48, channels: 4 } })
+    .composite([{ input: left, left: 0, top: 0 }, { input: right, left: 48, top: 0 }])
+    .png()
+    .toBuffer();
+}
+
+async function includesColor(buffer, color) {
+  const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let offset = 0; offset < data.length; offset += info.channels) {
+    if (data[offset] === color[0] && data[offset + 1] === color[1] && data[offset + 2] === color[2]) return true;
+  }
+  return false;
+}
+
+test("legacy frames receive null overrides and oriented cells preserve the source cell contract", async t => {
+  await useTempDataDir(t);
+  const legacy = parseMotionProject({
+    id: "legacy-override",
+    name: "Legacy override",
+    createdAtIso: "2026-09-07T00:00:00.000Z",
+    sourceImage: { path: "raw.png", width: 48, height: 48 },
+    grid: { cols: 1, rows: 1 },
+    canvas: { w: 48, h: 48 },
+    matte: { mode: "none" },
+    frames: [{
+      index: 0,
+      source: { x: 0, y: 0, w: 48, h: 48 },
+      trim: { x: 0, y: 0, w: 0, h: 0 },
+      pivot: { x: 0, y: 0 }
+    }],
+    animations: []
+  });
+  assert.equal(legacy.frames[0].override, null);
+
+  const project = await createProject({
+    name: "Oriented gamma",
+    sheetBuffer: await twoCellGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+  const cell = await readOrientedCell(project.id, 1);
+  assert.equal(cell.width, project.frames[1].source.w);
+  assert.equal(cell.height, project.frames[1].source.h);
+  assert.equal(cell.trim.h > 0, true);
+  const transparent = await sharp(cell.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.equal(transparent.data[3], 0);
+
+  const flipped = await rebuildProject(project.id, {
+    frames: project.frames.map(frame => ({ ...frame, flipX: frame.index === 1 }))
+  });
+  const flippedCell = await readOrientedCell(project.id, 1);
+  const expectedFlipped = await sharp(cell.buffer).flop().ensureAlpha().raw().toBuffer();
+  const actualFlipped = await sharp(flippedCell.buffer).ensureAlpha().raw().toBuffer();
+  assert.deepEqual(actualFlipped, expectedFlipped);
+  assert.equal(flipped.frames[1].flipX, true);
+});
+
+test("candidate application fits, persists, rebuilds, and reverts frame overrides", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Override gamma",
+    sheetBuffer: await twoCellGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+  const original = await readOrientedCell(project.id, 1);
+  const emptyCandidate = await sharp({
+    create: { width: 48, height: 48, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
+  }).png().toBuffer();
+  await assert.rejects(
+    fitToCell(emptyCandidate, original, await analyzeFrame(emptyCandidate)),
+    RangeError
+  );
+  const oversized = await gammaCell([200, 50, 30], 2);
+  const fitted = await fitToCell(oversized, original, await analyzeFrame(oversized));
+  const fittedAnalysis = await analyzeFrame(fitted);
+  assert.ok(Math.abs(fittedAnalysis.trim.h - original.trim.h) <= 1);
+  assert.ok(Math.abs(fittedAnalysis.pivot.x - original.pivot.x) <= 1);
+  assert.ok(Math.abs(fittedAnalysis.pivot.y - original.pivot.y) <= 1);
+
+  const before = await fs.readFile(path.join(projectDir(project.id), "derived", "frames", "f01.png"));
+  const rawBefore = await fs.readFile(path.join(projectDir(project.id), "raw.png"));
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 1, image: await gammaCell([200, 50, 30]) }],
+    instruction: "replace the second frame"
+  });
+  const applied = await applyCandidateFrames(project.id, candidate.id);
+  assert.equal(applied.frames[1].override?.candidateId, candidate.id);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f02.png")), true);
+  assert.equal(
+    await includesColor(await fs.readFile(path.join(projectDir(project.id), "derived", "frames", "f02.png")), [200, 50, 30]),
+    true
+  );
+  assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "derived", "frames", "f01.png")), before);
+  assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "raw.png")), rawBefore);
+
+  const rebuilt = await rebuildProject(project.id, { matte: { ...project.matte, tolerance: 1 } });
+  assert.equal(rebuilt.frames[1].override?.candidateId, candidate.id);
+  const explicit = await rebuildProject(project.id, { frames: rebuilt.frames.map(frame => ({ ...frame })) });
+  assert.equal(explicit.frames[1].override?.candidateId, candidate.id);
+
+  const reverted = await revertFrameOverrides(project.id, [1]);
+  assert.equal(reverted.frames[1].override, null);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f02.png")), false);
+  assert.equal(
+    await includesColor(await fs.readFile(path.join(projectDir(project.id), "derived", "frames", "f02.png")), [20, 80, 180]),
+    true
+  );
+  assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "raw.png")), rawBefore);
+
+  await applyCandidateFrames(project.id, candidate.id);
+  await fs.rm(path.join(projectDir(project.id), "overrides", "f02.png"));
+  await assert.rejects(rebuildProject(project.id, { matte: { ...project.matte, tolerance: 2 } }), error => error?.status === 409);
+});
+
+test("override apply and revert restore prior artifacts when atomic commits fail", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Atomic overrides",
+    sheetBuffer: await twoCellGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+  const original = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 1, image: await gammaCell([200, 50, 30]) }]
+  });
+  await applyCandidateFrames(project.id, original.id);
+  const replacement = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 1, image: await gammaCell([40, 170, 20]) }]
+  });
+  // macOS tmpdir is a symlink (/var -> /private/var); storage renames use realpaths, so the
+  // mock must compare against the resolved path or it silently never fires (same as the
+  // "failed project.json rename" test above).
+  const directory = await fs.realpath(projectDir(project.id));
+  const jsonPath = path.join(directory, "project.json");
+  const candidateJsonPath = path.join(directory, "candidates", replacement.id, "candidate.json");
+  const trackedPaths = [
+    path.join(directory, "raw.png"),
+    jsonPath,
+    path.join(directory, "derived", "sheet.png"),
+    path.join(directory, "derived", "frames", "f02.png"),
+    path.join(directory, "overrides", "f02.png"),
+    candidateJsonPath
+  ];
+  const before = await Promise.all(trackedPaths.map(file => fs.readFile(file)));
+  const assertRestored = async () => {
+    const after = await Promise.all(trackedPaths.map(file => fs.readFile(file)));
+    assert.deepEqual(after, before);
+  };
+  const originalRename = fs.rename.bind(fs);
+
+  const projectRenameMock = mock.method(fs, "rename", async (source, target) => {
+    if (target === jsonPath) {
+      assert.match(path.basename(String(source)), /^\.project-/);
+      throw Object.assign(new Error("injected project.json rename failure"), { code: "EIO" });
+    }
+    return originalRename(source, target);
+  });
+  try {
+    await assert.rejects(applyCandidateFrames(project.id, replacement.id), /injected project\.json rename failure/);
+  } finally {
+    projectRenameMock.mock.restore();
+  }
+  await assertRestored();
+
+  const candidateRenameMock = mock.method(fs, "rename", async (source, target) => {
+    if (target === candidateJsonPath) {
+      assert.match(path.basename(String(source)), /^\.candidate\.json-/);
+      throw Object.assign(new Error("injected candidate.json rename failure"), { code: "EIO" });
+    }
+    return originalRename(source, target);
+  });
+  try {
+    await assert.rejects(applyCandidateFrames(project.id, replacement.id), /injected candidate\.json rename failure/);
+  } finally {
+    candidateRenameMock.mock.restore();
+  }
+  await assertRestored();
+
+  const revertRenameMock = mock.method(fs, "rename", async (source, target) => {
+    if (target === jsonPath) {
+      assert.match(path.basename(String(source)), /^\.project-/);
+      throw Object.assign(new Error("injected revert project.json rename failure"), { code: "EIO" });
+    }
+    return originalRename(source, target);
+  });
+  try {
+    await assert.rejects(revertFrameOverrides(project.id, [1]), /injected revert project\.json rename failure/);
+  } finally {
+    revertRenameMock.mock.restore();
+  }
+  await assertRestored();
+});
+
+test("override directories reject symlinks before an override rebuild", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Linked override",
+    sheetBuffer: await twoCellGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 1, image: await gammaCell([200, 50, 30]) }]
+  });
+  await applyCandidateFrames(project.id, candidate.id);
+  const overrides = path.join(projectDir(project.id), "overrides");
+  await fs.rm(overrides, { recursive: true });
+  await fs.symlink("candidates", overrides, "dir");
+  await assert.rejects(
+    rebuildProject(project.id, { matte: { ...project.matte, tolerance: 1 } }),
+    error => error?.status === 409
+  );
 });
