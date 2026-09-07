@@ -304,6 +304,9 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
   }
 
   const readyCount = motionSet.members.filter(member => member.status === "ready").length;
+  const readyExportCount = motionSet.members.filter(
+    member => member.status === "ready" && Boolean(member.projectId)
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -317,15 +320,31 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
               <span>생성 {formatDate(motionSet.createdAtIso)}</span>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isLoading || isDeleting || regeneratingAction !== null}
-            onClick={() => void loadSet()}
-          >
-            <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} aria-hidden />
-            새로고침
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            {readyExportCount > 0 ? (
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={`/api/motion/sets/${encodeURIComponent(motionSet.id)}/export-file?gif=1`}
+                  download
+                >
+                  통합 내보내기
+                </a>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled>
+                통합 내보내기
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isLoading || isDeleting || regeneratingAction !== null}
+              onClick={() => void loadSet()}
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} aria-hidden />
+              새로고침
+            </Button>
+          </div>
         </CardHeader>
       </Card>
 

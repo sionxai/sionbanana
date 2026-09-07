@@ -5,11 +5,21 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import sharp from "sharp";
+
 import {
+  createMotionSet,
   createMotion,
+  exportMotionSet,
+  getMotionSet,
   getMotion,
+  listMotionSets,
   listMotion,
   motionCreateInputSchema,
+  motionSetCreateInputSchema,
+  motionSetExportInputSchema,
+  motionSetGetInputSchema,
+  motionSetListInputSchema,
   TOOL_NAMES
 } from "../scripts/mcp-server.mjs";
 
@@ -30,6 +40,13 @@ async function motionFixture(t, mock = false) {
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
 }
 
 test("create_motion mock returns a running job without a worker", async t => {
@@ -250,6 +267,198 @@ test("get_motion rejects traversal in jobId", async t => {
     ok: false,
     reason: "invalid jobId"
   });
+});
+
+test("motion set schemas are strict and TOOL_NAMES exposes all four set tools", () => {
+  const input = {
+    name: "Banana actions",
+    base: { description: "A banana hero", reference: { type: "imageId", imageId: "banana-source" } },
+    common: { cols: 2, rows: 2 },
+    members: [{ action: "walk" }]
+  };
+  assert.equal(motionSetCreateInputSchema.safeParse(input).success, true);
+  assert.equal(motionSetCreateInputSchema.safeParse({ ...input, unexpected: true }).success, false);
+  assert.equal(motionSetGetInputSchema.safeParse({ setId: "motion-set-1" }).success, true);
+  assert.equal(motionSetGetInputSchema.safeParse({ setId: "../motion-set" }).success, false);
+  assert.equal(motionSetListInputSchema.safeParse({}).success, true);
+  assert.equal(motionSetListInputSchema.safeParse({ limit: 1 }).success, false);
+  assert.equal(
+    motionSetExportInputSchema.safeParse({ setId: "motion-set-1", includeGif: false }).success,
+    true
+  );
+  for (const name of ["create_motion_set", "get_motion_set", "list_motion_sets", "export_motion_set"]) {
+    assert.equal(TOOL_NAMES.includes(name), true, name);
+  }
+});
+
+test("create_motion_set resolves imageId and upload references into the sets POST body", async t => {
+  const context = await motionFixture(t);
+  const imageId = "banana-source";
+  const png = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 240, g: 210, b: 50, alpha: 1 } }
+  })
+    .png()
+    .toBuffer();
+  await fs.mkdir(path.join(context.dataRoot, "images", "2026-09"), { recursive: true });
+  await fs.writeFile(path.join(context.dataRoot, "images", "2026-09", `${imageId}.png`), png);
+  const requests = [];
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith("/api/motion/sets") && options.method === "POST") {
+      const request = JSON.parse(options.body);
+      requests.push(request);
+      return jsonResponse({
+        ok: true,
+        set: {
+          id: `motion-set-${requests.length}`,
+          status: "pending",
+          members: request.members.map(member => ({ action: member.action, status: "pending" }))
+        }
+      }, 201);
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  const common = { cols: 2, rows: 2, fps: 12 };
+  const imageIdResult = await createMotionSet(
+    {
+      name: "Image id actions",
+      base: { description: "A banana hero", reference: { type: "imageId", imageId } },
+      common,
+      members: [{ action: "walk" }],
+      start: false
+    },
+    context
+  );
+  const uploadResult = await createMotionSet(
+    {
+      name: "Upload actions",
+      base: {
+        description: "A banana hero",
+        reference: { type: "upload", dataUrl: `data:image/png;base64,${png.toString("base64")}` }
+      },
+      common,
+      members: [{ action: "jump" }]
+    },
+    context
+  );
+  assert.deepEqual(imageIdResult, {
+    ok: true,
+    setId: "motion-set-1",
+    status: "pending",
+    members: [{ action: "walk", status: "pending" }]
+  });
+  assert.equal(uploadResult.ok, true);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].base.referenceImage, /^data:image\/png;base64,/);
+  assert.match(requests[1].base.referenceImage, /^data:image\/png;base64,/);
+  assert.equal(requests[0].start, false);
+  assert.equal(Object.hasOwn(requests[1], "start"), false);
+  assert.equal(Object.hasOwn(requests[0].base, "reference"), false);
+});
+
+test("create_motion_set rejects an oversized imageId before contacting the motion server", async t => {
+  const context = await motionFixture(t);
+  const imageId = "oversized-source";
+  const imagePath = path.join(context.dataRoot, "images", "2026-09", `${imageId}.png`);
+  await fs.mkdir(path.dirname(imagePath), { recursive: true });
+  await fs.writeFile(imagePath, Buffer.from([0]));
+  await fs.truncate(imagePath, 8 * 1024 * 1024 + 1);
+  let fetchCalls = 0;
+  context.fetchImpl = async () => {
+    fetchCalls += 1;
+    throw new Error("fetch must not run for an oversized imageId");
+  };
+
+  const result = await createMotionSet(
+    {
+      name: "Oversized image",
+      base: { description: "A banana hero", reference: { type: "imageId", imageId } },
+      common: { cols: 1, rows: 1 },
+      members: [{ action: "idle" }]
+    },
+    context
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /imageId source exceeds the 8MB limit/);
+  assert.equal(fetchCalls, 0);
+});
+
+test("get_motion_set reads ready project effective frames and row metadata", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-ready-set-project";
+  await writeJson(path.join(context.dataRoot, "motion-assets", projectId, "project.json"), {
+    id: projectId,
+    frames: [{ excluded: false }, { excluded: true }, { excluded: false }],
+    mirrorDetection: { rows: [{ mirrored: false }, { mirrored: true }] },
+    duplicateDetection: { rows: [{ repeated: true }, { repeated: false }] }
+  });
+  context.fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith("/api/motion/sets/motion-set-ready")) {
+      return jsonResponse({
+        ok: true,
+        set: {
+          id: "motion-set-ready",
+          status: "partial",
+          members: [
+            { action: "walk", status: "ready", projectId, reason: null },
+            { action: "jump", status: "failed", projectId: null, reason: "generation-error" }
+          ]
+        }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(await getMotionSet({ setId: "motion-set-ready" }, context), {
+    ok: true,
+    setId: "motion-set-ready",
+    status: "partial",
+    members: [
+      {
+        action: "walk",
+        status: "ready",
+        projectId,
+        reason: null,
+        effectiveFrames: 2,
+        repeatedRows: [0],
+        mirroredRows: [1]
+      },
+      { action: "jump", status: "failed", projectId: null, reason: "generation-error" }
+    ]
+  });
+});
+
+test("list_motion_sets preserves the API summary and export_motion_set persists streamed ZIP data", async t => {
+  const context = await motionFixture(t);
+  const summary = {
+    id: "motion-set-listed",
+    name: "Listed set",
+    createdAtIso: "2026-09-07T00:00:00.000Z",
+    updatedAtIso: "2026-09-07T00:00:00.000Z",
+    status: "ready",
+    members: [{ action: "walk", status: "ready", projectId: "motion-project-1" }]
+  };
+  const zip = Buffer.from("fixture motion set zip bytes");
+  context.fetchImpl = async url => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith("/api/motion/sets")) return jsonResponse({ ok: true, sets: [summary] });
+    if (value.includes("/api/motion/sets/motion-set-listed/export-file?gif=0")) {
+      return new Response(zip, { headers: { "content-type": "application/zip" } });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(await listMotionSets({}, context), { ok: true, sets: [summary] });
+  const exported = await exportMotionSet(
+    { setId: "motion-set-listed", includeGif: false, asBase64: true },
+    context
+  );
+  assert.equal(exported.ok, true);
+  assert.deepEqual(await fs.readFile(exported.zipPath), zip);
+  assert.equal(exported.base64, zip.toString("base64"));
 });
 
 test("TOOL_NAMES exposes all motion MCP tools", () => {
