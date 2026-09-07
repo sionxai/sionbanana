@@ -6,7 +6,8 @@ import { toast } from "sonner";
 
 import { MotionCreateDialog } from "@/components/studio/motion/motion-create-dialog";
 import { MotionEditorPanel } from "@/components/studio/motion/motion-editor-panel";
-import { MotionPlayer } from "@/components/studio/motion/motion-player";
+import { MotionFixPanel } from "@/components/studio/motion/motion-fix-panel";
+import { MotionPlayer, type MotionPreviewCandidate } from "@/components/studio/motion/motion-player";
 import { MotionSetBoard } from "@/components/studio/motion/motion-set-board";
 import { MotionSetDialog } from "@/components/studio/motion/motion-set-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -84,21 +85,24 @@ export function MotionShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<MotionProject | null>(null);
+  const [selectedFrameIndices, setSelectedFrameIndices] = useState<number[]>([]);
+  const [previewCandidate, setPreviewCandidate] = useState<MotionPreviewCandidate | null>(null);
   const [cacheVersion, setCacheVersion] = useState(() => Date.now());
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [isLoadingSets, setIsLoadingSets] = useState(true);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [isPatching, setIsPatching] = useState(false);
+  const [hasActiveCandidateWorker, setHasActiveCandidateWorker] = useState(false);
   const [isSetBusy, setIsSetBusy] = useState(false);
   const [hasPendingMatte, setHasPendingMatte] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [setDialogOpen, setSetDialogOpen] = useState(false);
   const selectedIdRef = useRef<string | null>(null);
-  const patchingRef = useRef(false);
+  const requestMutexRef = useRef(false);
   const listRequestRef = useRef(0);
   const setListRequestRef = useRef(0);
-  const navigationLocked = hasPendingMatte || isPatching || isSetBusy;
+  const navigationLocked = hasPendingMatte || isPatching || hasActiveCandidateWorker || isSetBusy;
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -164,6 +168,9 @@ export function MotionShell() {
     selectedIdRef.current = id;
     setSelectedId(id);
     setSelectedProject(null);
+    setSelectedFrameIndices([]);
+    setPreviewCandidate(null);
+    setHasActiveCandidateWorker(false);
     setIsLoadingProject(true);
     try {
       const response = await fetch(`/api/motion/projects/${encodeURIComponent(id)}`, {
@@ -177,6 +184,7 @@ export function MotionShell() {
       }
       if (selectedIdRef.current === id) {
         setSelectedProject(body.project);
+        setSelectedFrameIndices(body.project.frames[0] ? [body.project.frames[0].index] : []);
         setCacheVersion(Date.now());
       }
     } catch (error) {
@@ -191,15 +199,39 @@ export function MotionShell() {
     }
   }, [navigationLocked]);
 
-  const updateProject = useCallback(
-    async (patch: MotionProjectPatch): Promise<MotionProject> => {
-      const id = selectedIdRef.current;
-      if (!id) throw new Error("먼저 모션을 선택해주세요.");
-      if (patchingRef.current) throw new Error("다른 변경사항을 재빌드하고 있습니다.");
+  const runProjectMutation = useCallback(async <T,>(request: () => Promise<T>): Promise<T> => {
+    if (requestMutexRef.current) throw new Error("다른 변경사항을 재빌드하고 있습니다.");
+    requestMutexRef.current = true;
+    setIsPatching(true);
+    try {
+      return await request();
+    } finally {
+      requestMutexRef.current = false;
+      setIsPatching(false);
+    }
+  }, []);
 
-      patchingRef.current = true;
-      setIsPatching(true);
-      try {
+  const acceptProjectResponse = useCallback(
+    (project: MotionProject) => {
+      if (selectedIdRef.current !== project.id) return;
+      setSelectedProject(project);
+      setSelectedFrameIndices(current => {
+        const available = new Set(project.frames.map(frame => frame.index));
+        const retained = current.filter(index => available.has(index));
+        return retained.length > 0 ? retained : project.frames[0] ? [project.frames[0].index] : [];
+      });
+      setPreviewCandidate(null);
+      setCacheVersion(Date.now());
+      void loadProjects();
+    },
+    [loadProjects]
+  );
+
+  const updateProject = useCallback(
+    async (patch: MotionProjectPatch): Promise<MotionProject> =>
+      runProjectMutation(async () => {
+        const id = selectedIdRef.current;
+        if (!id) throw new Error("먼저 모션을 선택해주세요.");
         const response = await fetch(`/api/motion/projects/${encodeURIComponent(id)}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -211,18 +243,10 @@ export function MotionShell() {
         if (!response.ok || body?.ok !== true || !body.project) {
           throw new Error(responseReason(body, "모션을 재빌드하지 못했습니다."));
         }
-        if (selectedIdRef.current === id) {
-          setSelectedProject(body.project);
-          setCacheVersion(Date.now());
-        }
-        await loadProjects();
+        acceptProjectResponse(body.project);
         return body.project;
-      } finally {
-        patchingRef.current = false;
-        setIsPatching(false);
-      }
-    },
-    [loadProjects]
+      }),
+    [acceptProjectResponse, runProjectMutation]
   );
 
   const handleCreated = useCallback(
@@ -232,6 +256,9 @@ export function MotionShell() {
       selectedIdRef.current = project.id;
       setSelectedId(project.id);
       setSelectedProject(project);
+      setSelectedFrameIndices(project.frames[0] ? [project.frames[0].index] : []);
+      setPreviewCandidate(null);
+      setHasActiveCandidateWorker(false);
       setCacheVersion(Date.now());
       await loadProjects();
     },
@@ -304,6 +331,8 @@ export function MotionShell() {
   const handleSetBusyChange = useCallback((busy: boolean) => {
     setIsSetBusy(busy);
   }, []);
+
+  const structuralBusy = isPatching || hasActiveCandidateWorker;
 
   const handleDelete = useCallback(
     async (project: MotionProjectSummary) => {
@@ -557,17 +586,34 @@ export function MotionShell() {
 
           {!selectedSetId && !isLoadingProject && selectedProject ? (
             <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(340px,0.8fr)_minmax(420px,1.2fr)]">
-              <MotionEditorPanel
-                project={selectedProject}
-                cacheVersion={cacheVersion}
-                isPatching={isPatching}
-                onMatteDirtyChange={setHasPendingMatte}
-                updateProject={updateProject}
-              />
+              <div className="min-w-0 space-y-6">
+                <MotionEditorPanel
+                  project={selectedProject}
+                  cacheVersion={cacheVersion}
+                  isPatching={structuralBusy}
+                  onMatteDirtyChange={setHasPendingMatte}
+                  updateProject={updateProject}
+                />
+                <MotionFixPanel
+                  project={selectedProject}
+                  cacheVersion={cacheVersion}
+                  selectedFrameIndices={selectedFrameIndices}
+                  previewCandidate={previewCandidate}
+                  isBusy={isPatching}
+                  hasPendingMatte={hasPendingMatte}
+                  runProjectMutation={runProjectMutation}
+                  onProjectChanged={acceptProjectResponse}
+                  onPreviewCandidateChange={setPreviewCandidate}
+                  onWorkerActiveChange={setHasActiveCandidateWorker}
+                />
+              </div>
               <MotionPlayer
                 project={selectedProject}
                 cacheVersion={cacheVersion}
-                isPatching={isPatching}
+                isPatching={structuralBusy}
+                selectedFrameIndices={selectedFrameIndices}
+                previewCandidate={previewCandidate}
+                onSelectedFrameIndicesChange={setSelectedFrameIndices}
                 updateProject={updateProject}
               />
             </div>
