@@ -34,7 +34,8 @@
 | SB WO-004 | 2026-08-21 | MCP 영상 도구 create_video·get_video | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-08-22(KST) | 완료 | PASS · 스모크 실증 · 병합 7e12d8f3 |
 | SB WO-006 | 2026-09-02 | 영상 소스 upload 변형 — 프레임 체이닝 1급화 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-03(KST) | 완료 | PASS · 체이닝 스모크 YAVG 3.16 · 병합 1ffdc4b3 |
 | SB WO-007 | 2026-09-07 | 모션에셋 T-04 결함 수정 — 8위상 배분·단발 종료·2행 미러링 자동 반전·행 반복 자동 제외 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 84/84 · 실생성 9장 스모크 · 병합 89ee900f(서버 재기동 대기) |
-| SB WO-008 | 2026-09-07 | 모션 프리셋 10종·동작별 재생 기본값·프레임 정보 표시·슬로모션·MCP 감지 요약 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-008 | 2026-09-07 | 모션 프리셋 10종·동작별 재생 기본값·프레임 정보 표시·슬로모션·MCP 감지 요약 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 95/95 · 장전·피격 실생성 · 브라우저 실물 · 병합 875133b7 |
+| SB WO-009 | 2026-09-07 | 모션 세트 서버측 — 베이스 결속·다중 동작 순차 생성·공통 설정+예외·상태 추적 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -399,7 +400,25 @@
 
 #### 상태 이력
 
-- 2026-09-07 11:2x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-008-motion-presets` (`claude/sb-wo-008-motion-presets` @ `89ee900f`) 생성, Maker 위임 가동.
+- 2026-09-07 11:2x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-008-motion-presets` (`claude/sb-wo-008-motion-presets` @ `088b484a`) 생성, Maker 위임 가동.
+- 2026-09-07 11:25 KST — Maker 반환(정확히 9파일, "구현 완료 / 검증 미실행"). CEO 재실행: 테스트 6파일 **95/95** · tsc 0 · next lint 2컴포넌트 0 · `node --check` OK → `검수`.
+- 2026-09-07 11:26~11:35 KST — 실기: 격리 dev 서버 3012에서 4×4 생성 요청 400 확인 / 장전·피격 4×2 실생성(77s·59s) → `loop=once`, 8프레임 상이(행 반복 비율 1.52·1.59), 미러링 없음 / 브라우저 실물: 플레이어 `4장 / 12 FPS / 0.33초`·배지(중복 행 제외 4장·2행 반전 보정)·0.25×/0.5×/1×, 다이얼로그 프리셋 10종+직접 입력·보조 라벨·`열×행 = 8장 · 권장 8장 · 생성 상한 12장`·자동 제외 안내 → 커밋 `2f531eb6`, 병합 `875133b7` → `완료`.
+
+### SB WO-009 — 모션 세트 서버측 (베이스 캐릭터 결속 · 다중 동작 순차 생성 · 공통 설정+예외 · 상태 추적)
+
+- **ID:** `SB WO-009` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** SB WO-007·008 병합(`875133b7`), 대표 승인(2026-09-07 "권장순서대로" — 1·2단계: 공통 설정과 예외·동작별 상태판·베이스 시트 결속), 제안 항목 1·2·4
+- **목표:** 세트 레코드(`data/motion-sets/<id>/set.json` + `reference.png`): 베이스(설명·화풍·기본 방향·좌우 반전 허용·피사체·캐릭터 id·참조 이미지) + 공통(열·행·FPS) + 멤버(프리셋·설명·예외·상태·projectId). `POST /api/motion/sets`가 세트를 만들고 분리 워커(`scripts/motion-set-worker.mjs`)가 `run-next` 라우트를 반복 호출해 멤버를 **순차** 생성(생성 로직은 서버측 TS `runNextMember`, 워커는 시퀀서). 기본 방향 왼쪽은 생성 후 전 프레임 `flipX` 반전으로 구현. 조회·목록·예외 수정·재생성·삭제 API. 프로젝트 라우트에는 optional `style`만 추가.
+- **변경 범위:** `lib/motion/set-types.ts`·`lib/motion/set-storage.ts`·`app/api/motion/sets/route.ts`·`app/api/motion/sets/[id]/route.ts`·`app/api/motion/sets/[id]/run-next/route.ts`·`scripts/motion-set-worker.mjs`·`tests/motion-sets.test.mjs`(신규 7) + `app/api/motion/projects/route.ts`(style). 스펙 전문: 스크래치패드 `wo009-spec.md`.
+- **완료 기준:** `motion-sets` + 회귀 4파일 PASS · tsc 0 · `node --check` 워커 (CEO 재실행) / 코드 정독(원자 쓰기·경계·비밀 미기록·stale running 처리) / CEO 실기: 격리 dev 서버에서 세트(대기·이동·장전 3멤버, 참조 이미지 포함) 생성 → 워커 순차 완료 → 상태 전이·projectId·facing left 반전 확인.
+- **금지:** 목록 밖 수정, commit·push, npm install, MCP·UI(후속 WO-010/011), 기존 프로젝트 API 계약 변경.
+- **위험등급:** R2(새 저장 경로·워커 스폰) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-009-motion-sets` 폐기.
+- **보고 형식:** WO-008과 동일.
+
+#### 상태 이력
+
+- 2026-09-07 11:4x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-009-motion-sets` (`claude/sb-wo-009-motion-sets` @ `875133b7`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
@@ -547,3 +566,13 @@
 - 결함별 결론 — B(2행 미러링): 자동 반전으로 실효 수정. A(4위상 복제): 프롬프트 구조 수정(8위상·균등 배분·단발 종료)은 완료했으나 생성 결과에는 무효 → 2차 라운드의 반복 행 자동 제외로 실효 확보(명확 케이스 3/3, 경계 2건은 UI 수동 제외).
 - 커밋 — 1차 `3d4be759`, 2차 `d9a8bde7`, 병합 `89ee900f`(로컬 전용, push·배포·브랜치 삭제 없음). **상주 서버(3002)는 프로덕션 빌드라 재빌드·재기동 전까지 구 코드** — 다른 세션이 사용 중일 수 있어 대표 확인 후 재기동. 운영 데이터에 만든 기준선 프로젝트 2건은 분석 후 DELETE로 정리(원본 시트는 스크래치패드 보관).
 - **판정: PASS · 완료.** T-04 닫힘. 후속: 임계 0.4 조정은 표본 누적 후 / MCP get_motion 감지 요약·UI 배지(WO-008) / 순환 프리셋 실효 프레임 4장 전제의 권장값 검토.
+
+### SB WO-008 — 모션 프리셋 10종 · 동작별 재생 기본값 · 프레임 정보 표시 · 슬로모션 · MCP 감지 요약
+
+- 검수 기준: 워크트리 `claude/sb-wo-008-motion-presets` base `088b484a`, 시작 porcelain 0줄 → Maker 정확히 9파일(스펙 목록 내). 범위 위반 0건. 왕복 1회.
+- Maker(Codex exec, gpt-6-astra, effort high) 보고 — "구현 완료 / 검증 미실행"(키체인 -50 / exit 139). 가정: get_motion 감지 요약을 `mirrorDetection:{mirroredRows}`·`duplicateDetection:{repeatedRows,excludedFrames}` 중첩 형태로(행 인덱스 0부터) — CEO 채택.
+- CEO 재실행 — 테스트 6파일 **95/95** · `tsc --noEmit` 0 · `next lint` 2컴포넌트 0 · `node --check scripts/mcp-server.mjs` OK. CEO 직접 수정 0건.
+- 코드 정독 — 프리셋 메타 단일 원천(`motionActionPresetValues`·`MOTION_ACTION_PRESETS`)을 라우트·UI가 import, MCP는 동기화 주석과 함께 배열 복제; 라우트 12장 상한은 생성·참조 소스만(업로드 무제한); 기본 loop = 요청값 > 프리셋 기본 > loop; MCP 입력 스키마를 `motionCreateInputSchema`로 추출해 파싱(스코프 내 정리); 플레이어가 프레임별 `durationMs`를 재생 타이밍에 반영(부수 개선)·FPS 슬라이더 상한 30→60(라우트 상한과 일치).
+- 실기 — 격리 dev 서버 3012: 4×4 생성 요청 → 400 `at most 12 frames` / 장전·피격 4×2 실생성(77s·59s): `loop=once`, 8프레임 상이(행 반복 비율 1.52·1.59), 미러링 없음, 장전 시트 조준→탄창 배출→삽입→장전 손잡이→재조준 순서 정상 / 브라우저(in-app): 플레이어 `4장 / 12 FPS / 0.33초`·배지 2종·0.25×/0.5×/1× 토글, 다이얼로그 프리셋 10종+직접 입력·`반복/단발 · 권장 N장` 보조 라벨·`열×행 = 8장 · 권장 8장 · 생성 상한 12장`·순환 프리셋 자동 제외 안내.
+- 커밋 — WO `2f531eb6`, 병합 `875133b7`(로컬 전용). 상주 서버 재기동 대기(WO-007과 함께).
+- **판정: PASS · 완료.** 제안 항목 2·3·4 충족(세트·공통 설정·상태판은 WO-009/010). 전역 브리지 스킬 모션 절 갱신(같은 시각).
