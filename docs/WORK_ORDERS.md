@@ -14,7 +14,7 @@
 - [x] T-04 모션에셋 결함 수정안 승인 — 2026-09-07 대표 지시("권장순서대로 수정해줘", 모션 디벨롭 제안 6항목 판정의 1순위)로 승인. 수정 범위 = `SB WO-007`(walk/run/idle 8위상 배분·jump/attack 단발 종료 문장·행 방향 지시 강화·2행 미러링 자동 감지→`flipX`). 후속 단계(프리셋 10종·재생 기본값·프레임 표시 → 모션 세트·베이스 결속·통합 내보내기 → 구간 재생성 스파이크)는 WO-008 이후로 순차 발행한다.
 - [ ] T-05 웹 유입 추진 여부 결정 — 현재 로컬·미배포 방침을 유지하면 보류한다. 추진하려면 COMPANY.md DN-002/DEC-007 방향 재검토와 공식 공개 경로 확정 후 GA4·Search Console 속성, 읽기 권한, 배포를 각각 승인한다.
 - [ ] T-06 `~/.codex/config.toml` 스키마 충돌 대응 방향 결정 — `[agents]` 블록(ChatGPT 데스크톱 앱 기록)이 codex CLI 0.144.0 파서와 충돌해 **codex CLI·MCP 기동 불능** (2026-08-21 실측, CEO는 임시 CODEX_HOME으로 우회 중). 앱이 소유한 파일이라 임의 수정 보류 — 앱 업데이트 대기 / CLI 채널 갱신 / 블록 수동 조정 중 택일 필요. **2026-09-07 추가 실측:** codex CLI 0.153.4에서 동일 config로 `codex exec` 정상 기동(우회 불필요). 대표 확인 후 닫기 후보.
-- [ ] T-07 모션 "문제 구간 선택·수정 → 재생성 → 전후 비교 → 적용/되돌리기"(제안 항목 5·6) 구현 범위 결정 — 3단계 스파이크(2026-09-07) 결과: 마스크 인페인팅 **지원 확인**(`input_image_mask`, 얼굴·옷·배경 보존, `input_fidelity`는 거부), 앵커 스트립 재생성은 유효 5/10에서 연속성 5/5·정체성 5/5·스케일 +18% 일정, 무효 5/10은 인접 셀 접촉 슬라이싱 병합(레이아웃·격자로 대응 가능). 선택지: (A) 마스크 모드만 먼저 / (B) 마스크+스트립 동시 / (C) 보류. 규모 대(세션 분할). 제안 전문: 스크래치패드 `wo012-proposal.md`(승인 시 대장 전재).
+- [x] T-07 모션 "문제 구간 선택·수정" 구현 범위 — 2026-09-07 대표 결정 **(B) 마스크+앵커 스트립 동시**("마스크와 앵커 스트립 동시에 진행하자"). 구현은 `SB WO-012`(오버라이드·후보·적용/되돌리기·셀) → `WO-013`(마스크·스트립 생성 모드+워커) → `WO-014`(구간 선택·마스크 브러시·전후 비교 UI) → `WO-015`(MCP 3도구·문서) 순. 규모 대, 세션 분할 가능하도록 각 WO에 스펙 파일 명시.
 
 > T-02의 위 exact local cleanup만 2026-08-17 대표 결정으로 승인·실행됐다. T-01·T-03~T-06과
 > T-02의 추가 삭제·prune·push는 미승인이며, 정식 작업지시는 아래 상태표에 `SB WO-###`로 기록한다.
@@ -39,6 +39,7 @@
 | SB WO-009 | 2026-09-07 | 모션 세트 서버측 — 베이스 결속·다중 동작 순차 생성·공통 설정+예외·상태 추적 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 93/93 · 세트 실기 3/3+왼쪽 반전 · 병합 e20bfe35 |
 | SB WO-010 | 2026-09-07 | 모션 세트 UI — 세트 만들기·공통 설정+동작별 예외·상태판 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름 실물 · 병합 62e4c98e |
 | SB WO-011 | 2026-09-07 | 세트 통합 내보내기(시트+JSON) · MCP 세트 도구 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 47/47 · ZIP 실기 · MCP 4도구 실호출 · 병합 2d7ea239 |
+| SB WO-012 | 2026-09-07 | 프레임 오버라이드 계층·후보 저장·적용/되돌리기·셀 이미지 (구간 수정 기반, 생성 없음) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -461,6 +462,22 @@
 - 2026-09-07 12:3x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-011-motion-set-export` (`claude/sb-wo-011-motion-set-export` @ `62e4c98e`) 생성, Maker 위임 가동.
 - 2026-09-07 12:56 KST — Maker 반환(정확히 6파일, 검증 미실행). CEO 재실행: 테스트 5파일 **47/47** · tsc 0 · MCP 구문 OK · lint 0. 직접 수정 0건.
 - 2026-09-07 12:57~13:05 KST — 실기(격리 dev 서버 3012): 참조 포함 세트(대기·피격 2×2) 생성→ready → `export-file?gif=1` ZIP 4.77MB: `sprite-sheet.png` 1952×1216(4열×2행, 동작당 한 행), `animation.json` 8프레임·애니메이션 2개(대기 loop 12fps·피격 once)·sizeReport, `frames/<action>/`, README, `preview-idle.gif`·`preview-hit.gif` / MCP 모듈 직접 호출(서버 발견을 3012로 재작성): `list_motion_sets`·`get_motion_set`(effectiveFrames 4/4, 감지 요약)·`export_motion_set`(ZIP 4.26MB 저장)·`create_motion_set`(업로드 참조, 1멤버)→폴링→ready(실효 2장: 2×2 대기의 반복 행 자동 제외) 전부 PASS → 커밋 `6ba23d7c`, 병합 `2d7ea239` → `완료`.
+
+### SB WO-012 — 프레임 오버라이드 계층 · 후보 저장 · 적용/되돌리기 · 셀 이미지 (구간 수정 기반)
+
+- **ID:** `SB WO-012` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** T-07 결정(B), 3단계 스파이크 결과, WO-007~011 병합(`2d7ea239`), 제안 항목 5·6
+- **목표:** 원본 `raw.png` 불변 원칙 아래 (1) 프레임 오버라이드 계층 — `frames[i].override`가 있으면 `buildArtifacts`가 방향 적용 셀 대신 `overrides/fNN.png`를 투입(이후 analyze·normalize·pack 재사용) (2) 후보 저장소 `candidates/<cid>/`(candidate.json·frames·masks, 상태 pending/running/ready/failed, 모드 mask/strip/upload) (3) 적용 = 후보 프레임을 원본 셀에 맞춤(bbox 높이 스케일·발 기준점 정렬) 후 오버라이드 기록·재빌드, 되돌리기 = 오버라이드 제거·재빌드 (4) 마스크 편집용 셀 이미지 GET(방향·매트 적용, trim·pivot 헤더). 업로드 모드로 생성 없이 전체 경로 검증 가능.
+- **변경 범위:** `lib/motion/{types,storage}.ts`, `lib/motion/candidates.ts`(신규), 라우트 5개(`candidates`, `candidates/[cid]`, `candidates/[cid]/apply`, `revert`, `cells/[index]`), `tests/motion-candidates.test.mjs`(신규), `tests/motion-storage.test.mjs`. 스펙 전문: 스크래치패드 `wo012-spec.md`.
+- **완료 기준:** 신규·회귀 5파일 PASS · tsc 0 (CEO 재실행) / 코드 정독(원자 쓰기·경계·오버라이드 무결성 오류·레거시 호환) / CEO 실기: 격리 서버에서 업로드 후보 → 적용 → 파생 프레임 교체 확인 → 되돌리기 원상복구.
+- **금지:** 목록 밖 수정, commit·push, npm install, 생성 로직(WO-013), UI·MCP 변경.
+- **위험등급:** R2(프로젝트 스키마 확장·재빌드 경로 변경) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-012-motion-overrides` 폐기.
+- **보고 형식:** WO-011과 동일.
+
+#### 상태 이력
+
+- 2026-09-07 13:1x KST — T-07 결정 접수 후 `발행`. 워크트리 `.claude/worktrees/sb-wo-012-motion-overrides` (`claude/sb-wo-012-motion-overrides` @ `16cf63c0`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
