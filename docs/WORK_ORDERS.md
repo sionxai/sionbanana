@@ -42,7 +42,7 @@
 | SB WO-012 | 2026-09-07 | 프레임 오버라이드 계층·후보 저장·적용/되돌리기·셀 이미지 (구간 수정 기반) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 86/86 · 적용·되돌리기 실기 · 병합 4f6b7ac8 |
 | SB WO-013 | 2026-09-07 | 후보 생성 모드 — 마스크 인페인팅·앵커 스트립 재생성 + 후보 워커 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 57/57 · 마스크 밖 보존 7 · 스트립 연속성 6/4/3 · 병합 20095e01 |
 | SB WO-014 | 2026-09-07 | 구간 선택·마스크 브러시·후보 생성·전후 비교·적용/되돌리기 UI | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름(생성→적용→되돌리기) · 병합 84472070 |
-| SB WO-015 | 2026-09-07 | MCP 후보 도구 4종 + 스킬 문서 (구간 수정 외부 노출) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-015 | 2026-09-07 | MCP 후보 도구 4종 + 스킬 문서 (구간 수정 외부 노출) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 26/26 · MCP 4도구 실호출(생성→적용→되돌리기) · 병합 067a4963 |
 
 ## 지시서
 
@@ -536,6 +536,8 @@
 #### 상태 이력
 
 - 2026-09-07 15:3x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-015-motion-candidate-mcp` (`@ 84472070`) 생성, Maker 위임 가동.
+- 2026-09-07 15:52 KST — Maker 반환(정확히 2파일). 이번 회차는 Maker가 Deno로 우회 검증해 MCP·batch 24건 통과를 자체 보고 → CEO Node 재실행 **26/26 · `node --check` OK · tsc 0**.
+- 2026-09-07 15:53~15:58 KST — CEO 실기(MCP 모듈 직접 호출, 서버 발견을 3012로 재작성): `create_motion_candidate`(strip, 프레임 7) → pending → `get_motion_candidate` 폴링 5회 → ready(attempts 1·신뢰도 1·3×1·앵커 6·8, 프레임 절대경로 반환) → `apply_motion_candidate` → 오버라이드 [1..6] → `revert_motion_frames` → 잔여 [1..5] → 커밋 `8c6cec09`, 병합 `067a4963` → `완료`. 전역 브리지 스킬에 구간 수정 절 추가(CEO 직접).
 
 ## 검수 로그
 
@@ -765,3 +767,13 @@
 - **후속(UX, 기능 영향 없음):** ① 앵커 스트립 모드로 전환해도 마스크 브러시 영역이 계속 노출된다(서버는 strip에서 마스크를 무시하므로 무해하나 혼동 소지). ② 스트립 모드의 앵커 안내 문구(직전·직후 프레임 번호)가 화면에서 확인되지 않았다. 두 건은 WO-015 이후 UX 정리 후보.
 - 커밋 — WO `27c20d73`, 병합 `84472070`(로컬 전용). 상주 서버 재기동 대기.
 - **판정: PASS · 완료.** 제안 항목 5(구간 선택·수정 종류·보호 대상 지정)와 6(전후 비교·적용/되돌리기)의 UI 충족. 남은 것은 MCP 노출(WO-015).
+
+### SB WO-015 — MCP 후보 도구 4종
+
+- 검수 기준: 워크트리 `claude/sb-wo-015-motion-candidate-mcp` base `452e5bb0`, 시작 porcelain 0줄 → Maker 정확히 2파일. 범위 위반 0건. 왕복 1회. CEO 직접 수정 0건.
+- Maker 보고 — 키체인 이슈를 **Deno 런타임으로 우회**해 MCP·batch 24건 통과를 자체 검증(이전 회차들과 달리 자체 실행 성공). 그래도 판정은 CEO Node 재실행으로 한다.
+- CEO 재실행 — `motion-mcp`·`mcp-server-batch`·`motion-candidates` **26/26** · `node --check scripts/mcp-server.mjs` OK · tsc 0.
+- 코드 정독 — 서버 주소는 `findMotionServer(context.fetchImpl)`로 해석하고 모든 호출에 주입 fetch 사용(테스트 가능), 파일 경로 입력은 기존 upload 검증 헬퍼 재사용(저장소 안·8MB·매직), 반환 절대경로는 realpath 경계 검사, 기존 도구 동작 불변.
+- 실기 — MCP 4도구 실호출 전 경로 통과(상태 이력 참조).
+- 커밋 — WO `8c6cec09`, 병합 `067a4963`(로컬 전용). 상주 서버 재기동 대기.
+- **판정: PASS · 완료.** T-07 결정(B)의 4단계 프로그램(WO-012~015) 종료. 제안 항목 5·6이 서버·생성·UI·MCP 전 계층에서 구현됨.
