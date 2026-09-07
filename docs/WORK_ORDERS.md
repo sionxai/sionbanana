@@ -39,7 +39,8 @@
 | SB WO-009 | 2026-09-07 | 모션 세트 서버측 — 베이스 결속·다중 동작 순차 생성·공통 설정+예외·상태 추적 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 93/93 · 세트 실기 3/3+왼쪽 반전 · 병합 e20bfe35 |
 | SB WO-010 | 2026-09-07 | 모션 세트 UI — 세트 만들기·공통 설정+동작별 예외·상태판 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · tsc/lint 0 · 브라우저 전 흐름 실물 · 병합 62e4c98e |
 | SB WO-011 | 2026-09-07 | 세트 통합 내보내기(시트+JSON) · MCP 세트 도구 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 47/47 · ZIP 실기 · MCP 4도구 실호출 · 병합 2d7ea239 |
-| SB WO-012 | 2026-09-07 | 프레임 오버라이드 계층·후보 저장·적용/되돌리기·셀 이미지 (구간 수정 기반, 생성 없음) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
+| SB WO-012 | 2026-09-07 | 프레임 오버라이드 계층·후보 저장·적용/되돌리기·셀 이미지 (구간 수정 기반) | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 완료 | PASS · 86/86 · 적용·되돌리기 실기 · 병합 4f6b7ac8 |
+| SB WO-013 | 2026-09-07 | 후보 생성 모드 — 마스크 인페인팅·앵커 스트립 재생성 + 후보 워커 | CEO(Sol) / Maker(Codex exec) / 검수 CEO | P1 | 2026-09-07(KST) | 발행 | — |
 
 ## 지시서
 
@@ -478,6 +479,24 @@
 #### 상태 이력
 
 - 2026-09-07 13:1x KST — T-07 결정 접수 후 `발행`. 워크트리 `.claude/worktrees/sb-wo-012-motion-overrides` (`claude/sb-wo-012-motion-overrides` @ `16cf63c0`) 생성, Maker 위임 가동.
+- 2026-09-07 14:01 KST — Maker 반환(정확히 10파일, 검증 미실행). CEO 재실행: 실패 2 + tsc 오류 1 → 원인 규명 후 직접 수정 3건 → **86/86 · tsc 0**.
+- 2026-09-07 14:05 KST — CEO 실기(격리 dev 서버 3012): 8프레임 프로젝트 → `GET /cells/1`(187×359, trim·pivot 헤더) → 2배 확대·틴트 이미지를 upload 후보로 등록(ready) → apply(override 기록, 파생 f02만 변경 8.16, f01 불변 0.00, 캔버스 380×399 유지) → revert(override null, f02 복구 0.00, 오버라이드 파일 제거) → 후보 삭제 200 → 커밋 `b753b4b7`, 병합 `4f6b7ac8` → `완료`.
+
+### SB WO-013 — 후보 생성 모드 (마스크 인페인팅 · 앵커 스트립 재생성) + 후보 워커
+
+- **ID:** `SB WO-013` · **우선순위:** P1 · **목표일:** 2026-09-07 KST
+- **담당:** CEO(Sol, 스펙·검수·판정) / Maker(Codex exec, 구현) / 검수 CEO 직접
+- **의존성:** SB WO-012 병합(`4f6b7ac8`), 3단계 스파이크 실측(마스크 지원·`input_fidelity` 거부·스트립 슬라이싱 실패율), T-07 결정(B)
+- **목표:** (1) `mask` 후보 — 방향 적용 셀을 `input_image`, 마스크(없으면 캐릭터 bbox 자동)를 `input_image_mask`로 보내 편집 결과를 후보 프레임에 저장 (2) `strip` 후보 — 구간 앞뒤 이웃을 앵커로 포함한 스트립을 파생 시트·앵커 셀 참조와 함께 생성 → 자동 슬라이스(실패 시 최대 3회 재시도, 이후 격자 폴백) → 앵커 폐기·중간 셀 저장, `metrics`에 시도·신뢰도·배치 기록 (3) 분리 워커가 `run` 라우트를 1회 호출(세트 워커 패턴), 후보 생성 시 스폰.
+- **변경 범위:** `lib/codex-fetch.ts`(마스크 옵션만), `lib/motion/candidate-generate.ts`(신규), `candidates/route.ts`(스폰), `candidates/[cid]/run/route.ts`(신규), `scripts/motion-candidate-worker.mjs`(신규), `tests/motion-candidate-generate.test.mjs`(신규) 6파일. 스펙 전문: 스크래치패드 `wo013-spec.md`.
+- **완료 기준:** 신규·회귀 4파일 PASS · tsc 0 · `node --check` 워커 (CEO 재실행) / 코드 정독 / CEO 실기: 격리 서버에서 마스크 모드 실생성 1건(부분 수정 확인)·스트립 모드 실생성 1건(앵커 연속성 측정) → 적용까지.
+- **금지:** 목록 밖 수정, commit·push, npm install, 서버 기동, 테스트에서 실제 API 호출, `input_fidelity` 사용, UI·MCP 변경.
+- **위험등급:** R2(외부 생성 호출 경로 신설) · **대표자 투입:** 0~5분 · **롤백:** 브랜치 `claude/sb-wo-013-motion-candidate-generate` 폐기.
+- **보고 형식:** WO-012와 동일.
+
+#### 상태 이력
+
+- 2026-09-07 14:1x KST — `발행`. 워크트리 `.claude/worktrees/sb-wo-013-motion-candidate-generate` (`@ 4f6b7ac8`) 생성, Maker 위임 가동.
 
 ## 검수 로그
 
@@ -673,3 +692,17 @@
 - 실기 — 상태 이력 참조(ZIP 실물 + MCP 4도구 실호출 PASS). 관찰: `export_motion_set`에 `destPath`를 줘도 반환 `zipPath`는 dataRoot `motion-exports/` 경로였음(복사 여부 미확인 — 후속 확인 항목, 기능 자체는 정상).
 - 커밋 — WO `6ba23d7c`, 병합 `2d7ea239`(로컬 전용). 상주 서버 재기동 대기.
 - **판정: PASS · 완료.** 제안 항목 6(스프라이트 시트+JSON 내보내기, 세트 단위)과 2단계 MCP 노출 충족. 이로써 대표 승인 권장 순서의 1·2단계 전부와 3단계 스파이크가 완료됐고, 남은 결정은 T-07(항목 5·6 구현 범위).
+
+### SB WO-012 — 프레임 오버라이드 계층 · 후보 저장 · 적용/되돌리기 · 셀 이미지
+
+- 검수 기준: 워크트리 `claude/sb-wo-012-motion-overrides` base `16cf63c0`, 시작 porcelain 0줄 → Maker 정확히 10파일. 범위 위반 0건. 왕복 1회.
+- Maker 보고 — "구현 완료 / 검증 미실행"(키체인 -50). 가정: 빈 원본 셀에는 최소 배율 0.25 적용. 한계 자진 신고: 다중 프로세스 동시 쓰기·강제 종료 중 복구는 미보장.
+- CEO 재실행 1차 — 테스트 84/86(실패 2) · tsc 오류 1. **원인 규명 3건, 직접 수정:**
+  1. `candidates/route.ts`의 `CandidateRequestError`가 TypeScript 생성자 파라미터 프로퍼티를 사용 → Node strip-only 모드가 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`로 거부 → 라우트 테스트 전체 실패. 저장소 기존 스타일(필드 선언+본문 할당)로 교체.
+  2. `cells/[index]/route.ts`가 `new Response(Buffer)` — `BodyInit` 불일치(tsc TS2345) → `new Uint8Array(buffer)`.
+  3. 신규 원자성 테스트가 `projectDir()`(심링크 경로)로 `fs.rename` 목을 걸어 **목이 한 번도 발화하지 않고 통과**(macOS `/var`→`/private/var`) → 같은 파일 기존 원자성 테스트와 동일하게 `realpath` 비교로 교정. 완화가 아니라 오탐 제거이며, 교정 후 롤백 경로가 실제로 검증됨.
+- CEO 재실행 2차 — `motion-candidates`·`motion-storage`·`motion-engine`·`motion-export`·`motion-sets` **86/86** · `tsc --noEmit` 0.
+- 코드 정독 — 오버라이드는 방향 적용(flipX 후) 버퍼를 치환하므로 이중 반전 없음; `fitToCell`은 bbox 높이 기준 스케일(0.25~4 클램프)+발 기준점 정렬로 스파이크의 +18% 드리프트를 흡수; apply/revert는 프로젝트별 뮤테이션 락 + 오버라이드 스냅샷 롤백 + 실패 시 이전 프레임으로 재빌드; 오버라이드 파일이 사라지면 조용히 무시하지 않고 409로 실패(무결성); 후보·오버라이드 경로는 자산 화이트리스트·심링크·경계 검사 통과; 레거시 project.json은 `override: null`로 파싱.
+- 실기(격리 dev 서버 3012) — 상태 이력 참조. 핵심: 원본 `raw.png` 불변, 적용은 지정 프레임만 교체, 되돌리기는 완전 복구(픽셀 차 0.00).
+- 커밋 — WO `b753b4b7`, 병합 `4f6b7ac8`(로컬 전용). 상주 서버 재기동 대기.
+- **판정: PASS · 완료.** 항목 5·6의 기반(원본 보존·후보·적용/되돌리기) 확보. 생성 모드는 WO-013.
