@@ -70,7 +70,7 @@ export type MotionProjectPatch = Partial<
 
 export class MotionStorageError extends Error {
   readonly status: number;
-  readonly code: "INVALID_ID" | "NOT_FOUND" | "INVALID_PATCH";
+  readonly code: "INVALID_ID" | "NOT_FOUND" | "INVALID_PATCH" | "CONFLICT";
 
   constructor(
     code: MotionStorageError["code"],
@@ -908,7 +908,8 @@ export async function fitToCell(
 async function applyCandidateFramesUnlocked(
   id: string,
   candidateId: string,
-  frameIndices?: number[]
+  frameIndices?: number[],
+  options: { force?: boolean } = {}
 ): Promise<MotionProject> {
   const candidates = await import("@/lib/motion/candidates");
   const candidate = await candidates.readCandidate(id, candidateId);
@@ -921,6 +922,18 @@ async function applyCandidateFramesUnlocked(
     candidate.frames.map(frame => frame.index),
     current.frames.length
   );
+  const conflicts = indices.filter(index => {
+    const expected = candidate.baseline.find(entry => entry.index === index)?.overrideCandidateId;
+    const actual = current.frames[index].override?.candidateId ?? null;
+    return expected !== undefined && expected !== actual;
+  });
+  if (conflicts.length > 0 && options.force !== true) {
+    throw new MotionStorageError(
+      "CONFLICT",
+      `프레임 ${conflicts.map(index => index + 1).join(", ")}번은 이 후보를 만든 뒤 다른 후보(또는 되돌리기)로 바뀌었습니다. force로 덮어쓰거나 후보를 다시 만드세요.`,
+      409
+    );
+  }
   const directory = await safeExistingProjectDirectory(id);
   const snapshots: OverrideSnapshot[] = [];
   let rebuilt = false;
@@ -930,7 +943,20 @@ async function applyCandidateFramesUnlocked(
       const source = await candidates.candidateFramePath(id, candidateId, index);
       const candidateBuffer = await fs.readFile(source);
       const cell = await readOrientedCell(id, index);
-      const fitted = await fitToCell(candidateBuffer, cell, await analyzeFrame(candidateBuffer));
+      // 셀 정렬 결과를 재정렬하면 보존 영역도 리샘플되므로 생성 좌표를 그대로 적용한다.
+      if (candidate.cellAligned) {
+        const metadata = await sharp(candidateBuffer).metadata();
+        if (metadata.width !== cell.width || metadata.height !== cell.height) {
+          throw new MotionStorageError(
+            "INVALID_PATCH",
+            `셀 정렬 후보 프레임 ${index + 1}의 크기가 원본 셀과 다릅니다.`,
+            409
+          );
+        }
+      }
+      const fitted = candidate.cellAligned
+        ? await sharp(candidateBuffer).ensureAlpha().png().toBuffer()
+        : await fitToCell(candidateBuffer, cell, await analyzeFrame(candidateBuffer));
       snapshots.push(await snapshotOverride(directory, id, index));
       await writeOverrideFile(directory, id, index, fitted);
       frames[index] = {
@@ -970,10 +996,11 @@ async function applyCandidateFramesUnlocked(
 export async function applyCandidateFrames(
   id: string,
   candidateId: string,
-  frameIndices?: number[]
+  frameIndices?: number[],
+  options: { force?: boolean } = {}
 ): Promise<MotionProject> {
   return withMotionProjectMutation(id, () =>
-    applyCandidateFramesUnlocked(id, candidateId, frameIndices)
+    applyCandidateFramesUnlocked(id, candidateId, frameIndices, options)
   );
 }
 
@@ -1006,6 +1033,9 @@ async function revertFrameOverridesUnlocked(
   }
 }
 
+/**
+ * 오버라이드를 제거해 최초 원본으로 되돌린다. 직전 후보 상태로 돌아가지 않는다.
+ */
 export async function revertFrameOverrides(
   id: string,
   frameIndices?: number[]

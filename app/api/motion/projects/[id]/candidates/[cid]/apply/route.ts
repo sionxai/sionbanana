@@ -7,7 +7,12 @@ import { applyCandidateFrames, MotionStorageError } from "@/lib/motion/storage";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const payloadSchema = z.object({ frames: z.array(z.number().int().nonnegative()).min(1).optional() }).strict();
+const payloadSchema = z
+  .object({
+    frames: z.array(z.number().int().nonnegative()).min(1).optional(),
+    force: z.boolean().optional()
+  })
+  .strict();
 type RouteContext = { params: { id: string; cid: string } };
 
 function errorResponse(error: unknown, context: string): Response {
@@ -38,7 +43,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     const payload = payloadSchema.parse(input);
     return NextResponse.json({
       ok: true,
-      project: await applyCandidateFrames(params.id, params.cid, payload.frames)
+      project: await applyCandidateFrames(params.id, params.cid, payload.frames, { force: payload.force })
     });
   } catch (error) {
     return errorResponse(error, "/api/motion/projects/[id]/candidates/[cid]/apply POST error");

@@ -13,7 +13,7 @@ import {
   createCandidate,
   readCandidate
 } from "@/lib/motion/candidates";
-import { createProject, projectDir } from "@/lib/motion/storage";
+import { createProject, projectDir, readOrientedCell } from "@/lib/motion/storage";
 import { runCandidateWorker } from "../scripts/motion-candidate-worker.mjs";
 
 let hooksRegistered = false;
@@ -187,15 +187,94 @@ test("autoMaskFromCell makes only the alpha bounding box plus margin editable", 
   assert.equal(alphaAt(34, 44), 0);
 });
 
+test("compositeInsideMask preserves mask exteriors exactly and rejects mismatched masks", async () => {
+  const { compositeInsideMask } = await candidateGenerate();
+  const width = 4;
+  const height = 2;
+  const originalPixels = Buffer.alloc(width * height * 4);
+  const maskPixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      if (x < width / 2) {
+        originalPixels[offset + 2] = 255;
+        originalPixels[offset + 3] = 255;
+        maskPixels[offset + 3] = 255;
+      }
+    }
+  }
+  const original = await sharp(originalPixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  const edited = await sharp({
+    create: { width: width * 2, height: height * 2, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } }
+  })
+    .png()
+    .toBuffer();
+  const mask = await sharp(maskPixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  const composite = await compositeInsideMask({ original, edited, mask, feather: 0 });
+  const raw = await sharp(composite).raw().toBuffer({ resolveWithObject: true });
+  assert.deepEqual([raw.info.width, raw.info.height], [width, height]);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const pixel = [...raw.data.subarray(offset, offset + 4)];
+      if (x < width / 2) {
+        assert.deepEqual(pixel, [...originalPixels.subarray(offset, offset + 4)]);
+      } else {
+        assert.deepEqual(pixel, [255, 0, 0, 255]);
+      }
+    }
+  }
+  await assert.rejects(
+    compositeInsideMask({
+      original,
+      edited,
+      mask: await sharp({ create: { width: width + 1, height, channels: 4, background: "black" } }).png().toBuffer()
+    }),
+    RangeError
+  );
+
+  const hiddenOriginal = await sharp(Buffer.from([13, 17, 23, 0]), {
+    raw: { width: 1, height: 1, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+  const hiddenMask = await sharp(Buffer.from([0, 0, 0, 255]), {
+    raw: { width: 1, height: 1, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+  const hiddenComposite = await compositeInsideMask({ original: hiddenOriginal, edited, mask: hiddenMask });
+  assert.deepEqual([...await sharp(hiddenOriginal).ensureAlpha().raw().toBuffer()], [13, 17, 23, 0]);
+  assert.deepEqual([...await sharp(hiddenComposite).ensureAlpha().raw().toBuffer()], [13, 17, 23, 0]);
+
+  const featherMaskPixels = Buffer.alloc(7 * 4);
+  for (let x = 0; x < 3; x += 1) featherMaskPixels[x * 4 + 3] = 255;
+  const featherComposite = await compositeInsideMask({
+    original: await sharp({ create: { width: 7, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer(),
+    edited: await sharp({ create: { width: 7, height: 1, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } } }).png().toBuffer(),
+    mask: await sharp(featherMaskPixels, { raw: { width: 7, height: 1, channels: 4 } }).png().toBuffer()
+  });
+  const featherRaw = await sharp(featherComposite).ensureAlpha().raw().toBuffer();
+  assert.ok(featherRaw[3 * 4 + 3] > 0 && featherRaw[3 * 4 + 3] < 255);
+
+  const blended = await compositeInsideMask({
+    original: await sharp(Buffer.from([0, 0, 255, 128]), { raw: { width: 1, height: 1, channels: 4 } }).png().toBuffer(),
+    edited: await sharp(Buffer.from([255, 0, 0, 255]), { raw: { width: 1, height: 1, channels: 4 } }).png().toBuffer(),
+    mask: await sharp(Buffer.from([0, 0, 0, 128]), { raw: { width: 1, height: 1, channels: 4 } }).png().toBuffer(),
+    feather: 0
+  });
+  assert.deepEqual([...await sharp(blended).ensureAlpha().raw().toBuffer()], [169, 0, 86, 191]);
+});
+
 test("mask candidates use oriented cells and stored masks, then persist a ready frame", async t => {
   await useTempDataDir(t);
   const { runCandidate } = await candidateGenerate();
   const project = await projectForCandidates();
-  const storedMask = await sharp({
-    create: { width: 48, height: 48, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } }
-  })
-    .png()
-    .toBuffer();
+  const storedMaskPixels = Buffer.alloc(48 * 48 * 4);
+  for (let y = 0; y < 48; y += 1) {
+    for (let x = 0; x < 24; x += 1) storedMaskPixels[(y * 48 + x) * 4 + 3] = 255;
+  }
+  const storedMask = await sharp(storedMaskPixels, { raw: { width: 48, height: 48, channels: 4 } }).png().toBuffer();
   const candidate = await createCandidate(project.id, {
     mode: "mask",
     frames: [{ index: 1, mask: storedMask }],
@@ -218,8 +297,19 @@ test("mask candidates use oriented cells and stored masks, then persist a ready 
   assert.match(calls[0].prompt, /repair the arm/);
   assert.match(calls[0].prompt, /Keep face exactly as they are/);
   assert.equal(result.status, "ready");
-  assert.deepEqual(result.metrics, { mode: "mask", frames: 1, retries: 0 });
-  assert.equal(existsSync(path.join(projectDir(project.id), "candidates", candidate.id, "frames", "f02.png")), true);
+  assert.deepEqual(result.metrics, { mode: "mask", frames: 1, retries: 0, maskComposite: true, feather: 2 });
+  const candidateFrame = path.join(projectDir(project.id), "candidates", candidate.id, "frames", "f02.png");
+  assert.equal(existsSync(candidateFrame), true);
+  const [original, generated] = await Promise.all([
+    readOrientedCell(project.id, 1).then(cell => sharp(cell.buffer).ensureAlpha().raw().toBuffer()),
+    sharp(await fs.readFile(candidateFrame)).ensureAlpha().raw().toBuffer()
+  ]);
+  for (let y = 0; y < 48; y += 1) {
+    for (let x = 0; x < 24; x += 1) {
+      const offset = (y * 48 + x) * 4;
+      assert.deepEqual([...generated.subarray(offset, offset + 4)], [...original.subarray(offset, offset + 4)]);
+    }
+  }
 });
 
 test("mask candidates derive a mask when absent and retry one failed image edit", async t => {
@@ -245,7 +335,7 @@ test("mask candidates derive a mask when absent and retry one failed image edit"
   assert.equal(mask.data[(4 * mask.info.width + 6) * 4 + 3], 0);
   assert.equal(calls.length, 2);
   assert.equal(result.status, "ready");
-  assert.deepEqual(result.metrics, { mode: "mask", frames: 1, retries: 1 });
+  assert.deepEqual(result.metrics, { mode: "mask", frames: 1, retries: 1, maskComposite: true, feather: 2 });
 });
 
 test("mask candidates record a frame-specific failure after the second failed edit", async t => {

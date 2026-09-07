@@ -464,15 +464,25 @@ export function MotionFixPanel({
     if (!window.confirm(displayFrames(frames) + "번 프레임에 이 후보를 적용할까요?")) return;
     try {
       const updated = await runProjectMutation(async () => {
-        const response = await fetch(candidatesUrl(project.id) + "/" + encodeURIComponent(candidate.id) + "/apply", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frames })
-        });
-        const body = (await response.json().catch(() => null)) as { ok?: boolean; project?: MotionProject; reason?: string } | null;
-        if (!response.ok || body?.ok !== true || !body.project) throw new Error(responseReason(body, "후보를 적용하지 못했습니다."));
-        return body.project;
+        const requestApply = async (force: boolean): Promise<MotionProject | null> => {
+          const response = await fetch(candidatesUrl(project.id) + "/" + encodeURIComponent(candidate.id) + "/apply", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ frames, ...(force ? { force: true } : {}) })
+          });
+          const body = (await response.json().catch(() => null)) as { ok?: boolean; project?: MotionProject; reason?: string } | null;
+          if (response.status === 409 && !force) {
+            toast.error(responseReason(body, "후보를 적용하지 못했습니다."));
+            return window.confirm("그래도 덮어쓸까요?") ? requestApply(true) : null;
+          }
+          if (!response.ok || body?.ok !== true || !body.project) {
+            throw new Error(responseReason(body, "후보를 적용하지 못했습니다."));
+          }
+          return body.project;
+        };
+        return requestApply(false);
       });
+      if (!updated) return;
       onProjectChanged(updated);
       onPreviewCandidateChange(null);
       toast.success("선택한 후보 프레임을 적용했습니다.");
@@ -630,7 +640,7 @@ export function MotionFixPanel({
         </CardHeader>
         <CardContent className="space-y-4">
           {candidateError ? <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{candidateError} 잠시 후 다시 확인합니다.</p> : null}
-          {allOverrideFrames.length > 0 ? <div className="space-y-2 rounded-md border bg-muted/20 p-3"><p className="text-sm font-medium">적용된 프레임 되돌리기</p><p className="text-xs text-muted-foreground">후보를 삭제한 뒤에도 현재 프로젝트의 오버라이드를 선택 구간 또는 전체에서 되돌릴 수 있습니다.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || selectedOverrideFrames.length === 0} onClick={() => void revertFrames(selectedOverrideFrames, "선택 구간의 적용 프레임")}>선택 구간 되돌리기</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte} onClick={() => void revertFrames(allOverrideFrames, "프로젝트 전체의 적용 프레임")}>전체 되돌리기</Button></div></div> : null}
+          {allOverrideFrames.length > 0 ? <div className="space-y-2 rounded-md border bg-muted/20 p-3"><p className="text-sm font-medium">적용된 프레임 되돌리기</p><p className="text-xs text-muted-foreground">되돌리면 해당 프레임이 최초 원본으로 돌아갑니다(직전 후보로 되돌아가지 않습니다).</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || selectedOverrideFrames.length === 0} onClick={() => void revertFrames(selectedOverrideFrames, "선택 구간의 적용 프레임")}>선택 구간 되돌리기</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte} onClick={() => void revertFrames(allOverrideFrames, "프로젝트 전체의 적용 프레임")}>전체 되돌리기</Button></div></div> : null}
           {!isLoadingCandidates && !candidateError && candidates.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">아직 생성한 수정 후보가 없습니다.</p> : null}
           {candidates.map(candidate => {
             const checked = selectedCandidateFrames[candidate.id] ?? [];

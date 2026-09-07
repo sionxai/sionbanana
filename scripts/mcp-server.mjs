@@ -344,7 +344,8 @@ export const motionCandidateApplyInputSchema = z
   .object({
     projectId: motionCandidateIdSchema,
     candidateId: motionCandidateIdSchema,
-    frames: z.array(z.number().int().nonnegative()).min(1).optional()
+    frames: z.array(z.number().int().nonnegative()).min(1).optional(),
+    force: z.boolean().optional()
   })
   .strict();
 export const motionCandidateRevertInputSchema = z
@@ -357,6 +358,12 @@ const MOTION_SET_TOOL_DESCRIPTION =
   "세트 = 한 캐릭터의 여러 동작을 순차 생성. 순환 프리셋은 반복 행 자동 제외(실효 4장 정상).";
 const MOTION_CANDIDATE_TOOL_DESCRIPTION =
   "구간 수정 — mask는 셀 크기 마스크(알파 0=편집, 좁을수록 원본 보존), strip은 연속 구간을 이웃 앵커로 재생성. 적용 시 원본 셀 크기로 스케일·발 기준 정렬되며 원본 시트는 바뀌지 않는다.";
+const MOTION_CANDIDATE_APPLY_TOOL_DESCRIPTION =
+  MOTION_CANDIDATE_TOOL_DESCRIPTION +
+  " 후보 생성 이후 해당 프레임이 바뀌었으면 409로 거부한다. force: true로 덮어쓴다.";
+const MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION =
+  MOTION_CANDIDATE_TOOL_DESCRIPTION +
+  " 오버라이드를 제거해 최초 원본으로 되돌린다(직전 후보로 돌아가지 않는다).";
 
 const TOOL_NAMES = [
   "health_check",
@@ -729,7 +736,7 @@ export function createSionBananaMcpServer(options = {}) {
     "apply_motion_candidate",
     {
       title: "Apply Motion Candidate",
-      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      description: MOTION_CANDIDATE_APPLY_TOOL_DESCRIPTION,
       inputSchema: motionCandidateApplyInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -745,7 +752,7 @@ export function createSionBananaMcpServer(options = {}) {
     "revert_motion_frames",
     {
       title: "Revert Motion Frames",
-      description: MOTION_CANDIDATE_TOOL_DESCRIPTION,
+      description: MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION,
       inputSchema: motionCandidateRevertInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -1625,7 +1632,10 @@ export async function applyMotionCandidate(input, context) {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(parsedInput.frames === undefined ? {} : { frames: parsedInput.frames })
+        body: JSON.stringify({
+          ...(parsedInput.frames === undefined ? {} : { frames: parsedInput.frames }),
+          ...(parsedInput.force === undefined ? {} : { force: parsedInput.force })
+        })
       },
       context
     );
