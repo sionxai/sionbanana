@@ -42,6 +42,7 @@ type CreateCandidateInput = {
   frames: CandidateFrameInput[];
   instruction?: string | null;
   protect?: string[];
+  cellAligned?: boolean;
 };
 
 function errorCode(error: unknown): string | undefined {
@@ -260,6 +261,10 @@ async function createCandidateUnlocked(projectId: string, input: CreateCandidate
   if (!Array.isArray(protect) || protect.some(value => typeof value !== "string" || !value.trim() || value.trim().length > 200)) {
     throw new CandidateStorageError("INVALID_INPUT", "Candidate protect values are invalid.", 400);
   }
+  const cellAligned = input.cellAligned ?? false;
+  if (typeof cellAligned !== "boolean") {
+    throw new CandidateStorageError("INVALID_INPUT", "Candidate cell alignment is invalid.", 400);
+  }
 
   const candidates = await candidatesDirectory(projectId, true);
   const id = `cand-${Date.now()}-${randomUUID()}`;
@@ -306,6 +311,11 @@ async function createCandidateUnlocked(projectId: string, input: CreateCandidate
       frames: candidateFrames,
       instruction,
       protect: protect.map(value => value.trim()),
+      cellAligned,
+      baseline: candidateFrames.map(frame => ({
+        index: frame.index,
+        overrideCandidateId: project.frames[frame.index].override?.candidateId ?? null
+      })),
       reason: null,
       createdAtIso: now,
       updatedAtIso: now,

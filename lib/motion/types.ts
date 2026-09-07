@@ -100,6 +100,17 @@ export const candidateSchema = z
       .min(1),
     instruction: z.string().max(4000).nullable().default(null),
     protect: z.array(z.string().trim().min(1).max(200)).default([]),
+    cellAligned: z.boolean().default(false),
+    baseline: z
+      .array(
+        z
+          .object({
+            index: z.number().int().nonnegative(),
+            overrideCandidateId: z.string().nullable()
+          })
+          .strict()
+      )
+      .default([]),
     reason: z.string().nullable().default(null),
     createdAtIso: z.string().datetime(),
     updatedAtIso: z.string().datetime(),

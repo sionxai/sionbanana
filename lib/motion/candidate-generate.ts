@@ -30,6 +30,7 @@ import type { Candidate } from "@/lib/motion/types";
 const FRAME_RETRY_COUNT = 1;
 const FRAME_GENERATION_TIMEOUT_MS = 120_000;
 const RUNNING_GRACE_MS = 60_000;
+const MASK_COMPOSITE_FEATHER = 2;
 
 export type CandidateGenerateDeps = {
   editImage: (input: { image: Buffer; mask: Buffer; prompt: string }) => Promise<Buffer>;
@@ -126,7 +127,12 @@ async function finishClaim(
   projectId: string,
   candidateId: string,
   startedAtIso: string,
-  input: { status: "ready" | "failed"; reason: string | null; metrics: Record<string, unknown> | null }
+  input: {
+    status: "ready" | "failed";
+    reason: string | null;
+    metrics: Record<string, unknown> | null;
+    cellAligned?: boolean;
+  }
 ): Promise<Candidate> {
   return updateCandidate(projectId, candidateId, current => {
     if (current.status !== "running" || runningStartedAt(current) !== startedAtIso) return current;
@@ -134,7 +140,8 @@ async function finishClaim(
       ...current,
       status: input.status,
       reason: input.reason,
-      metrics: input.metrics
+      metrics: input.metrics,
+      ...(input.cellAligned === undefined ? {} : { cellAligned: input.cellAligned })
     };
   });
 }
@@ -279,6 +286,85 @@ export async function autoMaskFromCell(cell: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
+/**
+ * 편집 결과에서 마스크 안쪽만 취하고 바깥은 원본 픽셀을 그대로 쓴다.
+ * mask 알파 0 = 편집 영역, 255 = 보존 영역. feather는 경계 혼합 반경(px).
+ */
+export async function compositeInsideMask(input: {
+  original: Buffer;
+  edited: Buffer;
+  mask: Buffer;
+  feather?: number;
+}): Promise<Buffer> {
+  const original = await sharp(input.original).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  if (!original.info.width || !original.info.height || original.info.channels !== 4) {
+    throw new Error("Original image must decode to RGBA pixels.");
+  }
+  const mask = await sharp(input.mask).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  if (mask.info.width !== original.info.width || mask.info.height !== original.info.height) {
+    throw new RangeError("Mask dimensions must match the original image.");
+  }
+  if (mask.info.channels !== 4) throw new Error("Mask image must decode to RGBA pixels.");
+
+  const edited = await sharp(input.edited)
+    .resize(original.info.width, original.info.height, { fit: "fill", kernel: sharp.kernel.lanczos3 })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  if (edited.info.channels !== 4) throw new Error("Edited image must decode to RGBA pixels.");
+
+  const feather = input.feather ?? MASK_COMPOSITE_FEATHER;
+  if (!Number.isFinite(feather) || feather < 0) {
+    throw new RangeError("Mask feather must be a non-negative finite number.");
+  }
+
+  const pixelCount = original.info.width * original.info.height;
+  const weights = Buffer.alloc(pixelCount);
+  for (let index = 0; index < pixelCount; index += 1) {
+    weights[index] = 255 - mask.data[index * 4 + 3];
+  }
+  if (feather > 0) {
+    const blurred = await sharp(weights, {
+      raw: { width: original.info.width, height: original.info.height, channels: 1 }
+    })
+      .blur(feather)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    for (let index = 0; index < pixelCount; index += 1) {
+      // 보존 알파 255는 페더가 번져도 원본 RGBA 바이트를 반드시 유지한다.
+      weights[index] = mask.data[index * 4 + 3] === 255 ? 0 : blurred.data[index * blurred.info.channels];
+    }
+  }
+
+  const composite = Buffer.alloc(pixelCount * 4);
+  for (let index = 0; index < pixelCount; index += 1) {
+    const offset = index * 4;
+    if (mask.data[offset + 3] === 255) {
+      original.data.copy(composite, offset, offset, offset + 4);
+      continue;
+    }
+    const weight = weights[index] / 255;
+    const originalAlpha = original.data[offset + 3] / 255;
+    const editedAlpha = edited.data[offset + 3] / 255;
+    const outputAlpha = originalAlpha * (1 - weight) + editedAlpha * weight;
+    composite[offset + 3] = Math.round(outputAlpha * 255);
+    for (let channel = 0; channel < 3; channel += 1) {
+      composite[offset + channel] = outputAlpha > 0
+        ? Math.round(
+            (original.data[offset + channel] * originalAlpha * (1 - weight) +
+              edited.data[offset + channel] * editedAlpha * weight) /
+              outputAlpha
+          )
+        : 0;
+    }
+  }
+  return sharp(composite, {
+    raw: { width: original.info.width, height: original.info.height, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+}
+
 async function readCandidateMask(
   projectId: string,
   candidate: Candidate,
@@ -325,7 +411,12 @@ async function runMaskCandidate(
         try {
           const edited = await deps.editImage({ image: source, mask, prompt });
           const keyed = backgroundHex ? await applyMatte(edited, project.matte) : edited;
-          generated = await sharp(keyed).ensureAlpha().png().toBuffer();
+          generated = await compositeInsideMask({
+            original: cell.buffer,
+            edited: keyed,
+            mask,
+            feather: MASK_COMPOSITE_FEATHER
+          });
           break;
         } catch (error) {
           failure = error;
@@ -333,13 +424,23 @@ async function runMaskCandidate(
         }
       }
       if (!generated) throw new Error(errorMessage(failure));
+      const generatedMetadata = await sharp(generated).metadata();
+      if (generatedMetadata.width !== cell.width || generatedMetadata.height !== cell.height) {
+        throw new Error(`Generated frame ${frame.index + 1} does not match the source cell size.`);
+      }
       await writeClaimedFrame(projectId, candidate.id, startedAtIso, frame.index, generated);
     } catch (error) {
       if (error instanceof CandidateStorageError && error.code === "CONFLICT") throw error;
       throw new Error(`Frame ${frame.index + 1} edit failed: ${errorMessage(error)}`);
     }
   }
-  return { mode: "mask", frames: candidate.frames.length, retries };
+  return {
+    mode: "mask",
+    frames: candidate.frames.length,
+    retries,
+    maskComposite: true,
+    feather: MASK_COMPOSITE_FEATHER
+  };
 }
 
 async function runStripCandidate(
@@ -481,7 +582,8 @@ export async function runCandidate(
     return finishClaim(projectId, candidateId, claimed.startedAtIso, {
       status: "ready",
       reason: null,
-      metrics
+      metrics,
+      ...(claimed.candidate.mode === "mask" ? { cellAligned: true } : {})
     });
   } catch (error) {
     return finishClaim(projectId, candidateId, claimed.startedAtIso, {
