@@ -68,6 +68,14 @@ export const frameOverrideSchema = z
         touchesEdge: z.array(z.enum(["left", "right", "top", "bottom"])).default([])
       })
       .strict()
+      .optional(),
+    review: z
+      .object({
+        candidateId: z.string().regex(/^[A-Za-z0-9-]+$/),
+        reasons: z.array(z.string().min(1)).min(1),
+        recordedAtIso: z.string().datetime()
+      })
+      .strict()
       .optional()
   })
   .strict();
@@ -191,7 +199,7 @@ export const motionProjectSchema = z
     sourceImage: sourceImageSchema,
     sliceMode: z.enum(sliceModeValues),
     sliceConfidence: z.number().finite().min(0).max(1).default(1),
-    layoutValidated: z.boolean().default(false),
+    layoutValidated: z.boolean().nullable().default(null),
     normalizeScale: z.enum(normalizeScaleValues).default("area"),
     normalizePivotX: z.enum(normalizePivotXValues).default("centroid"),
     normalizePivotY: z.enum(normalizePivotYValues).default("preserve"),
@@ -200,6 +208,15 @@ export const motionProjectSchema = z
     matte: matteSpecSchema,
     mirrorDetection: mirrorDetectionSchema.nullable().default(null),
     duplicateDetection: duplicateDetectionSchema.nullable().default(null),
+    reviewApproval: z
+      .object({
+        approvedAtIso: z.string().datetime(),
+        approvedReasons: z.array(z.string().min(1)),
+        note: z.string().max(500).nullable().default(null)
+      })
+      .strict()
+      .nullable()
+      .default(null),
     frames: z.array(frameSchema),
     animations: z.array(animationSchema)
   })
@@ -239,7 +256,7 @@ export function parseMotionProject(input: unknown): MotionProject {
   const layoutValidated =
     !Object.prototype.hasOwnProperty.call(project, "layoutValidated") ||
     project.layoutValidated === undefined
-      ? sliceMode === "auto"
+      ? null
       : project.layoutValidated;
   const normalizeScale =
     !Object.prototype.hasOwnProperty.call(project, "normalizeScale") ||

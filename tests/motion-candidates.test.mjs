@@ -712,16 +712,97 @@ test("candidate apply preflights every frame before writing and aggregates block
   assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "project.json")), projectBeforeBlockedApply);
 });
 
-test("cell-aligned candidates keep the existing size-only apply path", async t => {
+test("cell-aligned candidates require an explicit index before applying an empty source", async t => {
   await useTempDataDir(t);
   const project = await projectForCandidates(1);
   const candidate = await createCandidate(project.id, {
     mode: "upload",
-    frames: [{ index: 0, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }],
+    frames: [{ index: 0, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }]
+  });
+  await updateCandidate(project.id, candidate.id, current => ({ ...current, cellAligned: true }));
+  const projectPath = path.join(projectDir(project.id), "project.json");
+  const projectBefore = await fs.readFile(projectPath);
+
+  await assert.rejects(
+    applyCandidateFrames(project.id, candidate.id, undefined, {
+      force: true,
+      allowContentLoss: true,
+      maxLostPixels: 10000,
+      intentionalEmptyFrames: [1]
+    }),
+    error =>
+      error?.status === 409 &&
+      error?.code === "CONTENT_LOSS" &&
+      error?.message ===
+        "프레임 1번 후보에 그려진 내용이 없습니다. 의도한 소멸 프레임이면 intentionalEmptyFrames에 0(0-based 인덱스)를 넣어 적용하세요."
+  );
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+  assert.equal((await readProject(project.id)).frames[0].override, null);
+  assert.deepEqual(await fs.readFile(projectPath), projectBefore);
+
+  const applied = await applyCandidateFrames(project.id, candidate.id, undefined, {
+    intentionalEmptyFrames: [0]
+  });
+  assert.equal(applied.frames[0].override?.candidateId, candidate.id);
+  assert.equal(applied.frames[0].override?.fit?.verdict, "review");
+  assert.deepEqual(applied.frames[0].override?.fit?.reasons, ["intentional-empty"]);
+  const empty = await sharp(await fs.readFile(path.join(projectDir(project.id), "overrides", "f01.png")))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  assert.deepEqual([empty.info.width, empty.info.height], [48, 48]);
+  for (let offset = 3; offset < empty.data.length; offset += empty.info.channels) assert.equal(empty.data[offset], 0);
+});
+
+test("cell-aligned nonempty candidates preserve candidate RGBA pixels", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await gammaCell([200, 50, 30]) }],
     cellAligned: true
   });
 
   const applied = await applyCandidateFrames(project.id, candidate.id);
-  assert.equal(applied.frames[0].override?.candidateId, candidate.id);
+  const candidateRaw = await sharp(await fs.readFile(await candidateFramePath(project.id, candidate.id, 0)))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const overrideRaw = await sharp(await fs.readFile(path.join(projectDir(project.id), "overrides", "f01.png")))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
   assert.equal(applied.frames[0].override?.fit, undefined);
+  assert.deepEqual(overrideRaw.info, candidateRaw.info);
+  assert.deepEqual(overrideRaw.data, candidateRaw.data);
+});
+
+test("cell-aligned candidates preflight mixed empty frames before writing overrides", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(2);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [
+      { index: 0, image: await gammaCell([200, 50, 30]) },
+      { index: 1, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }
+    ],
+    cellAligned: true
+  });
+  const projectPath = path.join(projectDir(project.id), "project.json");
+  const projectBefore = await fs.readFile(projectPath);
+  const projectBeforeJson = JSON.parse(projectBefore.toString("utf8"));
+
+  await assert.rejects(
+    applyCandidateFrames(project.id, candidate.id),
+    error =>
+      error?.status === 409 &&
+      error?.code === "CONTENT_LOSS" &&
+      error?.message ===
+        "프레임 2번 후보에 그려진 내용이 없습니다. 의도한 소멸 프레임이면 intentionalEmptyFrames에 1(0-based 인덱스)를 넣어 적용하세요."
+  );
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f02.png")), false);
+  const projectAfter = await fs.readFile(projectPath);
+  assert.deepEqual(projectAfter, projectBefore);
+  assert.deepEqual(JSON.parse(projectAfter.toString("utf8")), projectBeforeJson);
 });

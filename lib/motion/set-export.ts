@@ -8,7 +8,11 @@ import { promisify } from "node:util";
 
 import sharp from "sharp";
 
-import { buildMotionExportReview, type MotionExportReview } from "@/lib/motion/export";
+import {
+  buildMotionExportReview,
+  MotionExportBlockedError,
+  type MotionExportReview
+} from "@/lib/motion/export";
 import { MOTION_ACTION_PRESETS } from "@/lib/motion/prompt";
 import type { MotionSet, MotionSetMember } from "@/lib/motion/set-types";
 import { projectDir, readProject } from "@/lib/motion/storage";
@@ -188,6 +192,38 @@ export async function buildSetExportBundle(
   }
 
   const exportedMembers = await readExportedMembers(set);
+  const review: Record<string, MotionExportReview> = {};
+  let reviewFrameOffset = 0;
+  for (const member of exportedMembers) {
+    review[member.member.action] = buildMotionExportReview(
+      member.project,
+      member.frames,
+      reviewFrameOffset
+    );
+    reviewFrameOffset += member.frames.length;
+  }
+  const blockingIssues = Object.entries(review).flatMap(([action, value]) =>
+    value.blockingIssues.map(issue => `${action}:${issue}`)
+  );
+  const outstandingIssues = Object.entries(review).flatMap(([action, value]) =>
+    value.outstandingIssues.map(issue => `${action}:${issue}`)
+  );
+  if (blockingIssues.length > 0 || outstandingIssues.length > 0) {
+    const firstReview = Object.values(review)[0]!;
+    throw new MotionExportBlockedError({
+      ...firstReview,
+      issues: Object.entries(review).flatMap(([action, value]) =>
+        value.issues.map(issue => `${action}:${issue}`)
+      ),
+      blockingIssues,
+      approvableIssues: Object.entries(review).flatMap(([action, value]) =>
+        value.approvableIssues.map(issue => `${action}:${issue}`)
+      ),
+      outstandingIssues,
+      approval: null,
+      requiresReview: true
+    });
+  }
   const left = Math.ceil(Math.max(...exportedMembers.map(member => member.pivotX)));
   const right = Math.ceil(
     Math.max(...exportedMembers.map(member => member.project.canvas.w - member.pivotX))
@@ -271,7 +307,6 @@ export async function buildSetExportBundle(
     let nextIndex = 0;
     const sourceProjectIds: Record<string, string> = {};
     const sizeReport: Record<string, { frameHeightMedian: number }> = {};
-    const review: Record<string, MotionExportReview> = {};
     const frames: Array<{
       index: number;
       x: number;
@@ -284,7 +319,6 @@ export async function buildSetExportBundle(
     }> = [];
     const animations = aligned.map((action, row) => {
       const indices: number[] = [];
-      const firstFrameIndex = nextIndex;
       for (const [column, frame] of action.member.frames.entries()) {
         const index = nextIndex++;
         indices.push(index);
@@ -305,11 +339,6 @@ export async function buildSetExportBundle(
       sizeReport[action.member.member.action] = {
         frameHeightMedian: median(action.member.frames.map(frame => frame.trim.h))
       };
-      review[action.member.member.action] = buildMotionExportReview(
-        action.member.project,
-        action.member.frames,
-        firstFrameIndex
-      );
       return {
         name: action.member.member.action,
         label: preset.label,

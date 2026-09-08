@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { MotionExportReview } from "@/lib/motion/export";
 import type { MotionActionPreset } from "@/lib/motion/prompt";
 import { MOTION_ACTION_PRESETS } from "@/lib/motion/prompt";
 import { motionSetSchema, type MotionSet } from "@/lib/motion/set-types";
@@ -127,12 +128,15 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
   const [isLoading, setIsLoading] = useState(true);
   const [regeneratingAction, setRegeneratingAction] = useState<MotionActionPreset | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [projectMetrics, setProjectMetrics] = useState<Record<string, ProjectMetrics>>({});
   const mountedRef = useRef(true);
   const getRequestRef = useRef<number | null>(null);
   const getRequestSequenceRef = useRef(0);
   const mutationRequestRef = useRef(0);
   const mutationRef = useRef(false);
+  const exportRequestRef = useRef(0);
+  const exportInFlightRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -140,6 +144,8 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
       mountedRef.current = false;
       getRequestRef.current = null;
       mutationRequestRef.current += 1;
+      exportRequestRef.current += 1;
+      exportInFlightRef.current = false;
       if (mutationRef.current) onBusyChange(false);
     };
   }, [onBusyChange]);
@@ -181,6 +187,12 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
       getRequestRef.current = null;
     };
   }, [loadSet]);
+
+  useEffect(() => {
+    exportRequestRef.current += 1;
+    exportInFlightRef.current = false;
+    setIsExporting(false);
+  }, [setId]);
 
   useEffect(() => {
     if (!motionSet || !motionSet.members.some(member => member.status === "pending" || member.status === "running")) {
@@ -286,6 +298,63 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
     }
   };
 
+  const handleExport = async () => {
+    if (!motionSet || isExporting || exportInFlightRef.current) return;
+
+    const requestId = ++exportRequestRef.current;
+    const exportSetId = motionSet.id;
+    exportInFlightRef.current = true;
+    setIsExporting(true);
+    try {
+      const response = await fetch(`/api/motion/sets/${encodeURIComponent(exportSetId)}/export-file?gif=1`);
+      if (!mountedRef.current || exportRequestRef.current !== requestId) return;
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          code?: unknown;
+          reason?: unknown;
+          review?: Pick<MotionExportReview, "blockingIssues">;
+        } | null;
+        if (!mountedRef.current || exportRequestRef.current !== requestId) return;
+        const reason = responseReason(payload, "통합 모션 세트를 내보내지 못했습니다.");
+        const hasBlockingIssues = Array.isArray(payload?.review?.blockingIssues) && payload.review.blockingIssues.length > 0;
+        throw new Error(
+          payload?.code === "EXPORT_BLOCKED"
+            ? hasBlockingIssues
+              ? `${reason} 해당 모션 편집 화면에서 해당 프레임을 되돌리고 후보를 다시 만드세요.`
+              : `${reason} 해당 모션 편집 화면에서 검수 승인 후 다시 내보내세요.`
+            : reason
+        );
+      }
+
+      const blob = await response.blob();
+      if (!mountedRef.current || exportRequestRef.current !== requestId) return;
+      const downloadUrl = URL.createObjectURL(blob);
+      try {
+        const disposition = response.headers.get("Content-Disposition") ?? "";
+        const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+        const anchor = document.createElement("a");
+        anchor.href = downloadUrl;
+        anchor.download = fileName ?? `${exportSetId}-motion-set.zip`;
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      }
+      toast.success("통합 모션 세트 ZIP을 준비했습니다.");
+    } catch (error) {
+      if (mountedRef.current && exportRequestRef.current === requestId) {
+        toast.error(error instanceof Error ? error.message : "통합 모션 세트를 내보내지 못했습니다.");
+      }
+    } finally {
+      if (exportRequestRef.current === requestId) {
+        exportInFlightRef.current = false;
+        if (mountedRef.current) setIsExporting(false);
+      }
+    }
+  };
+
   if (isLoading && !motionSet) {
     return (
       <div className="flex min-h-[440px] items-center justify-center rounded-xl border border-dashed">
@@ -322,13 +391,9 @@ export function MotionSetBoard({ setId, onOpenProject, onSetUpdated, onDeleted, 
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             {readyExportCount > 0 ? (
-              <Button asChild variant="outline" size="sm">
-                <a
-                  href={`/api/motion/sets/${encodeURIComponent(motionSet.id)}/export-file?gif=1`}
-                  download
-                >
-                  통합 내보내기
-                </a>
+              <Button variant="outline" size="sm" disabled={isExporting} onClick={() => void handleExport()}>
+                {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+                통합 내보내기
               </Button>
             ) : (
               <Button variant="outline" size="sm" disabled>

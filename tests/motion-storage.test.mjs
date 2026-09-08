@@ -20,7 +20,8 @@ import {
   readOrientedCell,
   readProject,
   rebuildProject,
-  revertFrameOverrides
+  revertFrameOverrides,
+  setReviewApproval
 } from "@/lib/motion/storage";
 import { createCandidate, readCandidate, updateCandidate } from "@/lib/motion/candidates";
 import { analyzeFrame } from "@/lib/motion/engine";
@@ -255,7 +256,7 @@ test("buildSheetPrompt includes chroma key, grid dimensions, and one direction",
   assert.match(prompt, /Do not mirror/i);
 });
 
-test("projects record whether their layout was validated and derive it for legacy project JSON", async t => {
+test("projects record whether their layout was validated and retain unknown legacy project JSON", async t => {
   await useTempDataDir(t);
   const input = {
     sheetBuffer: await testSheet(),
@@ -280,11 +281,69 @@ test("projects record whether their layout was validated and derive it for legac
     frames: [],
     animations: []
   };
-  assert.equal(parseMotionProject(legacyProject).layoutValidated, false);
-  assert.equal(parseMotionProject({ ...legacyProject, sliceMode: "auto" }).layoutValidated, true);
+  assert.equal(parseMotionProject(legacyProject).layoutValidated, null);
+  assert.equal(parseMotionProject({ ...legacyProject, sliceMode: "auto" }).layoutValidated, null);
   assert.equal(
     parseMotionProject({ ...legacyProject, sliceMode: "grid", layoutValidated: true }).layoutValidated,
     true
+  );
+});
+
+test("review approval requires every outstanding issue, rejects content loss, and survives rebuild", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Review approval",
+    sheetBuffer: await testSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+
+  await assert.rejects(
+    setReviewApproval(project.id, { reasons: [] }),
+    error => error?.code === "CONFLICT" && error?.status === 409
+  );
+  const approved = await setReviewApproval(project.id, {
+    reasons: ["layout-not-validated"],
+    note: "previewed"
+  });
+  assert.deepEqual(approved.reviewApproval?.approvedReasons, ["layout-not-validated"]);
+  assert.equal(approved.reviewApproval?.note, "previewed");
+  const rebuilt = await rebuildProject(project.id, { matte: { ...project.matte, tolerance: 1 } });
+  assert.deepEqual(rebuilt.reviewApproval, approved.reviewApproval);
+
+  await fs.writeFile(
+    path.join(projectDir(project.id), "project.json"),
+    `${JSON.stringify(
+      {
+        ...rebuilt,
+        frames: rebuilt.frames.map((frame, index) =>
+          index === 0
+            ? {
+                ...frame,
+                override: {
+                  candidateId: "cand-content-loss",
+                  mode: "upload",
+                  appliedAtIso: "2026-09-08T00:00:00.000Z",
+                  instruction: null,
+                  fit: {
+                    verdict: "review",
+                    reasons: ["content-loss-allowed"],
+                    lostPixels: 1,
+                    touchesEdge: ["left"]
+                  }
+                }
+              }
+            : frame
+        )
+      },
+      null,
+      2
+    )}\n`
+  );
+  await assert.rejects(
+    setReviewApproval(project.id, { reasons: ["layout-not-validated"] }),
+    error => error?.code === "CONTENT_LOSS" && error?.status === 409
   );
 });
 
@@ -860,8 +919,18 @@ test("candidate application fits, persists, rebuilds, and reverts frame override
     frames: [{ index: 1, image: await gammaCell([200, 50, 30]) }],
     instruction: "replace the second frame"
   });
+  await updateCandidate(project.id, candidate.id, value => ({
+    ...value,
+    requiresReview: true,
+    reviewReasons: ["low-slice-confidence"]
+  }));
   const applied = await applyCandidateFrames(project.id, candidate.id);
   assert.equal(applied.frames[1].override?.candidateId, candidate.id);
+  assert.deepEqual(applied.frames[1].override?.review, {
+    candidateId: candidate.id,
+    reasons: ["low-slice-confidence"],
+    recordedAtIso: applied.frames[1].override?.appliedAtIso
+  });
   assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f02.png")), true);
   assert.equal(
     await includesColor(await fs.readFile(path.join(projectDir(project.id), "derived", "frames", "f02.png")), [200, 50, 30]),

@@ -2,7 +2,11 @@ import { createReadStream, promises as fs } from "node:fs";
 import { Readable } from "node:stream";
 import { NextRequest, NextResponse } from "next/server";
 
-import { buildExportBundle, sanitizeExportFilename } from "@/lib/motion/export";
+import {
+  buildExportBundle,
+  MotionExportBlockedError,
+  sanitizeExportFilename
+} from "@/lib/motion/export";
 import { MotionStorageError, readProject } from "@/lib/motion/storage";
 
 export const runtime = "nodejs";
@@ -77,6 +81,12 @@ export async function GET(
     });
     if (error instanceof InvalidExportQueryError) {
       return NextResponse.json({ ok: false, reason: error.message }, { status: 400 });
+    }
+    if (error instanceof MotionExportBlockedError) {
+      return NextResponse.json(
+        { ok: false, code: error.code, reason: error.message, review: error.review },
+        { status: error.status }
+      );
     }
     if (error instanceof MotionStorageError) {
       return NextResponse.json({ ok: false, reason: error.message }, { status: error.status });

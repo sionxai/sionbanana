@@ -357,6 +357,13 @@ export const motionCandidateRevertInputSchema = z
     frames: z.array(z.number().int().nonnegative()).min(1).optional()
   })
   .strict();
+export const motionReviewApprovalInputSchema = z
+  .object({
+    projectId: motionCandidateIdSchema,
+    reasons: z.array(z.string().trim().min(1)),
+    note: z.string().max(500).optional()
+  })
+  .strict();
 const MOTION_SET_TOOL_DESCRIPTION =
   "세트 = 한 캐릭터의 여러 동작을 순차 생성. 순환 프리셋은 반복 행 자동 제외(실효 4장 정상).";
 const MOTION_CANDIDATE_TOOL_DESCRIPTION =
@@ -367,6 +374,10 @@ const MOTION_CANDIDATE_APPLY_TOOL_DESCRIPTION =
 const MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION =
   MOTION_CANDIDATE_TOOL_DESCRIPTION +
   " 오버라이드를 제거해 최초 원본으로 되돌린다(직전 후보로 돌아가지 않는다).";
+const MOTION_REVIEW_APPROVAL_TOOL_DESCRIPTION =
+  "미리보기로 확인한 뒤 검수 사유를 명시적으로 승인한다. 현재 미결 사유를 모두 포함해야 하며, 내용 손실이 기록된 프레임은 승인으로 해제할 수 없다.";
+const MOTION_EXPORT_REVIEW_GATE_DESCRIPTION =
+  " 검수 승인이 필요한 항목이 남아 있으면 409(EXPORT_BLOCKED)로 거부한다. approve_motion_review로 승인한 뒤 다시 시도한다.";
 
 const TOOL_NAMES = [
   "health_check",
@@ -382,6 +393,7 @@ const TOOL_NAMES = [
   "create_video",
   "get_video",
   "export_motion",
+  "approve_motion_review",
   "list_motion",
   "create_motion_candidate",
   "get_motion_candidate",
@@ -666,7 +678,7 @@ export function createSionBananaMcpServer(options = {}) {
     "export_motion",
     {
       title: "Export Motion",
-      description: "Packages a ready motion project as a persistent ZIP file.",
+      description: "Packages a ready motion project as a persistent ZIP file." + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
       inputSchema: {
         projectId: z.string().min(1).regex(MOTION_ID_RE),
         includeGif: z.boolean().default(true),
@@ -681,6 +693,22 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => exportMotion(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "approve_motion_review",
+    {
+      title: "Approve Motion Review",
+      description: MOTION_REVIEW_APPROVAL_TOOL_DESCRIPTION,
+      inputSchema: motionReviewApprovalInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true
+      }
+    },
+    input => approveMotionReview(input, context)
   );
 
   registerJsonTool(
@@ -819,7 +847,7 @@ export function createSionBananaMcpServer(options = {}) {
     "export_motion_set",
     {
       title: "Export Motion Set",
-      description: MOTION_SET_TOOL_DESCRIPTION,
+      description: MOTION_SET_TOOL_DESCRIPTION + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
       inputSchema: motionSetExportInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -1512,6 +1540,50 @@ export async function exportMotion(input, context) {
   }
 
   return result;
+}
+
+export async function approveMotionReview(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = motionReviewApprovalInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+  if (context.mock) {
+    return {
+      ok: true,
+      projectId: parsedInput.projectId,
+      approvedReasons: parsedInput.reasons,
+      mocked: true
+    };
+  }
+
+  try {
+    const { baseUrl } = await findMotionServer(context.fetchImpl);
+    const url = `${baseUrl}/api/motion/projects/${encodeURIComponent(parsedInput.projectId)}/review-approval`;
+    const body = await fetchMotionCandidateJson(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reasons: parsedInput.reasons,
+          ...(parsedInput.note === undefined ? {} : { note: parsedInput.note })
+        })
+      },
+      context
+    );
+    if (body?.ok !== true || body?.project?.id !== parsedInput.projectId) {
+      throw new Error("motion review approval response was incomplete");
+    }
+    return {
+      ok: true,
+      projectId: parsedInput.projectId,
+      reviewApproval: body.project.reviewApproval ?? null
+    };
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
 }
 
 export async function createMotionCandidate(input, context) {
@@ -2752,13 +2824,14 @@ async function readyMotionResult(jobId, job, context) {
     throw new Error("motion project id does not match its directory");
   }
   const layoutValidated =
-    typeof project.layoutValidated === "boolean"
+    typeof project.layoutValidated === "boolean" || project.layoutValidated === null
       ? project.layoutValidated
-      : project.sliceMode === "auto";
+      : null;
   const projectWithLayoutValidated = { ...project, layoutValidated };
   const { sliceConfidence: projectSliceConfidence, ...projectWithoutSliceConfidence } =
     projectWithLayoutValidated;
-  const responseProject = layoutValidated ? projectWithLayoutValidated : projectWithoutSliceConfidence;
+  const responseProject =
+    layoutValidated === true ? projectWithLayoutValidated : projectWithoutSliceConfidence;
   const mirroredRows = Array.isArray(project.mirrorDetection?.rows)
     ? project.mirrorDetection.rows.flatMap((row, index) => (row?.mirrored === true ? [index] : []))
     : [];
@@ -2787,9 +2860,9 @@ async function readyMotionResult(jobId, job, context) {
       frames,
       project: projectPath
     },
-    ...(layoutValidated && typeof job.sliceConfidence === "number"
+    ...(layoutValidated === true && typeof job.sliceConfidence === "number"
       ? { sliceConfidence: job.sliceConfidence }
-      : layoutValidated && typeof projectSliceConfidence === "number"
+      : layoutValidated === true && typeof projectSliceConfidence === "number"
         ? { sliceConfidence: projectSliceConfidence }
         : {})
   };
