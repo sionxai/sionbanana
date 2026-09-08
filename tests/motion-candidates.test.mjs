@@ -22,6 +22,7 @@ import {
   createProject,
   projectDir,
   readAssetFile,
+  readOrientedCell,
   readProject,
   revertFrameOverrides
 } from "@/lib/motion/storage";
@@ -86,6 +87,37 @@ async function gammaCell(color = [20, 80, 180]) {
     for (let x = 14; x <= 30; x += 1) set(x, y);
   }
   return sharp(pixels, { raw: { width: 48, height: 48, channels: 4 } }).png().toBuffer();
+}
+
+async function opaqueRectangle(width, height, left, top, rectWidth, rectHeight, color = [200, 50, 30]) {
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = top; y < top + rectHeight; y += 1) {
+    for (let x = left; x < left + rectWidth; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = color[0];
+      pixels[offset + 1] = color[1];
+      pixels[offset + 2] = color[2];
+      pixels[offset + 3] = 255;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function splitEdgeCandidate() {
+  const width = 100;
+  const height = 33;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (const x of [...Array.from({ length: 5 }, (_, index) => index), ...Array.from({ length: 5 }, (_, index) => 95 + index)]) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = 200;
+      pixels[offset + 1] = 50;
+      pixels[offset + 2] = 30;
+      pixels[offset + 3] = 255;
+    }
+  }
+  for (let x = 5; x < 95; x += 1) pixels[x * 4 + 3] = 9;
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
 async function readAssetBuffer(projectId, relativePath) {
@@ -475,4 +507,147 @@ test("default and legacy candidates keep cell alignment disabled, while updates 
   await applyCandidateFrames(project.id, resized.id);
   const override = await sharp(await fs.readFile(path.join(projectDir(project.id), "overrides", "f02.png"))).metadata();
   assert.deepEqual([override.width, override.height], [48, 48]);
+});
+
+test("candidate apply blocks content loss before creating overrides and records an allowed loss", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const { apply } = await loadMotionRouteHandlers();
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await opaqueRectangle(96, 48, 0, 8, 96, 33) }]
+  });
+  const projectBeforeBlockedApply = await fs.readFile(path.join(projectDir(project.id), "project.json"));
+  const blocked = await apply.POST(
+    new Request("http://localhost", { method: "POST", body: "{}" }),
+    { params: { id: project.id, cid: candidate.id } }
+  );
+  const blockedBody = await blocked.json();
+  assert.equal(blocked.status, 409);
+  assert.equal(blockedBody.code, "CONTENT_LOSS");
+  assert.match(blockedBody.reason, /프레임 1번/);
+  assert.match(blockedBody.reason, /내용 \d+픽셀이 잘립니다/);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+  assert.equal((await readProject(project.id)).frames[0].override, null);
+  assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "project.json")), projectBeforeBlockedApply);
+
+  const allowed = await apply.POST(
+    new Request("http://localhost", { method: "POST", body: JSON.stringify({ allowContentLoss: true }) }),
+    { params: { id: project.id, cid: candidate.id } }
+  );
+  const allowedBody = await allowed.json();
+  assert.equal(allowed.status, 200);
+  assert.equal(allowedBody.project.frames[0].override.fit.verdict, "review");
+  assert.deepEqual(allowedBody.project.frames[0].override.fit.reasons, ["content-loss-allowed"]);
+});
+
+test("candidate apply requires an explicit index for an empty source and writes an intentional empty cell", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }]
+  });
+  await assert.rejects(
+    applyCandidateFrames(project.id, candidate.id),
+    error => error?.status === 409 && error?.code === "CONTENT_LOSS" && /그려진 내용이 없습니다/.test(error.message)
+  );
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+
+  const applied = await applyCandidateFrames(project.id, candidate.id, undefined, { intentionalEmptyFrames: [0] });
+  assert.equal(applied.frames[0].override?.fit?.verdict, "review");
+  assert.deepEqual(applied.frames[0].override?.fit?.reasons, ["intentional-empty"]);
+  const empty = await sharp(await fs.readFile(path.join(projectDir(project.id), "overrides", "f01.png")))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  assert.deepEqual([empty.info.width, empty.info.height], [48, 48]);
+  for (let offset = 3; offset < empty.data.length; offset += empty.info.channels) assert.equal(empty.data[offset], 0);
+});
+
+test("candidate apply records a lossless boundary touch for review", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const cell = await readOrientedCell(project.id, 0);
+  const source = await sharp(cell.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let x = cell.trim.x + cell.trim.w; x < cell.width; x += 1) {
+    const offset = (cell.trim.y * source.info.width + x) * source.info.channels;
+    source.data[offset] = 200;
+    source.data[offset + 1] = 50;
+    source.data[offset + 2] = 30;
+    source.data[offset + 3] = 255;
+  }
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{
+      index: 0,
+      image: await sharp(source.data, {
+        raw: { width: source.info.width, height: source.info.height, channels: source.info.channels }
+      }).png().toBuffer()
+    }]
+  });
+
+  const applied = await applyCandidateFrames(project.id, candidate.id);
+  assert.equal(applied.frames[0].override?.fit?.verdict, "review");
+  assert.ok(applied.frames[0].override?.fit?.reasons.includes("boundary-touch"));
+  assert.ok(applied.frames[0].override?.fit?.touchesEdge.includes("right"));
+});
+
+test("candidate apply blocks a placement that leaves no opaque pixels inside the cell", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await splitEdgeCandidate() }]
+  });
+  await assert.rejects(
+    applyCandidateFrames(project.id, candidate.id, undefined, {
+      allowContentLoss: true,
+      intentionalEmptyFrames: [0],
+      maxLostPixels: 10000
+    }),
+    error => error?.status === 409 && error?.code === "CONTENT_LOSS" && /빈 프레임/.test(error.message)
+  );
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+  assert.equal((await readProject(project.id)).frames[0].override, null);
+});
+
+test("candidate apply preflights every frame before writing and aggregates blocked frame reasons", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(3);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [
+      { index: 0, image: await gammaCell([200, 50, 30]) },
+      { index: 1, image: await opaqueRectangle(96, 48, 0, 8, 96, 33) },
+      { index: 2, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }
+    ]
+  });
+  const projectBeforeBlockedApply = await fs.readFile(path.join(projectDir(project.id), "project.json"));
+  await assert.rejects(
+    applyCandidateFrames(project.id, candidate.id),
+    error =>
+      error?.status === 409 &&
+      error?.code === "CONTENT_LOSS" &&
+      /프레임 2번/.test(error.message) &&
+      /프레임 3번/.test(error.message)
+  );
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f01.png")), false);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f02.png")), false);
+  assert.equal(existsSync(path.join(projectDir(project.id), "overrides", "f03.png")), false);
+  assert.deepEqual(await fs.readFile(path.join(projectDir(project.id), "project.json")), projectBeforeBlockedApply);
+});
+
+test("cell-aligned candidates keep the existing size-only apply path", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates(1);
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await sharp({ create: { width: 48, height: 48, channels: 4, background: "transparent" } }).png().toBuffer() }],
+    cellAligned: true
+  });
+
+  const applied = await applyCandidateFrames(project.id, candidate.id);
+  assert.equal(applied.frames[0].override?.candidateId, candidate.id);
+  assert.equal(applied.frames[0].override?.fit, undefined);
 });

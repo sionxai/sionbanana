@@ -59,7 +59,16 @@ export const frameOverrideSchema = z
     candidateId: z.string().regex(/^[A-Za-z0-9-]+$/),
     mode: z.enum(candidateModeValues),
     appliedAtIso: z.string().datetime(),
-    instruction: z.string().max(4000).nullable().default(null)
+    instruction: z.string().max(4000).nullable().default(null),
+    fit: z
+      .object({
+        verdict: z.enum(["review"]),
+        reasons: z.array(z.string()).min(1),
+        lostPixels: z.number().int().nonnegative().default(0),
+        touchesEdge: z.array(z.enum(["left", "right", "top", "bottom"])).default([])
+      })
+      .strict()
+      .optional()
   })
   .strict();
 

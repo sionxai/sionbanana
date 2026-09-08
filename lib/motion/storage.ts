@@ -9,6 +9,13 @@ import sharp from "sharp";
 
 import { getDataDir } from "@/lib/local/storage";
 import {
+  classifyCellFit,
+  computeCellPlacement,
+  computeCellScale,
+  inspectCellFit,
+  type CellFitReport
+} from "@/lib/motion/fit-check";
+import {
   analyzeFrame,
   applyMatte,
   computeGrid,
@@ -70,7 +77,7 @@ export type MotionProjectPatch = Partial<
 
 export class MotionStorageError extends Error {
   readonly status: number;
-  readonly code: "INVALID_ID" | "NOT_FOUND" | "INVALID_PATCH" | "CONFLICT";
+  readonly code: "INVALID_ID" | "NOT_FOUND" | "INVALID_PATCH" | "CONFLICT" | "CONTENT_LOSS";
 
   constructor(
     code: MotionStorageError["code"],
@@ -862,7 +869,7 @@ export async function fitToCell(
   if (analysis.trim.w < 1 || analysis.trim.h < 1) {
     throw new RangeError("Candidate must contain a non-empty foreground bounding box.");
   }
-  const scale = Math.min(4, Math.max(0.25, cell.trim.h / analysis.trim.h));
+  const scale = computeCellScale(cell, analysis);
   const crop = await sharp(candidate)
     .extract({
       left: analysis.trim.x,
@@ -880,20 +887,14 @@ export async function fitToCell(
   const metadata = await sharp(crop).metadata();
   const cropWidth = metadata.width!;
   const cropHeight = metadata.height!;
-  let sourceLeft = 0;
-  let sourceTop = 0;
-  let destinationLeft = Math.round(cell.pivot.x - (analysis.pivot.x - analysis.trim.x) * scale);
-  let destinationTop = Math.round(cell.pivot.y - (analysis.pivot.y - analysis.trim.y) * scale);
-  if (destinationLeft < 0) {
-    sourceLeft = -destinationLeft;
-    destinationLeft = 0;
-  }
-  if (destinationTop < 0) {
-    sourceTop = -destinationTop;
-    destinationTop = 0;
-  }
-  const copyWidth = Math.min(cropWidth - sourceLeft, cell.width - destinationLeft);
-  const copyHeight = Math.min(cropHeight - sourceTop, cell.height - destinationTop);
+  const {
+    sourceLeft,
+    sourceTop,
+    destinationLeft,
+    destinationTop,
+    copyWidth,
+    copyHeight
+  } = computeCellPlacement(cell, analysis, { width: cropWidth, height: cropHeight });
   const canvas = sharp({
     create: { width: cell.width, height: cell.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
   });
@@ -905,11 +906,54 @@ export async function fitToCell(
   return canvas.composite([{ input: visible, left: destinationLeft, top: destinationTop }]).png().toBuffer();
 }
 
+type CandidateApplyOptions = {
+  force?: boolean;
+  allowContentLoss?: boolean;
+  intentionalEmptyFrames?: number[];
+  maxLostPixels?: number;
+};
+
+type RecordedFit = {
+  verdict: "review";
+  reasons: string[];
+  lostPixels: number;
+  touchesEdge: CellFitReport["touchesEdge"];
+};
+
+type PreparedCandidateFrame = {
+  candidateBuffer: Buffer;
+  cell: Awaited<ReturnType<typeof readOrientedCell>>;
+  intentionalEmpty: boolean;
+  fit?: RecordedFit;
+};
+
+function contentLossMessage(index: number, report: CellFitReport): string {
+  const edges: Array<[keyof CellFitReport["lostByEdge"], string]> = [
+    ["left", "좌측"],
+    ["right", "우측"],
+    ["top", "상단"],
+    ["bottom", "하단"]
+  ];
+  const edgeSummary = edges
+    .filter(([edge]) => report.lostByEdge[edge] > 0)
+    .map(([edge, label]) => `${label} ${report.lostByEdge[edge]}`)
+    .join(", ");
+  return `프레임 ${index + 1}번은 셀에 맞추면 내용 ${report.lostPixels}픽셀이 잘립니다${edgeSummary ? `(${edgeSummary})` : ""}. 셀을 벗어나는 부분을 줄여 후보를 다시 만들거나, 손실을 감수하려면 allowContentLoss로 적용하세요.`;
+}
+
+function blockedFitMessage(index: number, report: CellFitReport, reason: string): string {
+  if (reason === "content-loss") return contentLossMessage(index, report);
+  if (reason === "placement-empty") {
+    return `프레임 ${index + 1}번은 셀에 맞추면 남는 내용이 없어 빈 프레임이 됩니다. 적용할 수 없습니다.`;
+  }
+  return `프레임 ${index + 1}번 후보에 그려진 내용이 없습니다. 의도한 소멸 프레임이면 intentionalEmptyFrames에 ${index}(0-based 인덱스)를 넣어 적용하세요.`;
+}
+
 async function applyCandidateFramesUnlocked(
   id: string,
   candidateId: string,
   frameIndices?: number[],
-  options: { force?: boolean } = {}
+  options: CandidateApplyOptions = {}
 ): Promise<MotionProject> {
   const candidates = await import("@/lib/motion/candidates");
   const candidate = await candidates.readCandidate(id, candidateId);
@@ -934,29 +978,108 @@ async function applyCandidateFramesUnlocked(
       409
     );
   }
+
+  const prepared = new Map<number, PreparedCandidateFrame>();
+  const blockedMessages: string[] = [];
+  const intentionalEmptyFrames = new Set(options.intentionalEmptyFrames ?? []);
+  for (const index of indices) {
+    const source = await candidates.candidateFramePath(id, candidateId, index);
+    const candidateBuffer = await fs.readFile(source);
+    const cell = await readOrientedCell(id, index);
+    if (candidate.cellAligned) {
+      const metadata = await sharp(candidateBuffer).metadata();
+      if (metadata.width !== cell.width || metadata.height !== cell.height) {
+        throw new MotionStorageError(
+          "INVALID_PATCH",
+          `셀 정렬 후보 프레임 ${index + 1}의 크기가 원본 셀과 다릅니다.`,
+          409
+        );
+      }
+      prepared.set(index, { candidateBuffer, cell, intentionalEmpty: false });
+      continue;
+    }
+
+    const report = await inspectCellFit(candidateBuffer, cell, await analyzeFrame(candidateBuffer));
+    const verdict = classifyCellFit(report, { maxLostPixels: options.maxLostPixels });
+    if (verdict.verdict === "blocked") {
+      const reason = verdict.reasons[0];
+      if (reason === "empty-source" && intentionalEmptyFrames.has(index)) {
+        prepared.set(index, {
+          candidateBuffer,
+          cell,
+          intentionalEmpty: true,
+          fit: {
+            verdict: "review",
+            reasons: ["intentional-empty"],
+            lostPixels: report.lostPixels,
+            touchesEdge: report.touchesEdge
+          }
+        });
+        continue;
+      }
+      if (reason === "content-loss" && options.allowContentLoss === true) {
+        prepared.set(index, {
+          candidateBuffer,
+          cell,
+          intentionalEmpty: false,
+          fit: {
+            verdict: "review",
+            reasons: ["content-loss-allowed"],
+            lostPixels: report.lostPixels,
+            touchesEdge: report.touchesEdge
+          }
+        });
+        continue;
+      }
+      blockedMessages.push(blockedFitMessage(index, report, reason));
+      continue;
+    }
+
+    prepared.set(index, {
+      candidateBuffer,
+      cell,
+      intentionalEmpty: false,
+      fit:
+        verdict.verdict === "review"
+          ? {
+              verdict: "review",
+              reasons: verdict.reasons,
+              lostPixels: report.lostPixels,
+              touchesEdge: report.touchesEdge
+            }
+          : undefined
+    });
+  }
+  if (blockedMessages.length > 0) {
+    throw new MotionStorageError("CONTENT_LOSS", blockedMessages.join(" "), 409);
+  }
+
   const directory = await safeExistingProjectDirectory(id);
   const snapshots: OverrideSnapshot[] = [];
   let rebuilt = false;
   try {
     const frames = current.frames.map(frame => ({ ...frame }));
     for (const index of indices) {
-      const source = await candidates.candidateFramePath(id, candidateId, index);
-      const candidateBuffer = await fs.readFile(source);
-      const cell = await readOrientedCell(id, index);
+      const preparedFrame = prepared.get(index)!;
       // 셀 정렬 결과를 재정렬하면 보존 영역도 리샘플되므로 생성 좌표를 그대로 적용한다.
-      if (candidate.cellAligned) {
-        const metadata = await sharp(candidateBuffer).metadata();
-        if (metadata.width !== cell.width || metadata.height !== cell.height) {
-          throw new MotionStorageError(
-            "INVALID_PATCH",
-            `셀 정렬 후보 프레임 ${index + 1}의 크기가 원본 셀과 다릅니다.`,
-            409
-          );
-        }
-      }
-      const fitted = candidate.cellAligned
-        ? await sharp(candidateBuffer).ensureAlpha().png().toBuffer()
-        : await fitToCell(candidateBuffer, cell, await analyzeFrame(candidateBuffer));
+      const fitted = preparedFrame.intentionalEmpty
+        ? await sharp({
+            create: {
+              width: preparedFrame.cell.width,
+              height: preparedFrame.cell.height,
+              channels: 4,
+              background: { r: 0, g: 0, b: 0, alpha: 0 }
+            }
+          })
+            .png()
+            .toBuffer()
+        : candidate.cellAligned
+          ? await sharp(preparedFrame.candidateBuffer).ensureAlpha().png().toBuffer()
+          : await fitToCell(
+              preparedFrame.candidateBuffer,
+              preparedFrame.cell,
+              await analyzeFrame(preparedFrame.candidateBuffer)
+            );
       snapshots.push(await snapshotOverride(directory, id, index));
       await writeOverrideFile(directory, id, index, fitted);
       frames[index] = {
@@ -965,7 +1088,8 @@ async function applyCandidateFramesUnlocked(
           candidateId,
           mode: candidate.mode,
           appliedAtIso: new Date().toISOString(),
-          instruction: candidate.instruction
+          instruction: candidate.instruction,
+          ...(preparedFrame.fit ? { fit: preparedFrame.fit } : {})
         }
       };
     }
@@ -997,7 +1121,7 @@ export async function applyCandidateFrames(
   id: string,
   candidateId: string,
   frameIndices?: number[],
-  options: { force?: boolean } = {}
+  options: CandidateApplyOptions = {}
 ): Promise<MotionProject> {
   return withMotionProjectMutation(id, () =>
     applyCandidateFramesUnlocked(id, candidateId, frameIndices, options)
