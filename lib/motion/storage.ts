@@ -280,6 +280,7 @@ async function buildArtifacts(input: {
   previousMirrorDetection: MirrorDetection | null;
   autoExcludeRepeatedRows: boolean;
   previousDuplicateDetection: DuplicateDetection | null;
+  reviewApproval: MotionProject["reviewApproval"];
   animations: Animation[];
   animationsExplicit: boolean;
   defaultAnimation?: { fps?: number; loop?: Animation["loop"] };
@@ -429,6 +430,7 @@ async function buildArtifacts(input: {
     matte,
     mirrorDetection,
     duplicateDetection,
+    reviewApproval: input.reviewApproval,
     frames,
     animations
   });
@@ -599,6 +601,7 @@ export async function createProject(input: {
       previousMirrorDetection: null,
       autoExcludeRepeatedRows: input.autoExcludeRepeatedRows ?? false,
       previousDuplicateDetection: null,
+      reviewApproval: null,
       animations: [],
       animationsExplicit: false,
       defaultAnimation: input.defaultAnimation
@@ -661,6 +664,7 @@ async function rebuildProjectUnlocked(
     previousMirrorDetection: current.mirrorDetection,
     autoExcludeRepeatedRows: false,
     previousDuplicateDetection: current.duplicateDetection,
+    reviewApproval: current.reviewApproval,
     animations,
     animationsExplicit: patch.animations !== undefined,
     overrides
@@ -674,6 +678,86 @@ export async function rebuildProject(
   patch: MotionProjectPatch
 ): Promise<MotionProject> {
   return withMotionProjectMutation(id, () => rebuildProjectUnlocked(id, patch));
+}
+
+async function writeProjectJson(directory: string, project: MotionProject): Promise<void> {
+  const target = path.join(directory, "project.json");
+  let temporary: string | null = await writeJsonTemp(target, project);
+  let operationError: unknown = null;
+  try {
+    await fs.rename(temporary, target);
+    temporary = null;
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    if (temporary) {
+      try {
+        await fs.rm(temporary, { force: true });
+      } catch (cleanupError) {
+        if (operationError) {
+          throw new AggregateError(
+            [operationError, cleanupError],
+            "Motion review approval update and temporary-file cleanup failed."
+          );
+        }
+        throw cleanupError;
+      }
+    }
+  }
+}
+
+export async function setReviewApproval(
+  id: string,
+  input: { reasons: string[]; note?: string | null } | null
+): Promise<MotionProject> {
+  return withMotionProjectMutation(id, async () => {
+    const current = await readProject(id);
+    const directory = await safeExistingProjectDirectory(id);
+    if (input === null) {
+      const project = parseMotionProject({ ...current, reviewApproval: null });
+      await writeProjectJson(directory, project);
+      return project;
+    }
+
+    const { buildMotionExportReview } = await import("@/lib/motion/export");
+    const review = buildMotionExportReview(
+      current,
+      current.frames.filter(frame => !frame.excluded)
+    );
+    if (review.blockingIssues.length > 0) {
+      const frames = review.blockingIssues
+        .map(issue => issue.match(/^frame-(\d+)-/)?.[1])
+        .filter((frame): frame is string => frame !== undefined);
+      throw new MotionStorageError(
+        "CONTENT_LOSS",
+        `내용 손실이 기록된 프레임은 승인으로 해제할 수 없습니다. 해당 프레임을 되돌리고 후보를 다시 만드세요. (프레임 ${frames.join(", ") || "?"})`,
+        409
+      );
+    }
+
+    const requested = new Set(input.reasons);
+    const missing = review.approvableIssues.filter(reason => !requested.has(reason));
+    if (missing.length > 0) {
+      throw new MotionStorageError(
+        "CONFLICT",
+        `현재 미결 검토 사유를 모두 승인해야 합니다: ${review.approvableIssues.join(", ")}`,
+        409
+      );
+    }
+
+    const project = parseMotionProject({
+      ...current,
+      reviewApproval: {
+        approvedAtIso: new Date().toISOString(),
+        // Store only the issues observed now so later issues cannot be pre-approved.
+        approvedReasons: review.approvableIssues,
+        note: input.note ?? null
+      }
+    });
+    await writeProjectJson(directory, project);
+    return project;
+  });
 }
 
 type OverrideSnapshot = { index: number; buffer: Buffer | null };
@@ -1083,6 +1167,7 @@ async function applyCandidateFramesUnlocked(
   let rebuilt = false;
   try {
     const frames = current.frames.map(frame => ({ ...frame }));
+    const appliedAtIso = new Date().toISOString();
     for (const index of indices) {
       const preparedFrame = prepared.get(index)!;
       // 셀 정렬 결과를 재정렬하면 보존 영역도 리샘플되므로 생성 좌표를 그대로 적용한다.
@@ -1111,9 +1196,18 @@ async function applyCandidateFramesUnlocked(
         override: {
           candidateId,
           mode: candidate.mode,
-          appliedAtIso: new Date().toISOString(),
+          appliedAtIso,
           instruction: candidate.instruction,
-          ...(preparedFrame.fit ? { fit: preparedFrame.fit } : {})
+          ...(preparedFrame.fit ? { fit: preparedFrame.fit } : {}),
+          ...(candidate.requiresReview && candidate.reviewReasons.length > 0
+            ? {
+                review: {
+                  candidateId,
+                  reasons: candidate.reviewReasons,
+                  recordedAtIso: appliedAtIso
+                }
+              }
+            : {})
         }
       };
     }

@@ -29,11 +29,42 @@ type ExportAnimation = {
 
 export type MotionExportReview = {
   sliceMode: "auto" | "grid";
-  layoutValidated: boolean;
+  layoutValidated: boolean | null;
   sliceConfidence: number | null;
-  requiresReview: boolean;
   issues: string[];
+  blockingIssues: string[];
+  approvableIssues: string[];
+  outstandingIssues: string[];
+  approval: {
+    approvedAtIso: string;
+    approvedReasons: string[];
+    note: string | null;
+  } | null;
+  requiresReview: boolean;
 };
+
+export class MotionExportBlockedError extends Error {
+  readonly status = 409;
+  readonly code = "EXPORT_BLOCKED" as const;
+  readonly review: MotionExportReview;
+
+  constructor(review: MotionExportReview) {
+    const messages: string[] = [];
+    if (review.blockingIssues.length > 0) {
+      messages.push(
+        `내용 손실이 기록된 프레임이 있어 내보낼 수 없습니다: ${review.blockingIssues.join(", ")}. 해당 프레임을 되돌리고 후보를 다시 만드세요.`
+      );
+    }
+    if (review.outstandingIssues.length > 0) {
+      messages.push(
+        `검수 승인이 필요한 항목이 있습니다: ${review.outstandingIssues.join(", ")}. 미리보기로 확인한 뒤 승인하면 내보낼 수 있습니다.`
+      );
+    }
+    super(messages.join(" "));
+    this.name = "MotionExportBlockedError";
+    this.review = review;
+  }
+}
 
 export type ExportJson = {
   name: string;
@@ -63,23 +94,37 @@ export function buildMotionExportReview(
   frames: readonly Frame[],
   frameIndexOffset = 0
 ): MotionExportReview {
-  const issues: string[] = [];
-  if (!project.layoutValidated) {
-    issues.push("layout-not-validated");
+  const issueSet = new Set<string>();
+  if (project.layoutValidated === null) {
+    issueSet.add("layout-validation-unknown");
+  } else if (project.layoutValidated === false) {
+    issueSet.add("layout-not-validated");
   } else if (project.sliceConfidence < 1) {
-    issues.push("low-slice-confidence");
+    issueSet.add("low-slice-confidence");
   }
   for (const [index, frame] of frames.entries()) {
     for (const reason of frame.override?.fit?.reasons ?? []) {
-      issues.push(`frame-${frameIndexOffset + index + 1}-${reason}`);
+      issueSet.add(`frame-${frameIndexOffset + index + 1}-${reason}`);
+    }
+    for (const reason of frame.override?.review?.reasons ?? []) {
+      issueSet.add(`frame-${frameIndexOffset + index + 1}-${reason}`);
     }
   }
+  const issues = [...issueSet];
+  const blockingIssues = issues.filter(issue => issue.endsWith("content-loss-allowed"));
+  const approvableIssues = issues.filter(issue => !issue.endsWith("content-loss-allowed"));
+  const approvedReasons = new Set(project.reviewApproval?.approvedReasons ?? []);
+  const outstandingIssues = approvableIssues.filter(issue => !approvedReasons.has(issue));
   return {
     sliceMode: project.sliceMode,
     layoutValidated: project.layoutValidated,
-    sliceConfidence: project.layoutValidated ? project.sliceConfidence : null,
-    requiresReview: issues.length > 0,
-    issues
+    sliceConfidence: project.layoutValidated === true ? project.sliceConfidence : null,
+    issues,
+    blockingIssues,
+    approvableIssues,
+    outstandingIssues,
+    approval: project.reviewApproval,
+    requiresReview: blockingIssues.length > 0 || outstandingIssues.length > 0
   };
 }
 
@@ -303,6 +348,15 @@ export async function buildExportBundle(
     }
   }
 
+  const includedFrames = project.frames.filter(frame => !frame.excluded);
+  if (includedFrames.length === 0) {
+    throw new Error("Motion export requires at least one non-excluded frame.");
+  }
+  const review = buildMotionExportReview(project, includedFrames);
+  if (review.blockingIssues.length > 0 || review.outstandingIssues.length > 0) {
+    throw new MotionExportBlockedError(review);
+  }
+
   const safeProjectId = sanitizeExportFilename(project.id, "project");
   const tempRoot = await fs.mkdtemp(
     path.join(tmpdir(), `sionbanana-motion-${safeProjectId.slice(0, 48)}-`)
@@ -314,11 +368,6 @@ export async function buildExportBundle(
   };
 
   try {
-    const includedFrames = project.frames.filter(frame => !frame.excluded);
-    if (includedFrames.length === 0) {
-      throw new Error("Motion export requires at least one non-excluded frame.");
-    }
-
     const bundleDirectory = path.join(tempRoot, "bundle");
     const framesDirectory = path.join(bundleDirectory, "frames");
     const gifScratchDirectory = path.join(tempRoot, "gif-work");
@@ -371,7 +420,7 @@ export async function buildExportBundle(
         generator: "sionbanana-motion",
         createdAtIso: new Date().toISOString(),
         sourceProjectId: project.id,
-        review: buildMotionExportReview(project, includedFrames)
+        review
       }
     };
     await fs.writeFile(

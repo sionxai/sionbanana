@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 import {
+  approveMotionReview,
   applyMotionCandidate,
   createMotionCandidate,
   createMotionSet,
@@ -22,6 +23,7 @@ import {
   motionCandidateCreateInputSchema,
   motionCandidateGetInputSchema,
   motionCandidateRevertInputSchema,
+  motionReviewApprovalInputSchema,
   motionCreateInputSchema,
   motionSetCreateInputSchema,
   motionSetExportInputSchema,
@@ -260,6 +262,34 @@ test("get_motion hides confidence for layouts that were not validated", async t 
   const result = await getMotion({ jobId, waitMs: 0 }, context);
   assert.equal(result.ok, true);
   assert.equal(result.layoutValidated, false);
+  assert.equal(Object.hasOwn(result, "sliceConfidence"), false);
+  assert.equal(Object.hasOwn(result.project, "sliceConfidence"), false);
+});
+
+test("get_motion preserves unknown layout validation and omits confidence", async t => {
+  const context = await motionFixture(t);
+  const jobId = "motion-job-legacy";
+  const projectId = "motion-project-legacy";
+  await writeJson(path.join(context.dataRoot, "motion-jobs", `${jobId}.json`), {
+    status: "ready",
+    createdAtIso: "2026-09-08T00:00:00.000Z",
+    deadlineIso: "2026-09-08T00:10:00.000Z",
+    projectId,
+    sliceConfidence: 1
+  });
+  await writeJson(path.join(context.dataRoot, "motion-assets", projectId, "project.json"), {
+    id: projectId,
+    name: "Legacy motion",
+    createdAtIso: "2026-09-08T00:00:00.000Z",
+    sliceMode: "auto",
+    sliceConfidence: 1,
+    frames: []
+  });
+
+  const result = await getMotion({ jobId, waitMs: 0 }, context);
+  assert.equal(result.ok, true);
+  assert.equal(result.layoutValidated, null);
+  assert.equal(result.project.layoutValidated, null);
   assert.equal(Object.hasOwn(result, "sliceConfidence"), false);
   assert.equal(Object.hasOwn(result.project, "sliceConfidence"), false);
 });
@@ -506,6 +536,59 @@ test("TOOL_NAMES exposes all motion MCP tools", () => {
   assert.equal(TOOL_NAMES.includes("create_motion"), true);
   assert.equal(TOOL_NAMES.includes("get_motion"), true);
   assert.equal(TOOL_NAMES.includes("list_motion"), true);
+  assert.equal(TOOL_NAMES.includes("approve_motion_review"), true);
+});
+
+test("approve_motion_review sends approval reasons and note to the approval route", async t => {
+  const context = await motionFixture(t);
+  const projectId = "motion-project-approval";
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value.endsWith("/api/health")) return jsonResponse({ ok: true });
+    if (value.endsWith(`/api/motion/projects/${projectId}/review-approval`)) {
+      assert.equal(options.method, "POST");
+      assert.deepEqual(JSON.parse(options.body), {
+        reasons: ["layout-not-validated"],
+        note: "previewed"
+      });
+      return jsonResponse({
+        ok: true,
+        project: {
+          id: projectId,
+          reviewApproval: {
+            approvedAtIso: "2026-09-08T00:00:00.000Z",
+            approvedReasons: ["layout-not-validated"],
+            note: "previewed"
+          }
+        }
+      });
+    }
+    throw new Error(`unexpected URL: ${value}`);
+  };
+  assert.deepEqual(
+    await approveMotionReview(
+      { projectId, reasons: ["layout-not-validated"], note: "previewed" },
+      context
+    ),
+    {
+      ok: true,
+      projectId,
+      reviewApproval: {
+        approvedAtIso: "2026-09-08T00:00:00.000Z",
+        approvedReasons: ["layout-not-validated"],
+        note: "previewed"
+      }
+    }
+  );
+  assert.equal(
+    motionReviewApprovalInputSchema.safeParse({ projectId, reasons: ["layout-not-validated"] }).success,
+    true
+  );
+  assert.equal(
+    motionReviewApprovalInputSchema.safeParse({ projectId, reasons: ["layout-not-validated"], extra: true })
+      .success,
+    false
+  );
 });
 
 test("motion candidate schemas are strict, reject ambiguous sources, and register all four tools", async t => {

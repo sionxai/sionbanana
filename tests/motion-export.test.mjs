@@ -3,15 +3,26 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { promisify } from "node:util";
 
 import sharp from "sharp";
 
-import { buildExportBundle, sanitizeExportFilename } from "@/lib/motion/export";
+import {
+  buildExportBundle,
+  MotionExportBlockedError,
+  sanitizeExportFilename
+} from "@/lib/motion/export";
 import { buildSetExportBundle } from "@/lib/motion/set-export";
 import { createSet, updateSet } from "@/lib/motion/set-storage";
-import { createProject, projectDir, rebuildProject } from "@/lib/motion/storage";
+import {
+  applyCandidateFrames,
+  createProject,
+  projectDir,
+  rebuildProject,
+  setReviewApproval
+} from "@/lib/motion/storage";
+import { createCandidate, updateCandidate } from "@/lib/motion/candidates";
 import { exportMotion } from "../scripts/mcp-server.mjs";
 import { findMotionServer } from "../scripts/motion-server-discovery.mjs";
 
@@ -74,6 +85,17 @@ async function persistProject(project) {
   );
 }
 
+function approvedGridProject(project, approvedReasons = ["layout-not-validated"]) {
+  return {
+    ...project,
+    reviewApproval: {
+      approvedAtIso: "2026-09-08T00:00:00.000Z",
+      approvedReasons,
+      note: "fixture approval"
+    }
+  };
+}
+
 async function createHundredFrameFixture(t) {
   await useTempDataDir(t);
   const id = "motion-100-frame-gif";
@@ -105,6 +127,8 @@ async function createHundredFrameFixture(t) {
     sourceImage: { path: "raw.png", width: 200, height: 2 },
     sliceMode: "grid",
     sliceConfidence: 1,
+    layoutValidated: true,
+    reviewApproval: null,
     grid: { cols: 100, rows: 1, gutter: 0, remainderPolicy: "distribute" },
     canvas: { w: 2, h: 2 },
     matte: { mode: "none", tolerance: 45, softness: 2, despill: false },
@@ -302,7 +326,7 @@ test("animation.json uses the export schema and valid remapped frame indices", a
       { name: "walk", frameIndices: [0, 1, 2], fps: 8, loop: "loop" }
     ]
   });
-  const bundle = await buildExportBundle(project, { includeGif: false });
+  const bundle = await buildExportBundle(approvedGridProject(project), { includeGif: false });
   t.after(() => bundle.cleanup());
   const data = await unzipJson(bundle.zipPath);
 
@@ -347,9 +371,32 @@ test("animation.json uses the export schema and valid remapped frame indices", a
   assert.equal(data.meta.sourceProjectId, project.id);
 });
 
-test("motion exports include layout review state and only expose validated confidence", async t => {
+test("motion exports block unapproved review issues and record explicit approval", async t => {
   const gridProject = await createFixture(t, "Grid review export");
-  const gridBundle = await buildExportBundle(gridProject, { includeGif: false });
+  const originalMkdtemp = fs.mkdtemp.bind(fs);
+  let temporaryDirectories = 0;
+  const mkdtempMock = mock.method(fs, "mkdtemp", async (...args) => {
+    temporaryDirectories += 1;
+    return originalMkdtemp(...args);
+  });
+  try {
+    await assert.rejects(
+      buildExportBundle(gridProject, { includeGif: false }),
+      error =>
+        error instanceof MotionExportBlockedError &&
+        error.status === 409 &&
+        error.review.outstandingIssues.includes("layout-not-validated")
+    );
+  } finally {
+    mkdtempMock.mock.restore();
+  }
+  assert.equal(temporaryDirectories, 0);
+
+  const approvedProject = await setReviewApproval(gridProject.id, {
+    reasons: ["layout-not-validated"],
+    note: "previewed"
+  });
+  const gridBundle = await buildExportBundle(approvedProject, { includeGif: false });
   t.after(() => gridBundle.cleanup());
   const gridExport = await unzipJson(gridBundle.zipPath);
 
@@ -357,15 +404,20 @@ test("motion exports include layout review state and only expose validated confi
     sliceMode: "grid",
     layoutValidated: false,
     sliceConfidence: null,
-    requiresReview: true,
-    issues: ["layout-not-validated"]
+    issues: ["layout-not-validated"],
+    blockingIssues: [],
+    approvableIssues: ["layout-not-validated"],
+    outstandingIssues: [],
+    approval: approvedProject.reviewApproval,
+    requiresReview: false
   });
 
   const inspectedProject = {
     ...gridProject,
     sliceMode: "auto",
     layoutValidated: true,
-    sliceConfidence: 1
+    sliceConfidence: 1,
+    reviewApproval: null
   };
   const inspectedBundle = await buildExportBundle(inspectedProject, { includeGif: false });
   t.after(() => inspectedBundle.cleanup());
@@ -374,8 +426,12 @@ test("motion exports include layout review state and only expose validated confi
     sliceMode: "auto",
     layoutValidated: true,
     sliceConfidence: 1,
-    requiresReview: false,
-    issues: []
+    issues: [],
+    blockingIssues: [],
+    approvableIssues: [],
+    outstandingIssues: [],
+    approval: null,
+    requiresReview: false
   });
 });
 
@@ -394,6 +450,11 @@ test("motion export fit review issues use the included frame index", async t => 
       touchesEdge: ["left"]
     }
   };
+  project.reviewApproval = {
+    approvedAtIso: "2026-09-08T00:00:00.000Z",
+    approvedReasons: ["layout-not-validated", "frame-1-content-loss"],
+    note: null
+  };
   const bundle = await buildExportBundle(project, { includeGif: false });
   t.after(() => bundle.cleanup());
   const exported = await unzipJson(bundle.zipPath);
@@ -403,7 +464,122 @@ test("motion export fit review issues use the included frame index", async t => 
   assert.equal(exported.meta.review.issues.includes("frame-2-content-loss"), false);
 });
 
-test("motion set exports aggregate action-keyed layout reviews", async t => {
+test("candidate review reasons survive application, require approval, and are exported with approval metadata", async t => {
+  await useTempDataDir(t);
+  const foreground = await sharp({
+    create: {
+      width: 16,
+      height: 16,
+      channels: 4,
+      background: { r: 240, g: 210, b: 20, alpha: 1 }
+    }
+  })
+    .png()
+    .toBuffer();
+  const interiorCell = await sharp({
+    create: {
+      width: 48,
+      height: 48,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: foreground, left: 16, top: 16 }])
+    .png()
+    .toBuffer();
+  const project = await createProject({
+    name: "Candidate review export",
+    sheetBuffer: interiorCell,
+    sliceMode: "grid",
+    grid: { cols: 1, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: { mode: "none", tolerance: 45, softness: 2, despill: false }
+  });
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: interiorCell }]
+  });
+  await updateCandidate(project.id, candidate.id, value => ({
+    ...value,
+    requiresReview: true,
+    reviewReasons: ["low-slice-confidence"]
+  }));
+  const applied = await applyCandidateFrames(project.id, candidate.id);
+  assert.equal(applied.frames[0].override?.fit, undefined);
+  assert.deepEqual(applied.frames[0].override?.review?.reasons, ["low-slice-confidence"]);
+  assert.equal(applied.frames[0].override?.review?.candidateId, candidate.id);
+
+  let blocked;
+  try {
+    await buildExportBundle(applied, { includeGif: false });
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof MotionExportBlockedError);
+  assert.ok(blocked.review.outstandingIssues.includes("frame-1-low-slice-confidence"));
+
+  const approved = await setReviewApproval(project.id, {
+    reasons: blocked.review.approvableIssues,
+    note: "candidate previewed"
+  });
+  const bundle = await buildExportBundle(approved, { includeGif: false });
+  t.after(() => bundle.cleanup());
+  const exported = await unzipJson(bundle.zipPath);
+  assert.deepEqual(exported.meta.review.approval, approved.reviewApproval);
+  assert.equal(exported.meta.review.outstandingIssues.length, 0);
+});
+
+test("legacy unknown layouts and recorded content loss remain blocked by the export gate", async t => {
+  const project = await createFixture(t, "Legacy export review");
+  const legacy = {
+    ...project,
+    sliceMode: "auto",
+    layoutValidated: null,
+    reviewApproval: null
+  };
+  await assert.rejects(
+    buildExportBundle(legacy, { includeGif: false }),
+    error =>
+      error instanceof MotionExportBlockedError &&
+      error.review.outstandingIssues.includes("layout-validation-unknown")
+  );
+
+  const contentLoss = {
+    ...legacy,
+    layoutValidated: true,
+    reviewApproval: {
+      approvedAtIso: "2026-09-08T00:00:00.000Z",
+      approvedReasons: ["frame-1-content-loss-allowed"],
+      note: "attempted approval"
+    },
+    frames: legacy.frames.map((frame, index) =>
+      index === 0
+        ? {
+            ...frame,
+            override: {
+              candidateId: "cand-content-loss",
+              mode: "upload",
+              appliedAtIso: "2026-09-08T00:00:00.000Z",
+              instruction: null,
+              fit: {
+                verdict: "review",
+                reasons: ["content-loss-allowed"],
+                lostPixels: 3,
+                touchesEdge: ["left"]
+              }
+            }
+          }
+        : frame
+    )
+  };
+  await assert.rejects(
+    buildExportBundle(contentLoss, { includeGif: false }),
+    error =>
+      error instanceof MotionExportBlockedError &&
+      error.review.blockingIssues.includes("frame-1-content-loss-allowed")
+  );
+});
+
+test("motion set exports block an unapproved member before creating a temporary bundle", async t => {
   const project = await createFixture(t, "Set review export");
   const initial = await createSet({
     name: "Set review export",
@@ -421,21 +597,27 @@ test("motion set exports aggregate action-keyed layout reviews", async t => {
       finishedAtIso: "2026-09-08T00:00:00.000Z"
     }))
   }));
-  const bundle = await buildSetExportBundle(set, { includeGif: false });
-  t.after(() => bundle.cleanup());
-  const exported = await unzipJson(bundle.zipPath);
-
-  assert.deepEqual(exported.meta.review.idle, {
-    sliceMode: "grid",
-    layoutValidated: false,
-    sliceConfidence: null,
-    requiresReview: true,
-    issues: ["layout-not-validated"]
+  const originalMkdtemp = fs.mkdtemp.bind(fs);
+  let temporaryDirectories = 0;
+  const mkdtempMock = mock.method(fs, "mkdtemp", async (...args) => {
+    temporaryDirectories += 1;
+    return originalMkdtemp(...args);
   });
-  assert.equal(exported.meta.requiresReview, true);
+  try {
+    await assert.rejects(
+      buildSetExportBundle(set, { includeGif: false }),
+      error =>
+        error instanceof MotionExportBlockedError &&
+        error.status === 409 &&
+        error.review.outstandingIssues.includes("idle:layout-not-validated")
+    );
+  } finally {
+    mkdtempMock.mock.restore();
+  }
+  assert.equal(temporaryDirectories, 0);
 });
 
-test("motion set review issues use global frame indices and aggregate mixed motion states", async t => {
+test("motion set review issues use global frame indices in the export gate", async t => {
   await useTempDataDir(t);
   const idle = await createFixture(t, "Idle set review", false);
   const walk = await createFixture(t, "Walk set review", false);
@@ -481,15 +663,12 @@ test("motion set review issues use global frame indices and aggregate mixed moti
       finishedAtIso: "2026-09-08T00:00:00.000Z"
     }))
   }));
-  const bundle = await buildSetExportBundle(set, { includeGif: false });
-  t.after(() => bundle.cleanup());
-  const exported = await unzipJson(bundle.zipPath);
-
-  assert.equal(exported.meta.review.idle.requiresReview, false);
-  assert.deepEqual(exported.meta.review.idle.issues, []);
-  assert.equal(exported.meta.review.walk.requiresReview, true);
-  assert.deepEqual(exported.meta.review.walk.issues, ["frame-4-content-loss"]);
-  assert.equal(exported.meta.requiresReview, true);
+  await assert.rejects(
+    buildSetExportBundle(set, { includeGif: false }),
+    error =>
+      error instanceof MotionExportBlockedError &&
+      error.review.outstandingIssues.includes("walk:frame-4-content-loss")
+  );
 });
 
 test("motion set exports report no aggregate review when every motion is clean", async t => {
@@ -531,7 +710,7 @@ test("excluded frames are omitted and flipX pixels remain baked after reindexing
       { name: "bounce", frameIndices: [0, 1, 2, 0], fps: 10, loop: "pingpong" }
     ]
   });
-  const bundle = await buildExportBundle(project, { includeGif: false });
+  const bundle = await buildExportBundle(approvedGridProject(project), { includeGif: false });
   t.after(() => bundle.cleanup());
 
   const data = await unzipJson(bundle.zipPath);
@@ -579,7 +758,7 @@ test("export filename sanitization blocks traversal, spaces, quotes, and Korean-
 
 test("buildExportBundle creates a non-empty ZIP and cleanup removes its temporary root", async t => {
   const project = await createFixture(t, "ZIP cleanup");
-  const bundle = await buildExportBundle(project, { includeGif: false });
+  const bundle = await buildExportBundle(approvedGridProject(project), { includeGif: false });
   const temporaryRoot = path.dirname(bundle.zipPath);
   try {
     const stat = await fs.stat(bundle.zipPath);
@@ -599,7 +778,7 @@ test("README collapses animation-name whitespace and stays at eight lines", asyn
       { name: "walk\r\n   cycle\tfast", frameIndices: [0, 1, 2], fps: 9, loop: "once" }
     ]
   });
-  const bundle = await buildExportBundle(project, { includeGif: false });
+  const bundle = await buildExportBundle(approvedGridProject(project), { includeGif: false });
   t.after(() => bundle.cleanup());
 
   const readme = (await unzipBuffer(bundle.zipPath, "README.txt")).toString("utf8");

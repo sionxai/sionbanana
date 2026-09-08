@@ -4,7 +4,11 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getDataDir } from "@/lib/local/storage";
-import { buildExportBundle, sanitizeExportFilename } from "@/lib/motion/export";
+import {
+  buildExportBundle,
+  MotionExportBlockedError,
+  sanitizeExportFilename
+} from "@/lib/motion/export";
 import { MotionStorageError, readProject } from "@/lib/motion/storage";
 
 export const runtime = "nodejs";
@@ -125,6 +129,12 @@ export async function GET(
   } catch (error) {
     if (error instanceof InvalidExportQueryError) {
       return NextResponse.json({ ok: false, reason: error.message }, { status: 400 });
+    }
+    if (error instanceof MotionExportBlockedError) {
+      return NextResponse.json(
+        { ok: false, code: error.code, reason: error.message, review: error.review },
+        { status: error.status }
+      );
     }
     if (error instanceof MotionStorageError) {
       return NextResponse.json({ ok: false, reason: error.message }, { status: error.status });
