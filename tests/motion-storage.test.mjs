@@ -22,16 +22,22 @@ import {
   rebuildProject,
   revertFrameOverrides
 } from "@/lib/motion/storage";
-import { createCandidate } from "@/lib/motion/candidates";
+import { createCandidate, readCandidate, updateCandidate } from "@/lib/motion/candidates";
 import { analyzeFrame } from "@/lib/motion/engine";
 import { parseMotionProject } from "@/lib/motion/types";
 
 let routeImportHooksRegistered = false;
 
-async function loadMotionRouteHandlers() {
+function installMotionModuleHooks() {
   if (!routeImportHooksRegistered) {
+    const authStub = `data:text/javascript,${encodeURIComponent(
+      'export class CodexAuthError extends Error {}; export async function getCodexAuth() { return { accessToken: "test-token", accountId: "test-account" }; }'
+    )}`;
     registerHooks({
       resolve(specifier, context, nextResolve) {
+        if (specifier === "./codex-oauth" && context.parentURL?.endsWith("/lib/codex-fetch.ts")) {
+          return { url: authStub, shortCircuit: true };
+        }
         if (specifier === "next/server") {
           return nextResolve(pathToFileURL(path.resolve("node_modules/next/server.js")).href, context);
         }
@@ -49,6 +55,10 @@ async function loadMotionRouteHandlers() {
     });
     routeImportHooksRegistered = true;
   }
+}
+
+async function loadMotionRouteHandlers() {
+  installMotionModuleHooks();
   return import("../app/api/motion/projects/route.ts");
 }
 
@@ -80,6 +90,29 @@ async function testSheet() {
       pixels[offset] = 20;
       pixels[offset + 1] = 80;
       pixels[offset + 2] = 180;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function fourCellGammaStrip() {
+  const width = 48;
+  const height = 12;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  for (let cell = 0; cell < 4; cell += 1) {
+    for (let y = 3; y < 9; y += 1) {
+      for (let x = cell * 12 + 3; x < cell * 12 + 9; x += 1) {
+        const offset = (y * width + x) * 4;
+        pixels[offset] = 20;
+        pixels[offset + 1] = 80;
+        pixels[offset + 2] = 180;
+      }
     }
   }
   return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
@@ -220,6 +253,100 @@ test("buildSheetPrompt includes chroma key, grid dimensions, and one direction",
   assert.match(prompt, /4 columns by 2 rows/);
   assert.match(prompt, /facing the same way as row 1/i);
   assert.match(prompt, /Do not mirror/i);
+});
+
+test("projects record whether their layout was validated and derive it for legacy project JSON", async t => {
+  await useTempDataDir(t);
+  const input = {
+    sheetBuffer: await testSheet(),
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  };
+  const gridProject = await createProject({ name: "Grid layout validation", sliceMode: "grid", ...input });
+  const autoProject = await createProject({ name: "Auto layout validation", sliceMode: "auto", ...input });
+
+  assert.equal(gridProject.layoutValidated, false);
+  assert.equal(autoProject.layoutValidated, true);
+  assert.equal((await rebuildProject(autoProject.id, { sliceMode: "grid" })).layoutValidated, false);
+
+  const legacyProject = {
+    id: "legacy-layout-validation",
+    name: "Legacy layout validation",
+    createdAtIso: "2026-09-08T00:00:00.000Z",
+    sourceImage: { path: "raw.png", width: 12, height: 6 },
+    grid: { cols: 2, rows: 1 },
+    canvas: { w: 6, h: 6 },
+    matte: { mode: "none" },
+    frames: [],
+    animations: []
+  };
+  assert.equal(parseMotionProject(legacyProject).layoutValidated, false);
+  assert.equal(parseMotionProject({ ...legacyProject, sliceMode: "auto" }).layoutValidated, true);
+  assert.equal(
+    parseMotionProject({ ...legacyProject, sliceMode: "grid", layoutValidated: true }).layoutValidated,
+    true
+  );
+});
+
+test("candidate review flags persist, update, and reflect strip layout quality without changing status", async t => {
+  await useTempDataDir(t);
+  installMotionModuleHooks();
+  const { runCandidate } = await import("../lib/motion/candidate-generate.ts");
+  const project = await createProject({
+    name: "Candidate layout review",
+    sheetBuffer: await mirroredGammaSheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 2, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte()
+  });
+  const manual = await createCandidate(project.id, { mode: "mask", frames: [{ index: 0 }] });
+  assert.equal(manual.requiresReview, false);
+  assert.deepEqual(manual.reviewReasons, []);
+  await updateCandidate(project.id, manual.id, candidate => ({
+    ...candidate,
+    requiresReview: true,
+    reviewReasons: ["manual-review"]
+  }));
+  assert.deepEqual((await readCandidate(project.id, manual.id)).reviewReasons, ["manual-review"]);
+
+  const accepted = await createCandidate(project.id, {
+    mode: "strip",
+    frames: [{ index: 1 }, { index: 2 }]
+  });
+  const acceptedResult = await runCandidate(project.id, accepted.id, {
+    editImage: async () => {
+      throw new Error("mask generation is not expected");
+    },
+    generateSheet: async () => fourCellGammaStrip()
+  });
+  assert.equal(acceptedResult.status, "ready");
+  assert.equal(acceptedResult.requiresReview, false);
+  assert.deepEqual(acceptedResult.reviewReasons, []);
+
+  const fallback = await createCandidate(project.id, {
+    mode: "strip",
+    frames: [{ index: 1 }, { index: 2 }]
+  });
+  const fallbackResult = await runCandidate(project.id, fallback.id, {
+    editImage: async () => {
+      throw new Error("mask generation is not expected");
+    },
+    generateSheet: async () => testSheet()
+  });
+  assert.equal(fallbackResult.status, "ready");
+  assert.equal(fallbackResult.requiresReview, true);
+  assert.deepEqual(fallbackResult.reviewReasons, ["layout-fallback-grid", "low-slice-confidence"]);
+
+  const mask = await createCandidate(project.id, { mode: "mask", frames: [{ index: 0 }] });
+  const maskResult = await runCandidate(project.id, mask.id, {
+    editImage: async () => (await readOrientedCell(project.id, 0)).buffer,
+    generateSheet: async () => {
+      throw new Error("strip generation is not expected");
+    }
+  });
+  assert.equal(maskResult.status, "ready");
+  assert.equal(maskResult.requiresReview, false);
+  assert.deepEqual(maskResult.reviewReasons, []);
 });
 
 test("failed project.json rename preserves the previous project atomically", async t => {

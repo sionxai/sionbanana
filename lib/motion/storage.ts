@@ -419,6 +419,7 @@ async function buildArtifacts(input: {
     sourceImage: { path: "raw.png", width: metadata.width, height: metadata.height },
     sliceMode: input.sliceMode,
     sliceConfidence,
+    layoutValidated: input.sliceMode === "auto",
     normalizeScale: input.normalizeScale,
     normalizePivotX: input.normalizePivotX,
     normalizePivotY: input.normalizePivotY,

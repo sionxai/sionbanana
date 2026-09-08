@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 import sharp from "sharp";
 
 import { buildExportBundle, sanitizeExportFilename } from "@/lib/motion/export";
+import { buildSetExportBundle } from "@/lib/motion/set-export";
+import { createSet, updateSet } from "@/lib/motion/set-storage";
 import { createProject, projectDir, rebuildProject } from "@/lib/motion/storage";
 import { exportMotion } from "../scripts/mcp-server.mjs";
 import { findMotionServer } from "../scripts/motion-server-discovery.mjs";
@@ -54,8 +56,8 @@ async function asymmetricSheet() {
   return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
-async function createFixture(t, name = "Export fixture") {
-  await useTempDataDir(t);
+async function createFixture(t, name = "Export fixture", initializeDataDir = true) {
+  if (initializeDataDir) await useTempDataDir(t);
   return createProject({
     name,
     sheetBuffer: await asymmetricSheet(),
@@ -63,6 +65,13 @@ async function createFixture(t, name = "Export fixture") {
     grid: { cols: 3, rows: 1, gutter: 0, remainderPolicy: "distribute" },
     matte: { mode: "none", tolerance: 45, softness: 2, despill: false }
   });
+}
+
+async function persistProject(project) {
+  await fs.writeFile(
+    path.join(projectDir(project.id), "project.json"),
+    `${JSON.stringify(project, null, 2)}\n`
+  );
 }
 
 async function createHundredFrameFixture(t) {
@@ -336,6 +345,178 @@ test("animation.json uses the export schema and valid remapped frame indices", a
   assert.equal(new Date(data.meta.createdAtIso).toISOString(), data.meta.createdAtIso);
   assert.equal(typeof data.meta.sourceProjectId, "string");
   assert.equal(data.meta.sourceProjectId, project.id);
+});
+
+test("motion exports include layout review state and only expose validated confidence", async t => {
+  const gridProject = await createFixture(t, "Grid review export");
+  const gridBundle = await buildExportBundle(gridProject, { includeGif: false });
+  t.after(() => gridBundle.cleanup());
+  const gridExport = await unzipJson(gridBundle.zipPath);
+
+  assert.deepEqual(gridExport.meta.review, {
+    sliceMode: "grid",
+    layoutValidated: false,
+    sliceConfidence: null,
+    requiresReview: true,
+    issues: ["layout-not-validated"]
+  });
+
+  const inspectedProject = {
+    ...gridProject,
+    sliceMode: "auto",
+    layoutValidated: true,
+    sliceConfidence: 1
+  };
+  const inspectedBundle = await buildExportBundle(inspectedProject, { includeGif: false });
+  t.after(() => inspectedBundle.cleanup());
+  const inspectedExport = await unzipJson(inspectedBundle.zipPath);
+  assert.deepEqual(inspectedExport.meta.review, {
+    sliceMode: "auto",
+    layoutValidated: true,
+    sliceConfidence: 1,
+    requiresReview: false,
+    issues: []
+  });
+});
+
+test("motion export fit review issues use the included frame index", async t => {
+  const project = await createFixture(t, "Fit review export");
+  project.frames[0].excluded = true;
+  project.frames[1].override = {
+    candidateId: "cand-fit-review",
+    mode: "upload",
+    appliedAtIso: "2026-09-08T00:00:00.000Z",
+    instruction: null,
+    fit: {
+      verdict: "review",
+      reasons: ["content-loss"],
+      lostPixels: 4,
+      touchesEdge: ["left"]
+    }
+  };
+  const bundle = await buildExportBundle(project, { includeGif: false });
+  t.after(() => bundle.cleanup());
+  const exported = await unzipJson(bundle.zipPath);
+
+  assert.ok(exported.meta.review.issues.includes("layout-not-validated"));
+  assert.ok(exported.meta.review.issues.includes("frame-1-content-loss"));
+  assert.equal(exported.meta.review.issues.includes("frame-2-content-loss"), false);
+});
+
+test("motion set exports aggregate action-keyed layout reviews", async t => {
+  const project = await createFixture(t, "Set review export");
+  const initial = await createSet({
+    name: "Set review export",
+    base: { description: "A banana hero" },
+    common: { cols: 3, rows: 1, fps: 12 },
+    members: [{ action: "idle" }]
+  });
+  const set = await updateSet(initial.id, current => ({
+    ...current,
+    status: "ready",
+    members: current.members.map(member => ({
+      ...member,
+      status: "ready",
+      projectId: project.id,
+      finishedAtIso: "2026-09-08T00:00:00.000Z"
+    }))
+  }));
+  const bundle = await buildSetExportBundle(set, { includeGif: false });
+  t.after(() => bundle.cleanup());
+  const exported = await unzipJson(bundle.zipPath);
+
+  assert.deepEqual(exported.meta.review.idle, {
+    sliceMode: "grid",
+    layoutValidated: false,
+    sliceConfidence: null,
+    requiresReview: true,
+    issues: ["layout-not-validated"]
+  });
+  assert.equal(exported.meta.requiresReview, true);
+});
+
+test("motion set review issues use global frame indices and aggregate mixed motion states", async t => {
+  await useTempDataDir(t);
+  const idle = await createFixture(t, "Idle set review", false);
+  const walk = await createFixture(t, "Walk set review", false);
+  await persistProject({ ...idle, sliceMode: "auto", layoutValidated: true, sliceConfidence: 1 });
+  await persistProject({
+    ...walk,
+    sliceMode: "auto",
+    layoutValidated: true,
+    sliceConfidence: 1,
+    frames: walk.frames.map(frame => {
+      if (frame.index === 0) return { ...frame, excluded: true };
+      if (frame.index !== 1) return frame;
+      return {
+        ...frame,
+        override: {
+          candidateId: "cand-set-fit-review",
+          mode: "upload",
+          appliedAtIso: "2026-09-08T00:00:00.000Z",
+          instruction: null,
+          fit: {
+            verdict: "review",
+            reasons: ["content-loss"],
+            lostPixels: 4,
+            touchesEdge: ["left"]
+          }
+        }
+      };
+    })
+  });
+  const initial = await createSet({
+    name: "Mixed set review",
+    base: { description: "A banana hero" },
+    common: { cols: 3, rows: 1, fps: 12 },
+    members: [{ action: "idle" }, { action: "walk" }]
+  });
+  const set = await updateSet(initial.id, current => ({
+    ...current,
+    status: "ready",
+    members: current.members.map(member => ({
+      ...member,
+      status: "ready",
+      projectId: member.action === "idle" ? idle.id : walk.id,
+      finishedAtIso: "2026-09-08T00:00:00.000Z"
+    }))
+  }));
+  const bundle = await buildSetExportBundle(set, { includeGif: false });
+  t.after(() => bundle.cleanup());
+  const exported = await unzipJson(bundle.zipPath);
+
+  assert.equal(exported.meta.review.idle.requiresReview, false);
+  assert.deepEqual(exported.meta.review.idle.issues, []);
+  assert.equal(exported.meta.review.walk.requiresReview, true);
+  assert.deepEqual(exported.meta.review.walk.issues, ["frame-4-content-loss"]);
+  assert.equal(exported.meta.requiresReview, true);
+});
+
+test("motion set exports report no aggregate review when every motion is clean", async t => {
+  const project = await createFixture(t, "Clean set review");
+  await persistProject({ ...project, sliceMode: "auto", layoutValidated: true, sliceConfidence: 1 });
+  const initial = await createSet({
+    name: "Clean set review",
+    base: { description: "A banana hero" },
+    common: { cols: 3, rows: 1, fps: 12 },
+    members: [{ action: "idle" }]
+  });
+  const set = await updateSet(initial.id, current => ({
+    ...current,
+    status: "ready",
+    members: current.members.map(member => ({
+      ...member,
+      status: "ready",
+      projectId: project.id,
+      finishedAtIso: "2026-09-08T00:00:00.000Z"
+    }))
+  }));
+  const bundle = await buildSetExportBundle(set, { includeGif: false });
+  t.after(() => bundle.cleanup());
+  const exported = await unzipJson(bundle.zipPath);
+
+  assert.equal(exported.meta.review.idle.requiresReview, false);
+  assert.equal(exported.meta.requiresReview, false);
 });
 
 test("excluded frames are omitted and flipX pixels remain baked after reindexing", async t => {

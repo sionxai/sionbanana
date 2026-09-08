@@ -79,6 +79,7 @@ test("create_motion mock returns a running job without a worker", async t => {
     ok: true,
     jobId: result.jobId,
     status: "running",
+    layoutValidated: false,
     mocked: true
   });
   await assert.rejects(fs.access(path.join(context.dataRoot, "motion-jobs")));
@@ -160,6 +161,7 @@ test("get_motion resolves an expired running job without a worker", async t => {
   assert.equal(result.ok, true);
   assert.equal(result.status, "failed");
   assert.match(result.reason, /deadline exceeded/);
+  assert.equal(result.layoutValidated, false);
 
   const persisted = JSON.parse(await fs.readFile(jobPath, "utf8"));
   assert.equal(persisted.status, "failed");
@@ -195,7 +197,9 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
     id: projectId,
     name: "Ready walk",
     createdAtIso: "2026-07-22T00:00:00.000Z",
+    sliceMode: "auto",
     sliceConfidence: 0.91,
+    layoutValidated: true,
     canvas: { w: 128, h: 128 },
     mirrorDetection: {
       enabled: true,
@@ -221,6 +225,7 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
   assert.equal(result.ok, true);
   assert.equal(result.status, "ready");
   assert.deepEqual(result.project, project);
+  assert.equal(result.layoutValidated, true);
   assert.deepEqual(result.mirrorDetection, { mirroredRows: [1] });
   assert.deepEqual(result.duplicateDetection, { repeatedRows: [1], excludedFrames: [2, 3] });
   assert.equal(result.sliceConfidence, 0.91);
@@ -229,6 +234,34 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
   assert.equal(path.isAbsolute(result.paths.project), true);
   assert.equal(result.paths.frames.length, 2);
   assert.equal(result.paths.frames.every(framePath => path.isAbsolute(framePath)), true);
+});
+
+test("get_motion hides confidence for layouts that were not validated", async t => {
+  const context = await motionFixture(t);
+  const jobId = "motion-job-grid";
+  const projectId = "motion-project-grid";
+  await writeJson(path.join(context.dataRoot, "motion-jobs", `${jobId}.json`), {
+    status: "ready",
+    createdAtIso: "2026-09-08T00:00:00.000Z",
+    deadlineIso: "2026-09-08T00:10:00.000Z",
+    projectId,
+    sliceConfidence: 1
+  });
+  await writeJson(path.join(context.dataRoot, "motion-assets", projectId, "project.json"), {
+    id: projectId,
+    name: "Grid motion",
+    createdAtIso: "2026-09-08T00:00:00.000Z",
+    sliceMode: "grid",
+    layoutValidated: false,
+    sliceConfidence: 1,
+    frames: []
+  });
+
+  const result = await getMotion({ jobId, waitMs: 0 }, context);
+  assert.equal(result.ok, true);
+  assert.equal(result.layoutValidated, false);
+  assert.equal(Object.hasOwn(result, "sliceConfidence"), false);
+  assert.equal(Object.hasOwn(result.project, "sliceConfidence"), false);
 });
 
 test("list_motion enumerates jobs and projects", async t => {
@@ -506,6 +539,22 @@ test("motion candidate schemas are strict, reject ambiguous sources, and registe
     }
   }
   assert.equal(
+    motionCandidateApplyInputSchema.safeParse({
+      ...applyValid,
+      allowContentLoss: true,
+      intentionalEmptyFrames: [0],
+      maxLostPixels: 4
+    }).success,
+    true
+  );
+  for (const input of [
+    { ...applyValid, allowContentLoss: "true" },
+    { ...applyValid, intentionalEmptyFrames: [-1] },
+    { ...applyValid, maxLostPixels: -1 }
+  ]) {
+    assert.equal(motionCandidateApplyInputSchema.safeParse(input).success, false);
+  }
+  assert.equal(
     motionCandidateCreateInputSchema.safeParse({
       ...valid,
       frames: [{ index: 0, imagePath: "image.png", imageDataUrl: "data:image/png;base64,AA==" }]
@@ -533,6 +582,16 @@ test("motion candidate schemas are strict, reject ambiguous sources, and registe
     ok: true,
     candidateId: "cand-mock",
     status: "pending",
+    mocked: true
+  });
+  assert.deepEqual(await getMotionCandidate(getValid, context), {
+    ok: true,
+    status: "pending",
+    reason: null,
+    frames: [],
+    metrics: null,
+    requiresReview: false,
+    reviewReasons: [],
     mocked: true
   });
 });
@@ -730,6 +789,8 @@ test("get_motion_candidate polls and returns canonical ready paths without trust
           status: getCalls <= 2 ? "pending" : "ready",
           reason: null,
           metrics: { generated: 1 },
+          requiresReview: true,
+          reviewReasons: ["layout-fallback-grid", "low-slice-confidence"],
           frames: [{ index: 0, file: "../../outside.png", mask: null }]
         }
       });
@@ -741,14 +802,18 @@ test("get_motion_candidate polls and returns canonical ready paths without trust
     status: "pending",
     reason: null,
     frames: [{ index: 0 }],
-    metrics: { generated: 1 }
+    metrics: { generated: 1 },
+    requiresReview: true,
+    reviewReasons: ["layout-fallback-grid", "low-slice-confidence"]
   });
   assert.deepEqual(await getMotionCandidate({ projectId, candidateId, waitMs: 600 }, context), {
     ok: true,
     status: "ready",
     reason: null,
     frames: [{ index: 0, path: framePath }],
-    metrics: { generated: 1 }
+    metrics: { generated: 1 },
+    requiresReview: true,
+    reviewReasons: ["layout-fallback-grid", "low-slice-confidence"]
   });
 
   const replacementFrames = path.join(context.dataRoot, "replacement-frames");
@@ -793,7 +858,9 @@ test("get_motion_candidate binds the response candidate id and preserves failure
     status: "failed",
     reason: "generation-error",
     frames: [{ index: 1 }],
-    metrics: null
+    metrics: null,
+    requiresReview: false,
+    reviewReasons: []
   });
 });
 
@@ -838,6 +905,30 @@ test("apply and revert candidate tools omit optional selections and project acti
       ]
     }
   });
+  assert.deepEqual(
+    await applyMotionCandidate(
+      {
+        projectId,
+        candidateId,
+        allowContentLoss: true,
+        intentionalEmptyFrames: [0],
+        maxLostPixels: 4
+      },
+      context
+    ),
+    {
+      ok: true,
+      projectId,
+      overriddenFrames: [1],
+      paths: {
+        sheet: path.join(context.dataRoot, "motion-assets", projectId, "derived", "sheet.png"),
+        frames: [
+          path.join(context.dataRoot, "motion-assets", projectId, "derived", "frames", "f01.png"),
+          path.join(context.dataRoot, "motion-assets", projectId, "derived", "frames", "f02.png")
+        ]
+      }
+    }
+  );
   for (const invalidProjectId of [undefined, "motion-project-other"]) {
     applyResponseId = invalidProjectId;
     const invalid = await applyMotionCandidate({ projectId, candidateId }, context);
@@ -856,5 +947,13 @@ test("apply and revert candidate tools omit optional selections and project acti
     assert.equal(invalid.ok, false);
     assert.match(invalid.reason, /motion candidate project response was incomplete/);
   }
-  assert.deepEqual(requests, [{}, {}, {}, { frames: [1] }, { frames: [1] }, { frames: [1] }]);
+  assert.deepEqual(requests, [
+    {},
+    { allowContentLoss: true, intentionalEmptyFrames: [0], maxLostPixels: 4 },
+    {},
+    {},
+    { frames: [1] },
+    { frames: [1] },
+    { frames: [1] }
+  ]);
 });

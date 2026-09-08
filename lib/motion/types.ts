@@ -110,6 +110,8 @@ export const candidateSchema = z
     instruction: z.string().max(4000).nullable().default(null),
     protect: z.array(z.string().trim().min(1).max(200)).default([]),
     cellAligned: z.boolean().default(false),
+    requiresReview: z.boolean().default(false),
+    reviewReasons: z.array(z.string().min(1)).default([]),
     baseline: z
       .array(
         z
@@ -189,6 +191,7 @@ export const motionProjectSchema = z
     sourceImage: sourceImageSchema,
     sliceMode: z.enum(sliceModeValues),
     sliceConfidence: z.number().finite().min(0).max(1).default(1),
+    layoutValidated: z.boolean().default(false),
     normalizeScale: z.enum(normalizeScaleValues).default("area"),
     normalizePivotX: z.enum(normalizePivotXValues).default("centroid"),
     normalizePivotY: z.enum(normalizePivotYValues).default("preserve"),
@@ -233,6 +236,11 @@ export function parseMotionProject(input: unknown): MotionProject {
     project.sliceConfidence === undefined
       ? 1
       : project.sliceConfidence;
+  const layoutValidated =
+    !Object.prototype.hasOwnProperty.call(project, "layoutValidated") ||
+    project.layoutValidated === undefined
+      ? sliceMode === "auto"
+      : project.layoutValidated;
   const normalizeScale =
     !Object.prototype.hasOwnProperty.call(project, "normalizeScale") ||
     project.normalizeScale === undefined
@@ -262,6 +270,7 @@ export function parseMotionProject(input: unknown): MotionProject {
     ...project,
     sliceMode,
     sliceConfidence,
+    layoutValidated,
     normalizeScale,
     normalizePivotX,
     normalizePivotY,

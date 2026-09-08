@@ -345,7 +345,10 @@ export const motionCandidateApplyInputSchema = z
     projectId: motionCandidateIdSchema,
     candidateId: motionCandidateIdSchema,
     frames: z.array(z.number().int().nonnegative()).min(1).optional(),
-    force: z.boolean().optional()
+    force: z.boolean().optional(),
+    allowContentLoss: z.boolean().optional(),
+    intentionalEmptyFrames: z.array(z.number().int().nonnegative()).optional(),
+    maxLostPixels: z.number().int().nonnegative().optional()
   })
   .strict();
 export const motionCandidateRevertInputSchema = z
@@ -357,10 +360,10 @@ export const motionCandidateRevertInputSchema = z
 const MOTION_SET_TOOL_DESCRIPTION =
   "세트 = 한 캐릭터의 여러 동작을 순차 생성. 순환 프리셋은 반복 행 자동 제외(실효 4장 정상).";
 const MOTION_CANDIDATE_TOOL_DESCRIPTION =
-  "구간 수정 — mask는 셀 크기 마스크(알파 0=편집, 좁을수록 원본 보존), strip은 연속 구간을 이웃 앵커로 재생성. 적용 시 원본 셀 크기로 스케일·발 기준 정렬되며 원본 시트는 바뀌지 않는다.";
+  "구간 수정 — mask는 셀 크기 마스크(알파 0=편집, 좁을수록 원본 보존), strip은 연속 구간을 이웃 앵커로 재생성. 적용 시 원본 셀 크기로 스케일·발 기준 정렬되며 원본 시트는 바뀌지 않는다. 고정 격자 폴백이나 낮은 배치 신뢰도로 만들어진 후보는 requiresReview: true로 표시된다(적용은 막지 않는다).";
 const MOTION_CANDIDATE_APPLY_TOOL_DESCRIPTION =
   MOTION_CANDIDATE_TOOL_DESCRIPTION +
-  " 후보 생성 이후 해당 프레임이 바뀌었으면 409로 거부한다. force: true로 덮어쓴다.";
+  " 후보 생성 이후 해당 프레임이 바뀌었으면 409로 거부한다. force: true로 덮어쓴다. 셀에 맞추면 내용이 잘리는 후보는 409(CONTENT_LOSS)로 거부한다. 잘림을 감수하려면 allowContentLoss: true. 의도한 소멸(빈) 프레임은 intentionalEmptyFrames에 0-based 인덱스로 지정한다. force는 기준선 충돌 전용이며 잘림을 허용하지 않는다.";
 const MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION =
   MOTION_CANDIDATE_TOOL_DESCRIPTION +
   " 오버라이드를 제거해 최초 원본으로 되돌린다(직전 후보로 돌아가지 않는다).";
@@ -1135,6 +1138,7 @@ export async function createMotion(input, context) {
       ok: true,
       jobId,
       status: "running",
+      layoutValidated: false,
       mocked: true
     };
   }
@@ -1204,6 +1208,9 @@ export async function createMotion(input, context) {
         jobId,
         ...(typeof polled.status === "string" ? { status: polled.status } : {}),
         ...(isMotionId(polled.projectId) ? { projectId: polled.projectId } : {}),
+        ...(typeof polled.layoutValidated === "boolean"
+          ? { layoutValidated: polled.layoutValidated }
+          : {}),
         ...(typeof polled.reason === "string" ? { reason: polled.reason } : {})
       };
     }
@@ -1588,6 +1595,8 @@ export async function getMotionCandidate(input, context) {
       reason: null,
       frames: [],
       metrics: null,
+      requiresReview: false,
+      reviewReasons: [],
       mocked: true
     };
   }
@@ -1634,7 +1643,16 @@ export async function applyMotionCandidate(input, context) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...(parsedInput.frames === undefined ? {} : { frames: parsedInput.frames }),
-          ...(parsedInput.force === undefined ? {} : { force: parsedInput.force })
+          ...(parsedInput.force === undefined ? {} : { force: parsedInput.force }),
+          ...(parsedInput.allowContentLoss === undefined
+            ? {}
+            : { allowContentLoss: parsedInput.allowContentLoss }),
+          ...(parsedInput.intentionalEmptyFrames === undefined
+            ? {}
+            : { intentionalEmptyFrames: parsedInput.intentionalEmptyFrames }),
+          ...(parsedInput.maxLostPixels === undefined
+            ? {}
+            : { maxLostPixels: parsedInput.maxLostPixels })
         })
       },
       context
@@ -1770,7 +1788,9 @@ async function motionCandidateLookupResult(candidate, projectId, context) {
     status: candidate.status,
     reason: typeof candidate.reason === "string" ? candidate.reason : null,
     frames: frameIndices.map(index => ({ index })),
-    metrics: candidate.metrics ?? null
+    metrics: candidate.metrics ?? null,
+    requiresReview: candidate.requiresReview === true,
+    reviewReasons: Array.isArray(candidate.reviewReasons) ? candidate.reviewReasons : []
   };
   if (candidate.status !== "ready") return result;
 
@@ -2703,6 +2723,7 @@ function motionJobResult(jobId, job) {
     ok: true,
     jobId,
     status: job.status,
+    layoutValidated: false,
     ...(isMotionId(job.projectId) ? { projectId: job.projectId } : {}),
     ...(typeof job.reason === "string" ? { reason: job.reason } : {})
   };
@@ -2730,6 +2751,14 @@ async function readyMotionResult(jobId, job, context) {
   if (project.id !== job.projectId) {
     throw new Error("motion project id does not match its directory");
   }
+  const layoutValidated =
+    typeof project.layoutValidated === "boolean"
+      ? project.layoutValidated
+      : project.sliceMode === "auto";
+  const projectWithLayoutValidated = { ...project, layoutValidated };
+  const { sliceConfidence: projectSliceConfidence, ...projectWithoutSliceConfidence } =
+    projectWithLayoutValidated;
+  const responseProject = layoutValidated ? projectWithLayoutValidated : projectWithoutSliceConfidence;
   const mirroredRows = Array.isArray(project.mirrorDetection?.rows)
     ? project.mirrorDetection.rows.flatMap((row, index) => (row?.mirrored === true ? [index] : []))
     : [];
@@ -2748,7 +2777,8 @@ async function readyMotionResult(jobId, job, context) {
     jobId,
     status: "ready",
     projectId: job.projectId,
-    project,
+    project: responseProject,
+    layoutValidated,
     mirrorDetection: { mirroredRows },
     duplicateDetection: { repeatedRows, excludedFrames },
     paths: {
@@ -2757,10 +2787,10 @@ async function readyMotionResult(jobId, job, context) {
       frames,
       project: projectPath
     },
-    ...(typeof job.sliceConfidence === "number"
+    ...(layoutValidated && typeof job.sliceConfidence === "number"
       ? { sliceConfidence: job.sliceConfidence }
-      : typeof project.sliceConfidence === "number"
-        ? { sliceConfidence: project.sliceConfidence }
+      : layoutValidated && typeof projectSliceConfidence === "number"
+        ? { sliceConfidence: projectSliceConfidence }
         : {})
   };
 }

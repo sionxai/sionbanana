@@ -43,6 +43,8 @@ type CreateCandidateInput = {
   instruction?: string | null;
   protect?: string[];
   cellAligned?: boolean;
+  requiresReview?: boolean;
+  reviewReasons?: string[];
 };
 
 function errorCode(error: unknown): string | undefined {
@@ -265,6 +267,17 @@ async function createCandidateUnlocked(projectId: string, input: CreateCandidate
   if (typeof cellAligned !== "boolean") {
     throw new CandidateStorageError("INVALID_INPUT", "Candidate cell alignment is invalid.", 400);
   }
+  const requiresReview = input.requiresReview ?? false;
+  if (typeof requiresReview !== "boolean") {
+    throw new CandidateStorageError("INVALID_INPUT", "Candidate review requirement is invalid.", 400);
+  }
+  const reviewReasons = input.reviewReasons ?? [];
+  if (
+    !Array.isArray(reviewReasons) ||
+    reviewReasons.some(reason => typeof reason !== "string" || reason.length === 0)
+  ) {
+    throw new CandidateStorageError("INVALID_INPUT", "Candidate review reasons are invalid.", 400);
+  }
 
   const candidates = await candidatesDirectory(projectId, true);
   const id = `cand-${Date.now()}-${randomUUID()}`;
@@ -312,6 +325,8 @@ async function createCandidateUnlocked(projectId: string, input: CreateCandidate
       instruction,
       protect: protect.map(value => value.trim()),
       cellAligned,
+      requiresReview,
+      reviewReasons,
       baseline: candidateFrames.map(frame => ({
         index: frame.index,
         overrideCandidateId: project.frames[frame.index].override?.candidateId ?? null
