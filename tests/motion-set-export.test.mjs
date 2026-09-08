@@ -12,7 +12,7 @@ import sharp from "sharp";
 
 import { buildSetExportBundle } from "@/lib/motion/set-export";
 import { createSet, updateSet } from "@/lib/motion/set-storage";
-import { createProject, projectDir } from "@/lib/motion/storage";
+import { createProject, projectDir, setReviewApproval } from "@/lib/motion/storage";
 
 const execFileAsync = promisify(execFile);
 let routeImportHooksRegistered = false;
@@ -82,7 +82,14 @@ async function seedProject({ name, canvas, frames, animations, frameImages }) {
       fs.writeFile(path.join(framesDirectory, `f${String(index + 1).padStart(2, "0")}.png`), image)
     )
   );
-  return project;
+  // 이 픽스처는 고정 격자라 SB WO-018 내보내기 게이트의 승인 대상이 된다.
+  // 이 파일이 검증하는 것은 캔버스 정렬과 라우트 스트리밍이지 게이트가 아니므로,
+  // 어서션을 낮추지 않고 실제 승인 경로를 한 번 거쳐 통과시킨다.
+  const approved = await setReviewApproval(created.id, {
+    reasons: ["layout-not-validated"],
+    note: "fixture approval"
+  });
+  return { ...project, reviewApproval: approved.reviewApproval };
 }
 
 function frame(index, pivot, trim, excluded = false, durationMs = null) {
