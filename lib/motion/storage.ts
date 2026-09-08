@@ -1024,7 +1024,7 @@ function contentLossMessage(index: number, report: CellFitReport): string {
     .filter(([edge]) => report.lostByEdge[edge] > 0)
     .map(([edge, label]) => `${label} ${report.lostByEdge[edge]}`)
     .join(", ");
-  return `프레임 ${index + 1}번은 셀에 맞추면 내용 ${report.lostPixels}픽셀이 잘립니다${edgeSummary ? `(${edgeSummary})` : ""}. 셀을 벗어나는 부분을 줄여 후보를 다시 만들거나, 손실을 감수하려면 allowContentLoss로 적용하세요.`;
+  return `프레임 ${index + 1}번은 셀에 맞추면 내용 ${report.lostPixels}픽셀이 잘립니다${edgeSummary ? `(${edgeSummary})` : ""}. 셀을 벗어나는 부분을 줄여 후보를 다시 만드세요. 후보 원본은 그대로 보존되므로 다시 확인할 수 있습니다.`;
 }
 
 function emptySourceMessage(index: number): string {
