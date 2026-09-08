@@ -11,6 +11,16 @@ import type { FrameRect, Pivot } from "./types";
  */
 const OPAQUE_ALPHA = 16;
 
+/** 셀 정렬 후보처럼 맞춤 없이 그대로 쓰는 버퍼에 실제 내용이 있는지 센다. */
+export async function countOpaquePixels(buffer: Buffer): Promise<number> {
+  const decoded = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let opaquePixels = 0;
+  for (let offset = 3; offset < decoded.data.length; offset += decoded.info.channels) {
+    if (decoded.data[offset] > OPAQUE_ALPHA) opaquePixels += 1;
+  }
+  return opaquePixels;
+}
+
 export type CellSpec = { width: number; height: number; trim: FrameRect; pivot: Pivot };
 
 export type CellPlacement = {

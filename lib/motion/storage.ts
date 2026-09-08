@@ -10,6 +10,7 @@ import sharp from "sharp";
 import { getDataDir } from "@/lib/local/storage";
 import {
   classifyCellFit,
+  countOpaquePixels,
   computeCellPlacement,
   computeCellScale,
   inspectCellFit,
@@ -942,12 +943,16 @@ function contentLossMessage(index: number, report: CellFitReport): string {
   return `프레임 ${index + 1}번은 셀에 맞추면 내용 ${report.lostPixels}픽셀이 잘립니다${edgeSummary ? `(${edgeSummary})` : ""}. 셀을 벗어나는 부분을 줄여 후보를 다시 만들거나, 손실을 감수하려면 allowContentLoss로 적용하세요.`;
 }
 
+function emptySourceMessage(index: number): string {
+  return `프레임 ${index + 1}번 후보에 그려진 내용이 없습니다. 의도한 소멸 프레임이면 intentionalEmptyFrames에 ${index}(0-based 인덱스)를 넣어 적용하세요.`;
+}
+
 function blockedFitMessage(index: number, report: CellFitReport, reason: string): string {
   if (reason === "content-loss") return contentLossMessage(index, report);
   if (reason === "placement-empty") {
     return `프레임 ${index + 1}번은 셀에 맞추면 남는 내용이 없어 빈 프레임이 됩니다. 적용할 수 없습니다.`;
   }
-  return `프레임 ${index + 1}번 후보에 그려진 내용이 없습니다. 의도한 소멸 프레임이면 intentionalEmptyFrames에 ${index}(0-based 인덱스)를 넣어 적용하세요.`;
+  return emptySourceMessage(index);
 }
 
 async function applyCandidateFramesUnlocked(
@@ -995,6 +1000,24 @@ async function applyCandidateFramesUnlocked(
           `셀 정렬 후보 프레임 ${index + 1}의 크기가 원본 셀과 다릅니다.`,
           409
         );
+      }
+      if ((await countOpaquePixels(candidateBuffer)) === 0) {
+        if (intentionalEmptyFrames.has(index)) {
+          prepared.set(index, {
+            candidateBuffer,
+            cell,
+            intentionalEmpty: true,
+            fit: {
+              verdict: "review",
+              reasons: ["intentional-empty"],
+              lostPixels: 0,
+              touchesEdge: []
+            }
+          });
+        } else {
+          blockedMessages.push(emptySourceMessage(index));
+        }
+        continue;
       }
       prepared.set(index, { candidateBuffer, cell, intentionalEmpty: false });
       continue;
