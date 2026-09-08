@@ -132,6 +132,8 @@ async function finishClaim(
     reason: string | null;
     metrics: Record<string, unknown> | null;
     cellAligned?: boolean;
+    requiresReview?: boolean;
+    reviewReasons?: string[];
   }
 ): Promise<Candidate> {
   return updateCandidate(projectId, candidateId, current => {
@@ -141,7 +143,9 @@ async function finishClaim(
       status: input.status,
       reason: input.reason,
       metrics: input.metrics,
-      ...(input.cellAligned === undefined ? {} : { cellAligned: input.cellAligned })
+      ...(input.cellAligned === undefined ? {} : { cellAligned: input.cellAligned }),
+      ...(input.requiresReview === undefined ? {} : { requiresReview: input.requiresReview }),
+      ...(input.reviewReasons === undefined ? {} : { reviewReasons: input.reviewReasons })
     };
   });
 }
@@ -579,11 +583,22 @@ export async function runCandidate(
       claimed.candidate.mode === "mask"
         ? await runMaskCandidate(projectId, claimed.candidate, claimed.startedAtIso, deps)
         : await runStripCandidate(projectId, claimed.candidate, claimed.startedAtIso, deps);
+    const reviewReasons =
+      claimed.candidate.mode === "strip"
+        ? [
+            ...(metrics.layoutFallback === "grid" ? ["layout-fallback-grid"] : []),
+            ...(typeof metrics.sliceConfidence === "number" && metrics.sliceConfidence < 1
+              ? ["low-slice-confidence"]
+              : [])
+          ]
+        : [];
     return finishClaim(projectId, candidateId, claimed.startedAtIso, {
       status: "ready",
       reason: null,
       metrics,
-      ...(claimed.candidate.mode === "mask" ? { cellAligned: true } : {})
+      ...(claimed.candidate.mode === "mask" ? { cellAligned: true } : {}),
+      requiresReview: reviewReasons.length > 0,
+      reviewReasons
     });
   } catch (error) {
     return finishClaim(projectId, candidateId, claimed.startedAtIso, {

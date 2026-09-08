@@ -10,7 +10,10 @@ export const dynamic = "force-dynamic";
 const payloadSchema = z
   .object({
     frames: z.array(z.number().int().nonnegative()).min(1).optional(),
-    force: z.boolean().optional()
+    force: z.boolean().optional(),
+    allowContentLoss: z.boolean().optional(),
+    intentionalEmptyFrames: z.array(z.number().int().nonnegative()).optional(),
+    maxLostPixels: z.number().int().nonnegative().optional()
   })
   .strict();
 type RouteContext = { params: { id: string; cid: string } };
@@ -23,7 +26,7 @@ function errorResponse(error: unknown, context: string): Response {
     );
   }
   if (error instanceof CandidateStorageError || error instanceof MotionStorageError) {
-    return NextResponse.json({ ok: false, reason: error.message }, { status: error.status });
+    return NextResponse.json({ ok: false, reason: error.message, code: error.code }, { status: error.status });
   }
   console.error(context, "Unexpected motion candidate apply failure");
   return NextResponse.json({ ok: false, reason: "Unable to apply motion candidate." }, { status: 500 });
@@ -43,7 +46,12 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     const payload = payloadSchema.parse(input);
     return NextResponse.json({
       ok: true,
-      project: await applyCandidateFrames(params.id, params.cid, payload.frames, { force: payload.force })
+      project: await applyCandidateFrames(params.id, params.cid, payload.frames, {
+        force: payload.force,
+        allowContentLoss: payload.allowContentLoss,
+        intentionalEmptyFrames: payload.intentionalEmptyFrames,
+        maxLostPixels: payload.maxLostPixels
+      })
     });
   } catch (error) {
     return errorResponse(error, "/api/motion/projects/[id]/candidates/[cid]/apply POST error");

@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 import { packSheet } from "@/lib/motion/engine";
 import { projectDir } from "@/lib/motion/storage";
-import type { MotionProject } from "@/lib/motion/types";
+import type { Frame, MotionProject } from "@/lib/motion/types";
 
 const execFileAsync = promisify(execFile);
 const ZIP_PATH = "/usr/bin/zip";
@@ -27,7 +27,15 @@ type ExportAnimation = {
   loop: "loop" | "pingpong" | "once";
 };
 
-type ExportJson = {
+export type MotionExportReview = {
+  sliceMode: "auto" | "grid";
+  layoutValidated: boolean;
+  sliceConfidence: number | null;
+  requiresReview: boolean;
+  issues: string[];
+};
+
+export type ExportJson = {
   name: string;
   image: "sprite-sheet.png";
   frameWidth: number;
@@ -46,8 +54,34 @@ type ExportJson = {
     generator: "sionbanana-motion";
     createdAtIso: string;
     sourceProjectId: string;
+    review: MotionExportReview;
   };
 };
+
+export function buildMotionExportReview(
+  project: MotionProject,
+  frames: readonly Frame[],
+  frameIndexOffset = 0
+): MotionExportReview {
+  const issues: string[] = [];
+  if (!project.layoutValidated) {
+    issues.push("layout-not-validated");
+  } else if (project.sliceConfidence < 1) {
+    issues.push("low-slice-confidence");
+  }
+  for (const [index, frame] of frames.entries()) {
+    for (const reason of frame.override?.fit?.reasons ?? []) {
+      issues.push(`frame-${frameIndexOffset + index + 1}-${reason}`);
+    }
+  }
+  return {
+    sliceMode: project.sliceMode,
+    layoutValidated: project.layoutValidated,
+    sliceConfidence: project.layoutValidated ? project.sliceConfidence : null,
+    requiresReview: issues.length > 0,
+    issues
+  };
+}
 
 function slug(value: string): string {
   return value
@@ -336,7 +370,8 @@ export async function buildExportBundle(
       meta: {
         generator: "sionbanana-motion",
         createdAtIso: new Date().toISOString(),
-        sourceProjectId: project.id
+        sourceProjectId: project.id,
+        review: buildMotionExportReview(project, includedFrames)
       }
     };
     await fs.writeFile(

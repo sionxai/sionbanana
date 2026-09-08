@@ -18,6 +18,10 @@ import { candidateSchema, type Candidate, type MotionProject } from "@/lib/motio
 type CandidateSummary = Pick<Candidate, "id" | "mode" | "status" | "createdAtIso" | "appliedAtIso"> & {
   frames: number[];
 };
+type CandidateApplyOptions = {
+  allowContentLoss: boolean;
+  intentionalEmptyFrames: boolean;
+};
 
 type CellMask = { image: HTMLImageElement; mask: HTMLCanvasElement };
 
@@ -42,6 +46,10 @@ const INSTRUCTION_PRESETS = [
   { label: "동작 연결", value: "동작 연결이 부드럽게 이어지도록 중간 포즈를 보정하세요." }
 ];
 const PROTECT_PRESETS = ["얼굴", "머리", "의상", "무기", "배경"];
+const DEFAULT_CANDIDATE_APPLY_OPTIONS: CandidateApplyOptions = {
+  allowContentLoss: false,
+  intentionalEmptyFrames: false
+};
 
 function cellUrl(projectId: string, frameIndex: number): string {
   return "/api/motion/projects/" + encodeURIComponent(projectId) + "/cells/" + frameIndex;
@@ -114,6 +122,12 @@ function displayFrames(indices: number[]): string {
   return indices.map(index => String(index + 1)).join(", ");
 }
 
+function reviewReasonLabel(reason: string): string {
+  if (reason === "layout-fallback-grid") return "생성 결과 배치를 감지하지 못해 고정 격자로 잘랐습니다";
+  if (reason === "low-slice-confidence") return "배치 감지 신뢰도가 낮습니다";
+  return reason;
+}
+
 export function MotionFixPanel({
   project,
   cacheVersion,
@@ -146,6 +160,7 @@ export function MotionFixPanel({
   const [candidateError, setCandidateError] = useState<string | null>(null);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
   const [selectedCandidateFrames, setSelectedCandidateFrames] = useState<Record<string, number[]>>({});
+  const [candidateApplyOptions, setCandidateApplyOptions] = useState<Record<string, CandidateApplyOptions>>({});
   const [pollAttempt, setPollAttempt] = useState(0);
 
   const selectedFrames = useMemo(
@@ -457,6 +472,7 @@ export function MotionFixPanel({
   const applyCandidate = async (candidate: Candidate) => {
     if (isBusy || hasPendingMatte) return;
     const frames = (selectedCandidateFrames[candidate.id] ?? []).filter(index => candidate.frames.some(frame => frame.index === index));
+    const options = candidateApplyOptions[candidate.id] ?? DEFAULT_CANDIDATE_APPLY_OPTIONS;
     if (frames.length === 0) {
       toast.error("적용할 후보 프레임을 하나 이상 선택해주세요.");
       return;
@@ -468,10 +484,15 @@ export function MotionFixPanel({
           const response = await fetch(candidatesUrl(project.id) + "/" + encodeURIComponent(candidate.id) + "/apply", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ frames, ...(force ? { force: true } : {}) })
+            body: JSON.stringify({
+              frames,
+              ...(options.allowContentLoss ? { allowContentLoss: true } : {}),
+              ...(options.intentionalEmptyFrames ? { intentionalEmptyFrames: frames } : {}),
+              ...(force ? { force: true } : {})
+            })
           });
-          const body = (await response.json().catch(() => null)) as { ok?: boolean; project?: MotionProject; reason?: string } | null;
-          if (response.status === 409 && !force) {
+          const body = (await response.json().catch(() => null)) as { ok?: boolean; project?: MotionProject; reason?: string; code?: string } | null;
+          if (response.status === 409 && !force && (body?.code === "CONFLICT" || body?.code === undefined)) {
             toast.error(responseReason(body, "후보를 적용하지 못했습니다."));
             return window.confirm("그래도 덮어쓸까요?") ? requestApply(true) : null;
           }
@@ -651,18 +672,21 @@ export function MotionFixPanel({
               .map(frame => frame.index);
             const previewable = candidate.status === "ready" && previewFrames.some(index => selectedFrames.includes(index));
             const isPreviewing = previewCandidate?.id === candidate.id;
+            const applyOptions = candidateApplyOptions[candidate.id] ?? DEFAULT_CANDIDATE_APPLY_OPTIONS;
+            const reviewReasons = (candidate.reviewReasons ?? []).map(reviewReasonLabel);
             return <div key={candidate.id} className="space-y-3 rounded-lg border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2"><Badge variant={candidate.status === "ready" ? "success" : candidate.status === "failed" ? "destructive" : "warning"}>{candidate.status === "ready" ? "준비됨" : candidate.status === "failed" ? "실패" : candidate.status === "running" ? "생성 중" : "대기"}</Badge><span className="text-sm font-medium">{candidate.mode === "mask" ? "마스크 편집" : "앵커 스트립"}</span>{candidate.appliedAtIso ? <Badge variant="secondary">적용 기록</Badge> : null}</div>
+                <div className="flex items-center gap-2"><Badge variant={candidate.status === "ready" ? "success" : candidate.status === "failed" ? "destructive" : "warning"}>{candidate.status === "ready" ? "준비됨" : candidate.status === "failed" ? "실패" : candidate.status === "running" ? "생성 중" : "대기"}</Badge><span className="text-sm font-medium">{candidate.mode === "mask" ? "마스크 편집" : "앵커 스트립"}</span>{candidate.requiresReview ? <Badge variant="warning">검토 필요</Badge> : null}{candidate.appliedAtIso ? <Badge variant="secondary">적용 기록</Badge> : null}</div>
                 <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={isBusy} onClick={() => void deleteCandidate(candidate)}><Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />삭제</Button>
               </div>
               {candidate.reason ? <p className="text-sm text-destructive">{candidate.reason}</p> : null}
+              {candidate.requiresReview && reviewReasons.length > 0 ? <p className="text-xs text-amber-700">{reviewReasons.join(" · ")}</p> : null}
               <div className="grid gap-2 sm:grid-cols-2">{candidate.frames.map(frame => {
                 const source = project.frames[frame.index]?.source;
                 const ratio = String(source?.w ?? 1) + " / " + String(source?.h ?? 1);
                 return <div key={frame.index} className="overflow-hidden rounded-md border"><div className="grid grid-cols-2 gap-px bg-border"><div className="bg-muted/20 p-1"><div className="mb-1 text-[11px] text-muted-foreground">원본 {frame.index + 1}</div><div className="bg-muted/30 bg-contain bg-center bg-no-repeat" style={{ aspectRatio: ratio, backgroundImage: "url(" + cellUrl(project.id, frame.index) + ")" }} /></div><div className="bg-muted/20 p-1"><div className="mb-1 text-[11px] text-muted-foreground">후보</div>{candidate.status === "ready" && frame.file ? <div className="bg-muted/30 bg-contain bg-center bg-no-repeat" style={{ aspectRatio: ratio, backgroundImage: "url(" + candidateUrl(project.id, candidate.id, frame.index) + ")" }} /> : <div className="flex items-center justify-center bg-muted/30 text-xs text-muted-foreground" style={{ aspectRatio: ratio }}>{candidate.status === "failed" ? "생성 실패" : "생성 대기"}</div>}</div></div><label className="flex cursor-pointer items-center gap-2 border-t px-2 py-1.5 text-xs"><input type="checkbox" checked={checked.includes(frame.index)} disabled={isBusy || candidate.status !== "ready"} onChange={event => setSelectedCandidateFrames(current => ({ ...current, [candidate.id]: event.target.checked ? [...new Set([...(current[candidate.id] ?? []), frame.index])].sort((left, right) => left - right) : (current[candidate.id] ?? []).filter(index => index !== frame.index) }))} />{frame.index + 1}번 적용</label></div>;
               })}</div>
-              {candidate.status === "ready" ? <div className="flex flex-wrap gap-2"><Button type="button" variant={isPreviewing ? "default" : "outline"} size="sm" disabled={isBusy || (!isPreviewing && !previewable)} onClick={() => onPreviewCandidateChange(isPreviewing ? null : { id: candidate.id, frames: previewFrames })}>{isPreviewing ? "미리 재생 끄기" : "선택 구간 미리 재생"}</Button><Button type="button" size="sm" disabled={isBusy || hasPendingMatte || checked.length === 0} onClick={() => void applyCandidate(candidate)}>선택 프레임 적용</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || selectedApplied.length === 0} onClick={() => void revertFrames(selectedApplied, "선택 구간의 적용 프레임")}>선택 구간 되돌리기</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || applied.length === 0} onClick={() => void revertFrames(applied, "이 후보의 적용 프레임 전체")}>이 후보 전체 되돌리기</Button></div> : null}
+              {candidate.status === "ready" ? <div className="space-y-2"><div className="flex flex-wrap gap-2"><Button type="button" variant={isPreviewing ? "default" : "outline"} size="sm" disabled={isBusy || (!isPreviewing && !previewable)} onClick={() => onPreviewCandidateChange(isPreviewing ? null : { id: candidate.id, frames: previewFrames })}>{isPreviewing ? "미리 재생 끄기" : "선택 구간 미리 재생"}</Button><Button type="button" size="sm" disabled={isBusy || hasPendingMatte || checked.length === 0} onClick={() => void applyCandidate(candidate)}>선택 프레임 적용</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || selectedApplied.length === 0} onClick={() => void revertFrames(selectedApplied, "선택 구간의 적용 프레임")}>선택 구간 되돌리기</Button><Button type="button" variant="outline" size="sm" disabled={isBusy || hasPendingMatte || applied.length === 0} onClick={() => void revertFrames(applied, "이 후보의 적용 프레임 전체")}>이 후보 전체 되돌리기</Button></div><div className="space-y-1 text-xs text-muted-foreground"><label className="flex cursor-pointer items-start gap-2"><input type="checkbox" checked={applyOptions.allowContentLoss} disabled={isBusy || hasPendingMatte} onChange={event => setCandidateApplyOptions(current => ({ ...current, [candidate.id]: { ...(current[candidate.id] ?? DEFAULT_CANDIDATE_APPLY_OPTIONS), allowContentLoss: event.target.checked } }))} /><span>잘리더라도 적용<span className="block">셀을 벗어나는 부분이 잘린 채로 적용됩니다.</span></span></label><label className="flex cursor-pointer items-start gap-2"><input type="checkbox" checked={applyOptions.intentionalEmptyFrames} disabled={isBusy || hasPendingMatte} onChange={event => setCandidateApplyOptions(current => ({ ...current, [candidate.id]: { ...(current[candidate.id] ?? DEFAULT_CANDIDATE_APPLY_OPTIONS), intentionalEmptyFrames: event.target.checked } }))} /><span>선택 프레임을 빈 프레임으로 적용<span className="block">소멸·퇴장처럼 마지막에 캐릭터가 없는 것이 정상인 경우에만 사용하세요.</span></span></label></div></div> : null}
             </div>;
           })}
         </CardContent>
