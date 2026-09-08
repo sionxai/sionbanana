@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import type { MotionExportReview } from "@/lib/motion/export";
 import type { MotionProject } from "@/lib/motion/types";
 
 type MotionEditorPanelProps = {
@@ -45,6 +46,22 @@ function frameAssetUrl(projectId: string, frameIndex: number, cacheVersion: numb
   return `/api/motion/projects/${encodeURIComponent(projectId)}/asset/derived/frames/${fileName}?v=${cacheVersion}`;
 }
 
+function reviewReasonLabel(reason: string): string {
+  if (reason === "layout-fallback-grid") return "생성 결과 배치를 감지하지 못해 고정 격자로 잘랐습니다";
+  if (reason === "low-slice-confidence") return "배치 감지 신뢰도가 낮습니다";
+  if (reason === "intentional-empty") return "의도한 빈 프레임으로 적용됨";
+  if (reason === "boundary-touch") return "내용이 셀 경계에 닿음(손실 없음)";
+  if (reason === "content-loss-allowed") return "내용이 잘린 채 적용됨 — 내보낼 수 없습니다";
+  if (reason === "layout-validation-unknown") return "배치 검증 기록이 없음";
+  if (reason === "layout-not-validated") return "고정 격자 — 배치 미검증";
+  return reason;
+}
+
+function reviewIssueLabel(issue: string): string {
+  const frameIssue = /^frame-(\d+)-(.+)$/.exec(issue);
+  return frameIssue ? `${frameIssue[1]}번 프레임 — ${reviewReasonLabel(frameIssue[2])}` : reviewReasonLabel(issue);
+}
+
 export function MotionEditorPanel({
   project,
   cacheVersion,
@@ -59,6 +76,8 @@ export function MotionEditorPanel({
   const [includeGif, setIncludeGif] = useState(true);
   const [gifFps, setGifFps] = useState(project.animations[0]?.fps ?? 12);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportReview, setExportReview] = useState<{ projectId: string; review: MotionExportReview } | null>(null);
+  const [isApprovingReview, setIsApprovingReview] = useState(false);
   const matteDraftRef = useRef(matteDraft);
   const matteDirtyRef = useRef(false);
   const matteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,6 +86,10 @@ export function MotionEditorPanel({
   const synchronizedProjectIdRef = useRef(project.id);
   const mountedRef = useRef(true);
   const onMatteDirtyChangeRef = useRef(onMatteDirtyChange);
+  const exportRequestRef = useRef(0);
+  const exportInFlightRef = useRef(false);
+  const reviewApprovalRequestRef = useRef(0);
+  const reviewApprovalInFlightRef = useRef(false);
 
   useEffect(() => {
     onMatteDirtyChangeRef.current = onMatteDirtyChange;
@@ -101,6 +124,13 @@ export function MotionEditorPanel({
       clearMatteTimer();
       setMatteDirty(false);
       sliderInteractingRef.current = false;
+      exportRequestRef.current += 1;
+      exportInFlightRef.current = false;
+      reviewApprovalRequestRef.current += 1;
+      reviewApprovalInFlightRef.current = false;
+      setIsExporting(false);
+      setIsApprovingReview(false);
+      setExportReview(null);
     }
     if (changedProject || !matteDirtyRef.current) {
       matteDraftRef.current = project.matte;
@@ -116,6 +146,10 @@ export function MotionEditorPanel({
       return () => {
         mountedRef.current = false;
         clearMatteTimer(false);
+        exportRequestRef.current += 1;
+        exportInFlightRef.current = false;
+        reviewApprovalRequestRef.current += 1;
+        reviewApprovalInFlightRef.current = false;
       };
     },
     [clearMatteTimer]
@@ -319,34 +353,48 @@ export function MotionEditorPanel({
   };
 
   const exportAssets = async () => {
-    if (isExporting) return;
+    if (isExporting || exportInFlightRef.current) return;
     if (includeGif && (!Number.isSafeInteger(gifFps) || gifFps < 1)) {
       toast.error("GIF fps는 1 이상의 정수여야 합니다.");
       return;
     }
 
     setIsExporting(true);
+    exportInFlightRef.current = true;
+    const requestId = ++exportRequestRef.current;
+    const projectId = project.id;
     try {
       const query = new URLSearchParams({ gif: includeGif ? "1" : "0" });
       if (includeGif) query.set("fps", String(gifFps));
       const response = await fetch(
-        `/api/motion/projects/${encodeURIComponent(project.id)}/export?${query.toString()}`
+        `/api/motion/projects/${encodeURIComponent(projectId)}/export?${query.toString()}`
       );
+      if (!mountedRef.current || exportRequestRef.current !== requestId) return;
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          code?: unknown;
+          reason?: unknown;
+          review?: MotionExportReview;
+        } | null;
+        if (!mountedRef.current || exportRequestRef.current !== requestId) return;
+        if (payload?.code === "EXPORT_BLOCKED" && payload.review) {
+          setExportReview({ projectId, review: payload.review });
+          return;
+        }
         throw new Error(
           typeof payload?.reason === "string" ? payload.reason : "에셋을 내보내지 못했습니다."
         );
       }
 
       const blob = await response.blob();
+      if (!mountedRef.current || exportRequestRef.current !== requestId) return;
       const downloadUrl = URL.createObjectURL(blob);
       try {
         const disposition = response.headers.get("Content-Disposition") ?? "";
         const fileName = disposition.match(/filename="([A-Za-z0-9.-]+)"/)?.[1];
         const anchor = document.createElement("a");
         anchor.href = downloadUrl;
-        anchor.download = fileName ?? `${project.id}-motion.zip`;
+        anchor.download = fileName ?? `${projectId}-motion.zip`;
         anchor.style.display = "none";
         document.body.appendChild(anchor);
         anchor.click();
@@ -354,15 +402,71 @@ export function MotionEditorPanel({
       } finally {
         window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
       }
+      setExportReview(null);
       toast.success("모션 에셋 ZIP을 준비했습니다.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "에셋을 내보내지 못했습니다.");
+      if (mountedRef.current && exportRequestRef.current === requestId) {
+        toast.error(error instanceof Error ? error.message : "에셋을 내보내지 못했습니다.");
+      }
     } finally {
-      if (mountedRef.current) setIsExporting(false);
+      if (exportRequestRef.current === requestId) {
+        exportInFlightRef.current = false;
+        if (mountedRef.current) setIsExporting(false);
+      }
+    }
+  };
+
+  const approveReviewAndRetryExport = async () => {
+    const activeReview = exportReview?.projectId === project.id ? exportReview.review : null;
+    if (!activeReview || activeReview.blockingIssues.length > 0 || isExporting || reviewApprovalInFlightRef.current) return;
+
+    const requestId = ++reviewApprovalRequestRef.current;
+    const projectId = project.id;
+    reviewApprovalInFlightRef.current = true;
+    setIsApprovingReview(true);
+    try {
+      const response = await fetch(`/api/motion/projects/${encodeURIComponent(projectId)}/review-approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reasons: activeReview.outstandingIssues })
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        project?: Pick<MotionProject, "reviewApproval">;
+        reason?: unknown;
+      } | null;
+      if (!mountedRef.current || reviewApprovalRequestRef.current !== requestId) return;
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error(typeof payload?.reason === "string" ? payload.reason : "검수 승인을 저장하지 못했습니다.");
+      }
+      setExportReview(current => {
+        if (!current || current.projectId !== projectId || current.review !== activeReview) return current;
+        return {
+          ...current,
+          review: {
+            ...current.review,
+            approval: payload.project?.reviewApproval ?? current.review.approval,
+            outstandingIssues: [],
+            requiresReview: current.review.blockingIssues.length > 0
+          }
+        };
+      });
+      toast.success("검수 승인을 저장했습니다.");
+      await exportAssets();
+    } catch (error) {
+      if (mountedRef.current && reviewApprovalRequestRef.current === requestId) {
+        toast.error(error instanceof Error ? error.message : "검수 승인을 저장하지 못했습니다.");
+      }
+    } finally {
+      if (reviewApprovalRequestRef.current === requestId) {
+        reviewApprovalInFlightRef.current = false;
+        if (mountedRef.current) setIsApprovingReview(false);
+      }
     }
   };
 
   const disabled = isPatching;
+  const activeExportReview = exportReview?.projectId === project.id ? exportReview.review : null;
 
   return (
     <div className="min-w-0 space-y-6">
@@ -625,13 +729,21 @@ export function MotionEditorPanel({
                   <Badge variant="warning">격자와 다르게 감지됨 — 확인 필요</Badge>
                 ) : null}
               </>
-            ) : (
+            ) : project.layoutValidated === false ? (
               <>
                 <span className="text-sm text-muted-foreground">
                   요청 격자 {project.grid.cols} × {project.grid.rows}
                 </span>
                 <Badge variant="warning">고정 격자 — 배치 미검증</Badge>
                 <span className="w-full text-xs text-muted-foreground">생성 결과의 실제 배치를 확인하지 않았습니다.</span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  요청 격자 {project.grid.cols} × {project.grid.rows}
+                </span>
+                <Badge variant="warning">배치 검증 기록 없음</Badge>
+                <span className="w-full text-xs text-muted-foreground">이전 버전에서 만들어져 배치를 검사했는지 기록이 없습니다. 검수 후 승인하면 내보낼 수 있습니다.</span>
               </>
             )}
           </div>
@@ -814,9 +926,43 @@ export function MotionEditorPanel({
               onChange={event => setGifFps(Number(event.target.value))}
             />
           </div>
+          {activeExportReview ? (
+            <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+              {activeExportReview.blockingIssues.length > 0 ? (
+                <>
+                  <p className="font-medium text-amber-900">내보내기를 차단하는 항목</p>
+                  <ul className="list-disc space-y-1 pl-5 text-amber-900">
+                    {activeExportReview.blockingIssues.map(issue => <li key={issue}>{reviewIssueLabel(issue)}</li>)}
+                  </ul>
+                  <p className="text-amber-900">내용이 잘린 채 적용된 프레임이 있어 내보낼 수 없습니다. 해당 프레임을 되돌리고 후보를 다시 만드세요.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium text-amber-900">내보내기 전 검수</p>
+                  {activeExportReview.outstandingIssues.length > 0 ? (
+                    <ul className="list-disc space-y-1 pl-5 text-amber-900">
+                      {activeExportReview.outstandingIssues.map(issue => <li key={issue}>{reviewIssueLabel(issue)}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="text-amber-900">모든 검수 항목이 승인되었습니다.</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">재생 미리보기로 동작을 확인한 뒤 승인하세요.</p>
+                  {activeExportReview.outstandingIssues.length > 0 ? (
+                    <Button type="button" variant="outline" size="sm" disabled={disabled || isExporting || isApprovingReview} onClick={() => void approveReviewAndRetryExport()}>
+                      {isApprovingReview ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+                      미리보기로 확인했습니다 — 검수 승인
+                    </Button>
+                  ) : null}
+                </>
+              )}
+              {activeExportReview.approval ? (
+                <p className="text-xs text-muted-foreground">승인 시각: {activeExportReview.approval.approvedAtIso}{activeExportReview.approval.note ? ` · 메모: ${activeExportReview.approval.note}` : " · 메모 없음"}</p>
+              ) : null}
+            </div>
+          ) : null}
           <Button
             className="w-full"
-            disabled={disabled || isExporting}
+            disabled={disabled || isExporting || isApprovingReview}
             onClick={() => void exportAssets()}
           >
             {isExporting ? (
