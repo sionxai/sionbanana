@@ -389,6 +389,80 @@ test("candidate apply route returns conflicts and forwards force", async t => {
   assert.equal((await forced.json()).project.frames[0].override.candidateId, candidateA.id);
 });
 
+test("legacy candidates derive review requirements from generation metrics without rewriting stored JSON", async t => {
+  await useTempDataDir(t);
+  const project = await projectForCandidates();
+  const candidate = await createCandidate(project.id, {
+    mode: "upload",
+    frames: [{ index: 0, image: await gammaCell([200, 50, 30]) }]
+  });
+  const candidatePath = path.join(projectDir(project.id), "candidates", candidate.id, "candidate.json");
+  const initial = JSON.parse(await fs.readFile(candidatePath, "utf8"));
+  const cases = [
+    {
+      name: "grid fallback only",
+      metrics: { layoutFallback: "grid" },
+      expected: { requiresReview: true, reviewReasons: ["layout-fallback-grid"] }
+    },
+    {
+      name: "low confidence only",
+      metrics: { sliceConfidence: 0.3 },
+      expected: { requiresReview: true, reviewReasons: ["low-slice-confidence"] }
+    },
+    {
+      name: "combined generation warnings",
+      metrics: { layoutFallback: "grid", sliceConfidence: 0.3 },
+      expected: { requiresReview: true, reviewReasons: ["layout-fallback-grid", "low-slice-confidence"] }
+    },
+    {
+      name: "explicit false takes precedence over warning metrics",
+      metrics: { layoutFallback: "grid", sliceConfidence: 0.3 },
+      requiresReview: false,
+      reviewReasons: [],
+      expected: { requiresReview: false, reviewReasons: [] }
+    },
+    {
+      name: "explicit review values take precedence",
+      metrics: { layoutFallback: "grid", sliceConfidence: 0.3 },
+      requiresReview: true,
+      reviewReasons: ["manual-review"],
+      expected: { requiresReview: true, reviewReasons: ["manual-review"] }
+    },
+    {
+      name: "no generation warning",
+      metrics: null,
+      expected: { requiresReview: false, reviewReasons: [] }
+    },
+    {
+      name: "non-warning generation metrics",
+      metrics: { layoutFallback: "auto", sliceConfidence: 1 },
+      expected: { requiresReview: false, reviewReasons: [] }
+    },
+    {
+      name: "non-numeric slice confidence",
+      metrics: { sliceConfidence: "0.3" },
+      expected: { requiresReview: false, reviewReasons: [] }
+    }
+  ];
+
+  for (const reviewCase of cases) {
+    const stored = { ...initial, metrics: reviewCase.metrics };
+    if ("requiresReview" in reviewCase) {
+      stored.requiresReview = reviewCase.requiresReview;
+      stored.reviewReasons = reviewCase.reviewReasons;
+    } else {
+      delete stored.requiresReview;
+      delete stored.reviewReasons;
+    }
+    await fs.writeFile(candidatePath, `${JSON.stringify(stored)}\n`);
+    const beforeRead = await fs.readFile(candidatePath);
+    const read = await readCandidate(project.id, candidate.id);
+    assert.equal(read.requiresReview, reviewCase.expected.requiresReview, reviewCase.name);
+    assert.deepEqual(read.reviewReasons, reviewCase.expected.reviewReasons, reviewCase.name);
+    assert.deepEqual(await fs.readFile(candidatePath), beforeRead, `${reviewCase.name} must not rewrite candidate.json`);
+  }
+});
+
 test("cell-aligned candidates preserve unchanged derived RGBA pixels when a sparse edit changes its bounding box", async t => {
   await useTempDataDir(t);
   const target = await gammaCell();

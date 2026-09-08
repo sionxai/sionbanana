@@ -214,7 +214,23 @@ async function readCandidateJson(directory: string): Promise<Candidate> {
     if (path.dirname(realJson) !== directory) {
       throw new CandidateStorageError("NOT_FOUND", "Motion candidate was not found.", 404);
     }
-    return parseCandidate(JSON.parse(await fs.readFile(realJson, "utf8")));
+    const stored = JSON.parse(await fs.readFile(realJson, "utf8"));
+    const hasStoredReviewRequirement =
+      typeof stored === "object" && stored !== null && Object.prototype.hasOwnProperty.call(stored, "requiresReview");
+    const candidate = parseCandidate(stored);
+    if (hasStoredReviewRequirement) return candidate;
+
+    const reviewReasons = [
+      ...(candidate.metrics?.layoutFallback === "grid" ? ["layout-fallback-grid"] : []),
+      ...(typeof candidate.metrics?.sliceConfidence === "number" && candidate.metrics.sliceConfidence < 1
+        ? ["low-slice-confidence"]
+        : [])
+    ];
+    return {
+      ...candidate,
+      requiresReview: reviewReasons.length > 0,
+      reviewReasons
+    };
   } catch (error) {
     if (error instanceof CandidateStorageError) throw error;
     if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {

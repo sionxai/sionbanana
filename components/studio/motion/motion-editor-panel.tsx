@@ -612,19 +612,29 @@ export function MotionEditorPanel({
             </ToggleGroup>
           </div>
 
-          {project.sliceMode === "auto" ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
-              <span className="text-sm text-muted-foreground">
-                감지 결과 {project.grid.cols} × {project.grid.rows}
-              </span>
-              <Badge variant="secondary">
-                신뢰도 {Math.round(project.sliceConfidence * 100)}%
-              </Badge>
-              {project.sliceConfidence < 0.7 ? (
-                <Badge variant="warning">격자와 다르게 감지됨 — 확인 필요</Badge>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+            {project.layoutValidated === true ? (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  감지 결과 {project.grid.cols} × {project.grid.rows}
+                </span>
+                <Badge variant="secondary">
+                  신뢰도 {Math.round(project.sliceConfidence * 100)}%
+                </Badge>
+                {project.sliceConfidence < 0.7 ? (
+                  <Badge variant="warning">격자와 다르게 감지됨 — 확인 필요</Badge>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  요청 격자 {project.grid.cols} × {project.grid.rows}
+                </span>
+                <Badge variant="warning">고정 격자 — 배치 미검증</Badge>
+                <span className="w-full text-xs text-muted-foreground">생성 결과의 실제 배치를 확인하지 않았습니다.</span>
+              </>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
