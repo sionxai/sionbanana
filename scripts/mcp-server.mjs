@@ -389,9 +389,9 @@ const MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION =
   MOTION_CANDIDATE_TOOL_DESCRIPTION +
   " 오버라이드를 제거해 최초 원본으로 되돌린다(직전 후보로 돌아가지 않는다).";
 const MOTION_REVIEW_APPROVAL_TOOL_DESCRIPTION =
-  "미리보기로 확인한 뒤 검수 사유를 명시적으로 승인한다. 현재 미결 사유를 모두 포함해야 하며, 내용 손실이 기록된 프레임은 승인으로 해제할 수 없다.";
+  "미리보기로 확인한 뒤 검수 사유를 명시적으로 승인한다. `reasons`에는 export 409 응답의 `review.outstandingIssues` 배열을 그대로 넘긴다(현재 미결 사유를 모두 포함해야 하며, 일부만 넘기면 409 CONFLICT로 실제 목록을 돌려준다). 내용 손실이 기록된 프레임(`review.blockingIssues`)은 승인으로 해제할 수 없다.";
 const MOTION_EXPORT_REVIEW_GATE_DESCRIPTION =
-  " 검수 승인이 필요한 항목이 남아 있으면 409(EXPORT_BLOCKED)로 거부한다. approve_motion_review로 승인한 뒤 다시 시도한다.";
+  " 검수 승인이 필요한 항목이 남아 있으면 409(EXPORT_BLOCKED)로 거부한다. 응답 `review.outstandingIssues` 배열을 그대로 approve_motion_review의 `reasons`로 넘겨 승인한 뒤 다시 시도한다. `review.blockingIssues`(content-loss-allowed)는 승인으로 풀 수 없다 — 해당 프레임을 revert_motion_frames로 되돌리고 후보를 다시 만든다.";
 
 const TOOL_NAMES = [
   "health_check",
@@ -687,7 +687,7 @@ export function createSionBananaMcpServer(options = {}) {
     "export_motion",
     {
       title: "Export Motion",
-      description: "Packages a ready motion project as a persistent ZIP file." + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
+      description: "Packages a ready motion project as a persistent ZIP file. ZIP 내용: `sprite-sheet.png`(프레임 가로 1행, 균일 셀) + `sprite-sheet.json`(TexturePacker JSON Hash atlas — Phaser `load.atlas`·PixiJS가 바로 읽는다. 프레임 키 \"0\"…\"N\", 프레임별 `pivot`은 0~1 정규화된 발 접점이며 Phaser가 로드 시와 재생 중 매 프레임 setOrigin으로 자동 적용하므로 setOrigin을 수동으로 부르지 말 것) + `animation.json`(재생 순서·fps·loop의 정본. atlas의 meta.frameTags는 연속 구간만 실린 참고값) + `frames/` 개별 PNG + `README.txt`. 응답은 zipPath·bytes·sha256(+destPath 복사, base64 선택)." + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
       inputSchema: {
         projectId: z.string().min(1).regex(MOTION_ID_RE),
         includeGif: z.boolean().default(true),
@@ -856,7 +856,7 @@ export function createSionBananaMcpServer(options = {}) {
     "export_motion_set",
     {
       title: "Export Motion Set",
-      description: MOTION_SET_TOOL_DESCRIPTION + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
+      description: MOTION_SET_TOOL_DESCRIPTION + " ZIP 내용은 export_motion과 같다(sprite-sheet.png + sprite-sheet.json atlas + animation.json 정본 + frames/ + README.txt). 행=동작, 프레임 인덱스는 전역, 동작마다 atlas meta.frameTags 한 개, meta.review[action]·sizeReport 추가." + MOTION_EXPORT_REVIEW_GATE_DESCRIPTION,
       inputSchema: motionSetExportInputSchema,
       annotations: {
         readOnlyHint: false,
