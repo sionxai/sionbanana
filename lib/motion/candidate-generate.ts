@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 import path from "node:path";
 import sharp from "sharp";
 
-import { callCodexResponses } from "@/lib/codex-fetch";
+import { callCodexResponses, getLastObservedImageBackend } from "@/lib/codex-fetch";
 import {
   CandidateStorageError,
   readCandidate,
@@ -392,6 +392,7 @@ async function runMaskCandidate(
   deps: CandidateGenerateDeps
 ): Promise<Record<string, unknown>> {
   let retries = 0;
+  let imageBackend: { model?: string; quality?: string; size?: string } | undefined;
   const project = await readProject(projectId);
   const backgroundHex =
     project.matte.mode === "keyColor" && project.matte.keyColor ? project.matte.keyColor : null;
@@ -414,6 +415,12 @@ async function runMaskCandidate(
       for (let attempt = 0; attempt <= FRAME_RETRY_COUNT; attempt += 1) {
         try {
           const edited = await deps.editImage({ image: source, mask, prompt });
+          const observed = getLastObservedImageBackend();
+          imageBackend =
+            observed &&
+            (observed.model !== undefined || observed.quality !== undefined || observed.size !== undefined)
+              ? { model: observed.model, quality: observed.quality, size: observed.size }
+              : undefined;
           const keyed = backgroundHex ? await applyMatte(edited, project.matte) : edited;
           generated = await compositeInsideMask({
             original: cell.buffer,
@@ -443,7 +450,8 @@ async function runMaskCandidate(
     frames: candidate.frames.length,
     retries,
     maskComposite: true,
-    feather: MASK_COMPOSITE_FEATHER
+    feather: MASK_COMPOSITE_FEATHER,
+    ...(imageBackend ? { imageBackend } : {})
   };
 }
 

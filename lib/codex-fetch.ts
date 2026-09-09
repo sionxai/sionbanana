@@ -53,6 +53,24 @@ export type CodexImageResult = {
   revisedPrompt?: string;
 };
 
+/** 서버가 실제로 적용한 image_generation 도구 설정(우리가 보낸 값이 아니라 에코된 값). */
+export type CodexImageBackend = {
+  model?: string;
+  quality?: string;
+  size?: string;
+  moderation?: string;
+  outputFormat?: string;
+  background?: string;
+};
+
+export type ObservedImageBackend = CodexImageBackend & { observedAtIso: string };
+
+let lastObservedImageBackend: ObservedImageBackend | null = null;
+
+export function getLastObservedImageBackend(): ObservedImageBackend | null {
+  return lastObservedImageBackend ? { ...lastObservedImageBackend } : null;
+}
+
 export type CodexCallResult = {
   text?: string;
   images: CodexImageResult[];
@@ -61,7 +79,39 @@ export type CodexCallResult = {
     inputTokens?: number;
     outputTokens?: number;
   };
+  imageBackend?: CodexImageBackend;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function findImageGenerationTool(tools: unknown): Record<string, unknown> | undefined {
+  if (!Array.isArray(tools)) return undefined;
+  return tools.find(
+    (tool): tool is Record<string, unknown> => isRecord(tool) && tool.type === "image_generation"
+  );
+}
+
+function extractImageBackend(imageTool: Record<string, unknown>): CodexImageBackend | undefined {
+  const imageBackend: CodexImageBackend = {};
+  if (typeof imageTool.model === "string") imageBackend.model = imageTool.model;
+  if (typeof imageTool.quality === "string") imageBackend.quality = imageTool.quality;
+  if (typeof imageTool.size === "string") imageBackend.size = imageTool.size;
+  if (typeof imageTool.moderation === "string") imageBackend.moderation = imageTool.moderation;
+  if (typeof imageTool.output_format === "string") imageBackend.outputFormat = imageTool.output_format;
+  if (typeof imageTool.background === "string") imageBackend.background = imageTool.background;
+  return Object.keys(imageBackend).length ? imageBackend : undefined;
+}
+
+function observeImageBackend(imageBackend: CodexImageBackend): void {
+  if (lastObservedImageBackend && lastObservedImageBackend.model !== imageBackend.model) {
+    console.warn(
+      `[codex] image backend changed: ${lastObservedImageBackend.model} → ${imageBackend.model}`
+    );
+  }
+  lastObservedImageBackend = { ...imageBackend, observedAtIso: new Date().toISOString() };
+}
 
 export class CodexResponseError extends Error {
   readonly status: number;
@@ -81,6 +131,7 @@ export async function callCodexResponses(options: CodexCallOptions): Promise<Cod
   const tools = options.mode === "image"
     ? [
         (() => {
+          // Codex 브리지는 model·quality·size를 서버 값으로 덮어쓴다(2026-09-09 실측). 여기 값은 참고용이며 적용을 보장하지 않는다.
           const tool: Record<string, unknown> = {
             type: "image_generation",
             quality: options.imageOptions?.quality ?? "medium",
@@ -179,6 +230,15 @@ async function parseCodexStream(
   const images: CodexImageResult[] = [];
   let finishReason: string | undefined;
   let usage: CodexCallResult["usage"];
+  let imageBackend: CodexImageBackend | undefined;
+
+  const collectImageBackend = (tools: unknown) => {
+    const imageTool = findImageGenerationTool(tools);
+    if (!imageTool) return;
+    const extracted = extractImageBackend(imageTool);
+    imageBackend = extracted;
+    if (extracted) observeImageBackend(extracted);
+  };
 
   const collectImageItem = (item: Record<string, unknown>) => {
     const result = typeof item.result === "string" ? item.result : null;
@@ -200,6 +260,9 @@ async function parseCodexStream(
     } catch {
       return;
     }
+
+    const echoedResponse = isRecord(payload.response) ? payload.response : undefined;
+    collectImageBackend(echoedResponse?.tools);
 
     if (event === "response.output_text.delta" || payload.type === "response.output_text.delta") {
       const delta = typeof payload.delta === "string" ? payload.delta : "";
@@ -314,7 +377,8 @@ async function parseCodexStream(
     text: finalText || deltaBuffer || undefined,
     images,
     finishReason,
-    usage
+    usage,
+    ...(imageBackend ? { imageBackend } : {})
   };
 }
 

@@ -11,6 +11,7 @@ import {
   CodexResponseError,
   DEFAULT_IMAGE_MODEL,
   type CodexContentPart,
+  type CodexImageBackend,
   type CodexImageOptions
 } from "@/lib/codex-fetch";
 import { CodexAuthError } from "@/lib/codex-oauth";
@@ -264,13 +265,18 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
     });
 
   const settled = await Promise.allSettled(Array.from({ length: count }, () => callOnce()));
-  const allImages: Array<{ b64: string; mimeType: string; revisedPrompt?: string }> = [];
+  const allImages: Array<{
+    b64: string;
+    mimeType: string;
+    revisedPrompt?: string;
+    imageBackend?: CodexImageBackend;
+  }> = [];
   const errors: string[] = [];
   const errorStatuses: number[] = [];
   for (const entry of settled) {
     if (entry.status === "fulfilled") {
       for (const img of entry.value.images) {
-        allImages.push(img);
+        allImages.push({ ...img, imageBackend: entry.value.imageBackend });
       }
     } else {
       const reason = entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
@@ -313,6 +319,7 @@ async function executeGenerate(request: NextRequest, payload: GeneratePayload): 
         bucket,
         payload,
         image: img,
+        imageBackend: img.imageBackend,
         createdAtIso
       });
       return {
@@ -365,12 +372,14 @@ async function saveGeneratedImageMetadata({
   bucket,
   payload,
   image,
+  imageBackend,
   createdAtIso
 }: {
   id: string;
   bucket: string;
   payload: GeneratePayload;
   image: { revisedPrompt?: string };
+  imageBackend?: CodexImageBackend;
   createdAtIso: string;
 }): Promise<void> {
   const referenceHandles = getReferenceHandles(payload.options);
@@ -380,6 +389,16 @@ async function saveGeneratedImageMetadata({
     refinedPrompt: payload.refinedPrompt || image.revisedPrompt || undefined,
     revisedPrompt: image.revisedPrompt,
     model: DEFAULT_IMAGE_MODEL,
+    ...(imageBackend
+      ? {
+          imageBackend: {
+            model: imageBackend.model,
+            quality: imageBackend.quality,
+            size: imageBackend.size,
+            observedAtIso: createdAtIso
+          }
+        }
+      : {}),
     mode: payload.mode,
     createdAtIso,
     negativePrompt: payload.negativePrompt || undefined,
