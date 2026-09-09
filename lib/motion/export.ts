@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import sharp from "sharp";
+
 import { packSheet } from "@/lib/motion/engine";
 import { projectDir } from "@/lib/motion/storage";
 import type { Frame, MotionProject } from "@/lib/motion/types";
@@ -88,6 +90,101 @@ export type ExportJson = {
     review: MotionExportReview;
   };
 };
+
+export type TexturePackerFrame = {
+  frame: { x: number; y: number; w: number; h: number };
+  rotated: false;
+  trimmed: false;
+  spriteSourceSize: { x: 0; y: 0; w: number; h: number };
+  sourceSize: { w: number; h: number };
+  pivot: { x: number; y: number };
+};
+
+export type TexturePackerFrameTag = {
+  name: string;
+  from: number;
+  to: number;
+  direction: "forward" | "pingpong";
+};
+
+export type TexturePackerAtlas = {
+  frames: Record<string, TexturePackerFrame>;
+  meta: {
+    app: "sionbanana-motion";
+    version: "1.0";
+    image: "sprite-sheet.png";
+    format: "RGBA8888";
+    size: { w: number; h: number };
+    scale: "1";
+    frameTags: TexturePackerFrameTag[];
+  };
+};
+
+function normalizedPivot(value: number, size: number): number {
+  if (size === 0) return 0.5;
+  return Math.round(Math.min(1, Math.max(0, value / size)) * 10000) / 10000;
+}
+
+function isContiguousFrameSequence(frames: readonly number[]): boolean {
+  return (
+    frames.length > 0 &&
+    frames.every((frame, index) => index === 0 || frame === frames[index - 1]! + 1)
+  );
+}
+
+export function buildTexturePackerAtlas(input: {
+  sheetWidth: number;
+  sheetHeight: number;
+  frames: Array<{
+    index: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    pivot: { x: number; y: number };
+  }>;
+  animations: Array<{
+    name: string;
+    frames: number[];
+    loop: "loop" | "pingpong" | "once";
+  }>;
+}): TexturePackerAtlas {
+  const frames: Record<string, TexturePackerFrame> = {};
+  for (const frame of input.frames) {
+    frames[String(frame.index)] = {
+      frame: { x: frame.x, y: frame.y, w: frame.w, h: frame.h },
+      rotated: false,
+      trimmed: false,
+      spriteSourceSize: { x: 0, y: 0, w: frame.w, h: frame.h },
+      sourceSize: { w: frame.w, h: frame.h },
+      pivot: {
+        x: normalizedPivot(frame.pivot.x, frame.w),
+        y: normalizedPivot(frame.pivot.y, frame.h)
+      }
+    };
+  }
+  const frameTags = input.animations.flatMap<TexturePackerFrameTag>(animation => {
+    if (!isContiguousFrameSequence(animation.frames)) return [];
+    return [{
+      name: animation.name,
+      from: animation.frames[0]!,
+      to: animation.frames[animation.frames.length - 1]!,
+      direction: animation.loop === "pingpong" ? "pingpong" : "forward"
+    }];
+  });
+  return {
+    frames,
+    meta: {
+      app: "sionbanana-motion",
+      version: "1.0",
+      image: "sprite-sheet.png",
+      format: "RGBA8888",
+      size: { w: input.sheetWidth, h: input.sheetHeight },
+      scale: "1",
+      frameTags
+    }
+  };
+}
 
 export function buildMotionExportReview(
   project: MotionProject,
@@ -262,6 +359,7 @@ function buildReadme(input: {
   const lines = [
     "Sion Banana Motion Export",
     "Authoritative runtime assets: sprite-sheet.png + animation.json.",
+    "sprite-sheet.json is a TexturePacker JSON Hash atlas (Phaser load.atlas, PixiJS) with normalized per-frame pivots; animation.json stays authoritative for playback order, fps and loop.",
     "preview.gif is only for preview and sharing, not runtime playback.",
     `Frame size: ${input.frameWidth}x${input.frameHeight}px; exported frames: ${input.frameCount}.`,
     `Primary animation: ${singleLine(input.animationName)}; default FPS: ${input.fps}.`,
@@ -391,6 +489,10 @@ export async function buildExportBundle(
     const sheetWidth = frameWidth * frameBuffers.length;
     const sheetHeight = frameHeight;
     await fs.writeFile(path.join(bundleDirectory, "sprite-sheet.png"), packed.buf, { flag: "wx" });
+    const sheetMetadata = await sharp(packed.buf).metadata();
+    if (sheetMetadata.width === undefined || sheetMetadata.height === undefined) {
+      throw new Error("Unable to read sprite-sheet.png dimensions.");
+    }
 
     const remappedIndices = new Map(
       includedFrames.map((frame, index) => [frame.index, index] as const)
@@ -426,6 +528,17 @@ export async function buildExportBundle(
     await fs.writeFile(
       path.join(bundleDirectory, "animation.json"),
       `${JSON.stringify(exportJson, null, 2)}\n`,
+      { encoding: "utf8", flag: "wx" }
+    );
+    const atlas = buildTexturePackerAtlas({
+      sheetWidth: sheetMetadata.width,
+      sheetHeight: sheetMetadata.height,
+      frames: exportJson.frames,
+      animations
+    });
+    await fs.writeFile(
+      path.join(bundleDirectory, "sprite-sheet.json"),
+      `${JSON.stringify(atlas, null, 2)}\n`,
       { encoding: "utf8", flag: "wx" }
     );
 
@@ -487,6 +600,7 @@ export async function buildExportBundle(
     const entries = [
       "sprite-sheet.png",
       "animation.json",
+      "sprite-sheet.json",
       "frames",
       "snippet.css",
       "snippet.js",

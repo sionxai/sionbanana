@@ -10,6 +10,7 @@ import sharp from "sharp";
 
 import {
   buildExportBundle,
+  buildTexturePackerAtlas,
   MotionExportBlockedError,
   sanitizeExportFilename
 } from "@/lib/motion/export";
@@ -155,13 +156,32 @@ async function unzipBuffer(zipPath, entry) {
   return stdout;
 }
 
-async function unzipJson(zipPath) {
-  return JSON.parse((await unzipBuffer(zipPath, "animation.json")).toString("utf8"));
+async function unzipJson(zipPath, entry = "animation.json") {
+  return JSON.parse((await unzipBuffer(zipPath, entry)).toString("utf8"));
 }
 
 async function unzipEntries(zipPath) {
   const { stdout } = await execFileAsync("/usr/bin/unzip", ["-Z1", zipPath]);
   return stdout.trim().split("\n");
+}
+
+function normalizedAtlasPivot(value, size) {
+  if (size === 0) return 0.5;
+  return Math.round(Math.min(1, Math.max(0, value / size)) * 10000) / 10000;
+}
+
+function expectedAtlasFrame(frame) {
+  return {
+    frame: { x: frame.x, y: frame.y, w: frame.w, h: frame.h },
+    rotated: false,
+    trimmed: false,
+    spriteSourceSize: { x: 0, y: 0, w: frame.w, h: frame.h },
+    sourceSize: { w: frame.w, h: frame.h },
+    pivot: {
+      x: normalizedAtlasPivot(frame.pivot.x, frame.w),
+      y: normalizedAtlasPivot(frame.pivot.y, frame.h)
+    }
+  };
 }
 
 function jsonResponse(body, status = 200) {
@@ -371,13 +391,141 @@ test("animation.json uses the export schema and valid remapped frame indices", a
   assert.equal(data.meta.sourceProjectId, project.id);
 });
 
+test("buildTexturePackerAtlas normalizes pivots and emits only contiguous frame tags", () => {
+  const atlas = buildTexturePackerAtlas({
+    sheetWidth: 24,
+    sheetHeight: 20,
+    frames: [
+      { index: 5, x: 1, y: 2, w: 10, h: 20, pivot: { x: -3, y: 30 } },
+      { index: 6, x: 11, y: 2, w: 10, h: 20, pivot: { x: 5, y: 10 } },
+      { index: 7, x: 0, y: 0, w: 0, h: 0, pivot: { x: 999, y: -999 } },
+      { index: 9, x: 21, y: 2, w: 1, h: 1, pivot: { x: 0.123456, y: 0.987654 } }
+    ],
+    animations: [
+      { name: "loop", frames: [5, 6, 7], loop: "loop" },
+      { name: "ping", frames: [5, 6], loop: "pingpong" },
+      { name: "once", frames: [9], loop: "once" },
+      { name: "repeated", frames: [5, 5], loop: "loop" },
+      { name: "gapped", frames: [5, 7], loop: "loop" },
+      { name: "reverse", frames: [7, 6], loop: "loop" },
+      { name: "empty", frames: [], loop: "loop" }
+    ]
+  });
+
+  assert.deepEqual(Object.keys(atlas.frames), ["5", "6", "7", "9"]);
+  assert.deepEqual(atlas.frames["5"].pivot, { x: 0, y: 1 });
+  assert.deepEqual(atlas.frames["7"], {
+    frame: { x: 0, y: 0, w: 0, h: 0 },
+    rotated: false,
+    trimmed: false,
+    spriteSourceSize: { x: 0, y: 0, w: 0, h: 0 },
+    sourceSize: { w: 0, h: 0 },
+    pivot: { x: 0.5, y: 0.5 }
+  });
+  assert.deepEqual(atlas.frames["9"].pivot, { x: 0.1235, y: 0.9877 });
+  assert.deepEqual(atlas.meta, {
+    app: "sionbanana-motion",
+    version: "1.0",
+    image: "sprite-sheet.png",
+    format: "RGBA8888",
+    size: { w: 24, h: 20 },
+    scale: "1",
+    frameTags: [
+      { name: "loop", from: 5, to: 7, direction: "forward" },
+      { name: "ping", from: 5, to: 6, direction: "pingpong" },
+      { name: "once", from: 9, to: 9, direction: "forward" }
+    ]
+  });
+});
+
+test("single export includes a TexturePacker atlas that preserves animation playback data", async t => {
+  let project = await createFixture(t, "TexturePacker single export");
+  project = await rebuildProject(project.id, {
+    animations: [
+      { name: "walk", frameIndices: [0, 1, 2], fps: 8, loop: "loop" },
+      { name: "ping", frameIndices: [0, 1, 2], fps: 9, loop: "pingpong" },
+      { name: "once", frameIndices: [1], fps: 10, loop: "once" },
+      { name: "repeated", frameIndices: [0, 1, 0, 1], fps: 11, loop: "loop" },
+      { name: "gapped", frameIndices: [0, 2], fps: 12, loop: "loop" },
+      { name: "reverse", frameIndices: [2, 1], fps: 13, loop: "loop" },
+      { name: "empty", frameIndices: [], fps: 14, loop: "loop" }
+    ]
+  });
+  const bundle = await buildExportBundle(approvedGridProject(project), { includeGif: false });
+  t.after(() => bundle.cleanup());
+
+  const animation = await unzipJson(bundle.zipPath);
+  const atlas = await unzipJson(bundle.zipPath, "sprite-sheet.json");
+  const entries = await unzipEntries(bundle.zipPath);
+  const sheetMetadata = await sharp(
+    await unzipBuffer(bundle.zipPath, "sprite-sheet.png")
+  ).metadata();
+
+  assert.deepEqual(Object.keys(atlas), ["frames", "meta"]);
+  assert.deepEqual(Object.keys(atlas.frames), animation.frames.map(frame => String(frame.index)));
+  for (const frame of animation.frames) {
+    const atlasFrame = atlas.frames[String(frame.index)];
+    assert.deepEqual(atlasFrame, expectedAtlasFrame(frame));
+    assert.ok(atlasFrame.pivot.x >= 0 && atlasFrame.pivot.x <= 1);
+    assert.ok(atlasFrame.pivot.y >= 0 && atlasFrame.pivot.y <= 1);
+  }
+  assert.deepEqual(Object.keys(atlas.meta), [
+    "app",
+    "version",
+    "image",
+    "format",
+    "size",
+    "scale",
+    "frameTags"
+  ]);
+  assert.equal(atlas.meta.app, "sionbanana-motion");
+  assert.equal(atlas.meta.version, "1.0");
+  assert.equal(atlas.meta.image, "sprite-sheet.png");
+  assert.equal(atlas.meta.format, "RGBA8888");
+  assert.equal(atlas.meta.scale, "1");
+  assert.deepEqual(atlas.meta.size, { w: sheetMetadata.width, h: sheetMetadata.height });
+  assert.deepEqual(atlas.meta.frameTags, [
+    { name: "walk", from: 0, to: 2, direction: "forward" },
+    { name: "ping", from: 0, to: 2, direction: "pingpong" },
+    { name: "once", from: 1, to: 1, direction: "forward" }
+  ]);
+  assert.deepEqual(
+    animation.animations,
+    project.animations.map(candidate => ({
+      name: candidate.name,
+      frames: candidate.frameIndices,
+      fps: candidate.fps,
+      loop: candidate.loop
+    }))
+  );
+  assert.deepEqual(
+    animation.animations.find(candidate => candidate.name === "repeated").frames,
+    [0, 1, 0, 1]
+  );
+  assert.equal(atlas.meta.frameTags.some(tag => tag.name === "repeated"), false);
+  assert.ok(entries.includes("sprite-sheet.json"));
+  assert.equal(entries[entries.indexOf("animation.json") + 1], "sprite-sheet.json");
+  const readme = (await unzipBuffer(bundle.zipPath, "README.txt")).toString("utf8");
+  assert.ok(
+    readme.includes(
+      "sprite-sheet.json is a TexturePacker JSON Hash atlas (Phaser load.atlas, PixiJS) with normalized per-frame pivots; animation.json stays authoritative for playback order, fps and loop."
+    )
+  );
+});
+
 test("motion exports block unapproved review issues and record explicit approval", async t => {
   const gridProject = await createFixture(t, "Grid review export");
   const originalMkdtemp = fs.mkdtemp.bind(fs);
+  const originalWriteFile = fs.writeFile.bind(fs);
   let temporaryDirectories = 0;
+  let atlasWrites = 0;
   const mkdtempMock = mock.method(fs, "mkdtemp", async (...args) => {
     temporaryDirectories += 1;
     return originalMkdtemp(...args);
+  });
+  const writeFileMock = mock.method(fs, "writeFile", async (...args) => {
+    if (String(args[0]).endsWith("sprite-sheet.json")) atlasWrites += 1;
+    return originalWriteFile(...args);
   });
   try {
     await assert.rejects(
@@ -389,8 +537,10 @@ test("motion exports block unapproved review issues and record explicit approval
     );
   } finally {
     mkdtempMock.mock.restore();
+    writeFileMock.mock.restore();
   }
   assert.equal(temporaryDirectories, 0);
+  assert.equal(atlasWrites, 0);
 
   const approvedProject = await setReviewApproval(gridProject.id, {
     reasons: ["layout-not-validated"],
@@ -598,10 +748,16 @@ test("motion set exports block an unapproved member before creating a temporary 
     }))
   }));
   const originalMkdtemp = fs.mkdtemp.bind(fs);
+  const originalWriteFile = fs.writeFile.bind(fs);
   let temporaryDirectories = 0;
+  let atlasWrites = 0;
   const mkdtempMock = mock.method(fs, "mkdtemp", async (...args) => {
     temporaryDirectories += 1;
     return originalMkdtemp(...args);
+  });
+  const writeFileMock = mock.method(fs, "writeFile", async (...args) => {
+    if (String(args[0]).endsWith("sprite-sheet.json")) atlasWrites += 1;
+    return originalWriteFile(...args);
   });
   try {
     await assert.rejects(
@@ -613,8 +769,10 @@ test("motion set exports block an unapproved member before creating a temporary 
     );
   } finally {
     mkdtempMock.mock.restore();
+    writeFileMock.mock.restore();
   }
   assert.equal(temporaryDirectories, 0);
+  assert.equal(atlasWrites, 0);
 });
 
 test("motion set review issues use global frame indices in the export gate", async t => {
@@ -671,14 +829,30 @@ test("motion set review issues use global frame indices in the export gate", asy
   );
 });
 
-test("motion set exports report no aggregate review when every motion is clean", async t => {
-  const project = await createFixture(t, "Clean set review");
-  await persistProject({ ...project, sliceMode: "auto", layoutValidated: true, sliceConfidence: 1 });
+test("motion set exports atlas tags with global frame ranges for unequal clean actions", async t => {
+  await useTempDataDir(t);
+  const idle = await createFixture(t, "Clean idle set review", false);
+  const walk = await createFixture(t, "Clean walk set review", false);
+  await persistProject({
+    ...idle,
+    sliceMode: "auto",
+    layoutValidated: true,
+    sliceConfidence: 1,
+    animations: [{ name: "idle-source", frameIndices: [0, 1, 2], fps: 8, loop: "loop" }]
+  });
+  await persistProject({
+    ...walk,
+    sliceMode: "auto",
+    layoutValidated: true,
+    sliceConfidence: 1,
+    frames: walk.frames.map(frame => ({ ...frame, excluded: frame.index === 2 })),
+    animations: [{ name: "walk-source", frameIndices: [0, 1], fps: 9, loop: "pingpong" }]
+  });
   const initial = await createSet({
     name: "Clean set review",
     base: { description: "A banana hero" },
     common: { cols: 3, rows: 1, fps: 12 },
-    members: [{ action: "idle" }]
+    members: [{ action: "idle" }, { action: "walk" }]
   });
   const set = await updateSet(initial.id, current => ({
     ...current,
@@ -686,16 +860,72 @@ test("motion set exports report no aggregate review when every motion is clean",
     members: current.members.map(member => ({
       ...member,
       status: "ready",
-      projectId: project.id,
+      projectId: member.action === "idle" ? idle.id : walk.id,
       finishedAtIso: "2026-09-08T00:00:00.000Z"
     }))
   }));
   const bundle = await buildSetExportBundle(set, { includeGif: false });
   t.after(() => bundle.cleanup());
-  const exported = await unzipJson(bundle.zipPath);
+  const animation = await unzipJson(bundle.zipPath);
+  const atlas = await unzipJson(bundle.zipPath, "sprite-sheet.json");
+  const entries = await unzipEntries(bundle.zipPath);
+  const sheetMetadata = await sharp(
+    await unzipBuffer(bundle.zipPath, "sprite-sheet.png")
+  ).metadata();
 
-  assert.equal(exported.meta.review.idle.requiresReview, false);
-  assert.equal(exported.meta.requiresReview, false);
+  assert.equal(animation.meta.review.idle.requiresReview, false);
+  assert.equal(animation.meta.review.walk.requiresReview, false);
+  assert.equal(animation.meta.requiresReview, false);
+  assert.deepEqual(
+    animation.animations.map(candidate => ({ name: candidate.name, frames: candidate.frames })),
+    [
+      { name: "idle", frames: [0, 1, 2] },
+      { name: "walk", frames: [3, 4] }
+    ]
+  );
+  assert.deepEqual(
+    animation.frames.map(frame => ({ index: frame.index, x: frame.x, y: frame.y })),
+    [
+      { index: 0, x: 0, y: 0 },
+      { index: 1, x: animation.frameWidth, y: 0 },
+      { index: 2, x: animation.frameWidth * 2, y: 0 },
+      { index: 3, x: 0, y: animation.frameHeight },
+      { index: 4, x: animation.frameWidth, y: animation.frameHeight }
+    ]
+  );
+  assert.deepEqual(Object.keys(atlas.frames), animation.frames.map(frame => String(frame.index)));
+  for (const frame of animation.frames) {
+    assert.deepEqual(atlas.frames[String(frame.index)], expectedAtlasFrame(frame));
+  }
+  const expectedPivot = {
+    x: normalizedAtlasPivot(animation.frames[0].pivot.x, animation.frameWidth),
+    y: normalizedAtlasPivot(animation.frames[0].pivot.y, animation.frameHeight)
+  };
+  assert.ok(
+    animation.frames.every(
+      frame =>
+        frame.pivot.x === animation.frames[0].pivot.x &&
+        frame.pivot.y === animation.frames[0].pivot.y
+    )
+  );
+  assert.ok(
+    Object.values(atlas.frames).every(
+      frame => frame.pivot.x === expectedPivot.x && frame.pivot.y === expectedPivot.y
+    )
+  );
+  assert.deepEqual(atlas.meta.frameTags, [
+    { name: "idle", from: 0, to: 2, direction: "forward" },
+    { name: "walk", from: 3, to: 4, direction: "pingpong" }
+  ]);
+  assert.deepEqual(atlas.meta.size, { w: sheetMetadata.width, h: sheetMetadata.height });
+  assert.ok(entries.includes("sprite-sheet.json"));
+  assert.equal(entries[entries.indexOf("animation.json") + 1], "sprite-sheet.json");
+  const readme = (await unzipBuffer(bundle.zipPath, "README.txt")).toString("utf8");
+  assert.ok(
+    readme.includes(
+      "sprite-sheet.json is a TexturePacker JSON Hash atlas (Phaser load.atlas, PixiJS) with normalized per-frame pivots; animation.json stays authoritative for playback order, fps and loop."
+    )
+  );
 });
 
 test("excluded frames are omitted and flipX pixels remain baked after reindexing", async t => {
@@ -771,7 +1001,7 @@ test("buildExportBundle creates a non-empty ZIP and cleanup removes its temporar
   await bundle.cleanup();
 });
 
-test("README collapses animation-name whitespace and stays at eight lines", async t => {
+test("README collapses animation-name whitespace and stays at nine lines", async t => {
   const initial = await createFixture(t, "README line count");
   const project = await rebuildProject(initial.id, {
     animations: [
@@ -783,7 +1013,7 @@ test("README collapses animation-name whitespace and stays at eight lines", asyn
 
   const readme = (await unzipBuffer(bundle.zipPath, "README.txt")).toString("utf8");
   const lines = readme.trimEnd().split("\n");
-  assert.equal(lines.length, 8);
+  assert.equal(lines.length, 9);
   assert.ok(lines.includes("Primary animation: walk cycle fast; default FPS: 9."));
   assert.ok(lines.every(line => !line.includes("\r")));
 });
@@ -807,5 +1037,5 @@ test("100-frame export uses the minimum-two-digit sequence and produces a GIF", 
     .toString("utf8")
     .trimEnd()
     .split("\n");
-  assert.equal(readmeLines.length, 8);
+  assert.equal(readmeLines.length, 9);
 });
