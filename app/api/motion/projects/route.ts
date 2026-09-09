@@ -4,7 +4,8 @@ import sharp from "sharp";
 import { z } from "zod";
 
 import { POST as generateImage } from "@/app/api/generate/route";
-import { readImageById } from "@/lib/local/storage";
+import { readImageById, resolveVideoPath } from "@/lib/local/storage";
+import { buildSheetFromVideo, VideoFramesError } from "@/lib/motion/video-frames";
 import {
   keyColorForSubject,
   subjectTypeValues,
@@ -76,7 +77,16 @@ const sourceSchema = z.discriminatedUnion("type", [
       referenceImage: referenceSourceSchema
     })
     .strict(),
-  z.object({ type: z.literal("upload"), dataUrl: z.string().min(1).max(MAX_DATA_URL_CHARS) }).strict()
+  z.object({ type: z.literal("upload"), dataUrl: z.string().min(1).max(MAX_DATA_URL_CHARS) }).strict(),
+  z.object({
+    type: z.literal("video"),
+    videoId: z.string().regex(/^[A-Za-z0-9_-]+$/),
+    subjectType: z.enum(subjectTypeValues).default("character"),
+    mode: z.enum(["loop", "oneshot"]).default("loop"),
+    count: z.number().int().min(2).max(24).default(8),
+    start: z.number().int().nonnegative().optional(),
+    end: z.number().int().positive().optional()
+  }).strict()
 ]);
 
 const createProjectSchema = z
@@ -90,11 +100,19 @@ const createProjectSchema = z
     autoExcludeRepeatedRows: z.boolean().optional(),
     fps: z.number().int().min(1).max(60).optional(),
     loop: z.enum(animationLoopValues).optional(),
-    grid: gridSpecSchema,
+    grid: gridSpecSchema.optional(),
     matte: matteSpecSchema.optional(),
     source: sourceSchema
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.source.type !== "video" && !value.grid) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["grid"], message: "grid is required for non-video sources." });
+    }
+    if (value.source.type === "video" && (value.source.start === undefined) !== (value.source.end === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["source"], message: "start and end must be supplied together." });
+    }
+  });
 
 class MotionRequestError extends Error {
   readonly status: number;
@@ -107,6 +125,9 @@ class MotionRequestError extends Error {
 }
 
 function requestError(error: unknown, context: string): Response {
+  if (error instanceof VideoFramesError) {
+    return NextResponse.json({ ok: false, reason: error.message, code: error.code }, { status: error.status });
+  }
   if (error instanceof z.ZodError) {
     return NextResponse.json(
       { ok: false, reason: error.issues[0]?.message ?? "Invalid request.", issues: error.issues },
@@ -260,7 +281,34 @@ export async function GET(): Promise<Response> {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const payload = createProjectSchema.parse(await readRequestJson(request));
-    if (payload.source.type !== "upload" && payload.grid.cols * payload.grid.rows > 12) {
+    if (payload.source.type === "video") {
+      const source = payload.source;
+      const videoPath = await resolveVideoPath(source.videoId);
+      if (!videoPath) throw new VideoFramesError("VIDEO_NOT_FOUND", "Stored video was not found.");
+      const matte = matteSpecSchema.parse({
+        mode: "keyColor", tolerance: 45, softness: 2, despill: true, choke: 1,
+        ...payload.matte,
+        ...(payload.matte?.mode === undefined || payload.matte.mode === "keyColor"
+          ? { keyColor: payload.matte?.keyColor ?? keyColorForSubject(source.subjectType).hex } : {})
+      });
+      const { sheet, cols, provenance } = await buildSheetFromVideo({
+        videoId: source.videoId, videoPath, matte, count: source.count,
+        mode: source.mode, start: source.start, end: source.end
+      });
+      const project = await createProject({
+        name: payload.name, sheetBuffer: sheet, sliceMode: "grid",
+        grid: gridSpecSchema.parse({ cols, rows: 1 }), matte,
+        normalizeScale: payload.normalizeScale ?? "area",
+        normalizePivotX: payload.normalizePivotX ?? "centroid",
+        normalizePivotY: payload.normalizePivotY ?? "preserve",
+        autoFlipRows: false, autoExcludeRepeatedRows: false,
+        defaultAnimation: { fps: payload.fps ?? provenance.derivedFps, loop: payload.loop ?? (source.mode === "loop" ? "loop" : "once") },
+        sourceVideo: provenance
+      });
+      return NextResponse.json({ ok: true, project }, { status: 201 });
+    }
+    const grid = gridSpecSchema.parse(payload.grid);
+    if (payload.source.type !== "upload" && grid.cols * grid.rows > 12) {
       throw new MotionRequestError(
         "Generated sprite sheets support at most 12 frames (measured quality drops beyond 8).",
         400
@@ -277,8 +325,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       sheetBuffer = await generateSheet(
         request,
         payload.source.prompt,
-        payload.grid.cols,
-        payload.grid.rows,
+        grid.cols,
+        grid.rows,
         {
           action: payload.source.action,
           style: payload.source.style,
@@ -290,8 +338,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       sheetBuffer = await generateSheet(
         request,
         payload.source.prompt,
-        payload.grid.cols,
-        payload.grid.rows,
+        grid.cols,
+        grid.rows,
         {
           action: payload.source.action,
           style: payload.source.style,
@@ -336,7 +384,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           payload.source.action !== "custom" &&
           isCyclicAction(payload.source.action)),
       defaultAnimation: { fps: payload.fps, loop },
-      grid: payload.grid,
+      grid,
       matte
     });
     return NextResponse.json({ ok: true, project }, { status: 201 });

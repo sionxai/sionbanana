@@ -46,7 +46,8 @@ import {
   type NormalizePivotY,
   type NormalizeScale,
   type Pivot,
-  type SliceMode
+  type SliceMode,
+  type VideoProvenance
 } from "@/lib/motion/types";
 
 const PROJECT_ID_RE = /^[A-Za-z0-9-]+$/;
@@ -268,6 +269,7 @@ async function buildArtifacts(input: {
   name: string;
   createdAtIso: string;
   raw: Buffer;
+  sourceVideo: VideoProvenance | null;
   sliceMode: SliceMode;
   normalizeScale: NormalizeScale;
   normalizePivotX: NormalizePivotX;
@@ -418,10 +420,13 @@ async function buildArtifacts(input: {
     id: input.id,
     name: input.name,
     createdAtIso: input.createdAtIso,
-    sourceImage: { path: "raw.png", width: metadata.width, height: metadata.height },
+    sourceImage: {
+      path: "raw.png", width: metadata.width, height: metadata.height,
+      ...(input.sourceVideo ? { video: input.sourceVideo } : {})
+    },
     sliceMode: input.sliceMode,
     sliceConfidence,
-    layoutValidated: input.sliceMode === "auto",
+    layoutValidated: input.sliceMode === "auto" || input.sourceVideo !== null,
     normalizeScale: input.normalizeScale,
     normalizePivotX: input.normalizePivotX,
     normalizePivotY: input.normalizePivotY,
@@ -564,6 +569,7 @@ async function createUniqueProjectDirectory(): Promise<{ id: string; directory: 
 export async function createProject(input: {
   name: string;
   sheetBuffer: Buffer;
+  sourceVideo?: VideoProvenance;
   sliceMode?: SliceMode;
   normalizeScale?: NormalizeScale;
   normalizePivotX?: NormalizePivotX;
@@ -589,6 +595,7 @@ export async function createProject(input: {
       name,
       createdAtIso: new Date().toISOString(),
       raw: input.sheetBuffer,
+      sourceVideo: input.sourceVideo ?? null,
       sliceMode: input.sliceMode ?? "auto",
       normalizeScale: input.normalizeScale ?? "area",
       normalizePivotX: input.normalizePivotX ?? "centroid",
@@ -652,6 +659,7 @@ async function rebuildProjectUnlocked(
     name: current.name,
     createdAtIso: current.createdAtIso,
     raw,
+    sourceVideo: current.sourceImage.video ?? null,
     sliceMode,
     normalizeScale,
     normalizePivotX,

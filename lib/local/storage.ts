@@ -445,6 +445,33 @@ export async function readVideoById(
   return null;
 }
 
+export async function resolveVideoPath(id: string): Promise<string | null> {
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  const cleaned = safeImageId(id);
+  if (!VIDEO_FILE_NAME_RE.test(`${cleaned}.mp4`)) return null;
+  const root = path.resolve(videosDir());
+  let buckets: import("node:fs").Dirent[];
+  try {
+    buckets = await fs.readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  for (const bucket of buckets) {
+    if (!bucket.isDirectory() || !BUCKET_NAME_RE.test(bucket.name)) continue;
+    const candidate = path.join(root, bucket.name, `${cleaned}.mp4`);
+    try {
+      const stat = await fs.lstat(candidate);
+      if (stat.isSymbolicLink()) return null;
+      if (stat.isFile()) return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  return null;
+}
+
 export type DiskVideoEntry = {
   id: string;
   bucket: string;

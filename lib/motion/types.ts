@@ -147,11 +147,28 @@ export const animationSchema = z
   })
   .strict();
 
+export const videoProvenanceSchema = z.object({
+  videoId: z.string().regex(/^[A-Za-z0-9_-]+$/),
+  sourceFps: z.number().positive(),
+  frameCount: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  mode: z.enum(["loop", "oneshot"]),
+  period: z.number().int().positive().nullable(),
+  segment: z.object({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive()
+  }).strict(),
+  frameIndices: z.array(z.number().int().nonnegative()).min(1),
+  derivedFps: z.number().int().min(1).max(60)
+}).strict();
+
 export const sourceImageSchema = z
   .object({
     path: z.string().min(1),
     width: z.number().int().positive(),
-    height: z.number().int().positive()
+    height: z.number().int().positive(),
+    video: videoProvenanceSchema.optional()
   })
   .strict();
 
@@ -227,6 +244,7 @@ export type GridSpec = z.infer<typeof gridSpecSchema>;
 export type FrameRect = z.infer<typeof frameRectSchema>;
 export type Pivot = z.infer<typeof pivotSchema>;
 export type MatteSpec = z.infer<typeof matteSpecSchema>;
+export type VideoProvenance = z.infer<typeof videoProvenanceSchema>;
 export type Frame = z.infer<typeof frameSchema>;
 export type FrameOverride = z.infer<typeof frameOverrideSchema>;
 export type Candidate = z.infer<typeof candidateSchema>;
