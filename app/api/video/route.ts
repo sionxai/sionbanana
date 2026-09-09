@@ -11,7 +11,7 @@ import {
   resolveDefaultGrokVideoModel,
   supportsFrameReferences
 } from "@/lib/grok-video";
-import { readImageById, saveVideoBuffer, saveVideoMetadata } from "@/lib/local/storage";
+import { listVideos, readImageById, saveVideoBuffer, saveVideoMetadata } from "@/lib/local/storage";
 import { generateId } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +50,31 @@ class VideoSourceImageError extends Error {
     super(message);
     this.name = "VideoSourceImageError";
     this.status = status;
+  }
+}
+
+export async function GET(request: NextRequest): Promise<Response> {
+  try {
+    const { limit } = z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(50)
+    }).strict().parse(Object.fromEntries(request.nextUrl.searchParams));
+    const videos = (await listVideos())
+      .sort((a, b) => Date.parse(b.createdAtIso) - Date.parse(a.createdAtIso))
+      .slice(0, limit)
+      .map(video => ({
+        id: video.id,
+        createdAtIso: video.createdAtIso,
+        prompt: video.prompt?.slice(0, 120) ?? "",
+        model: video.model ?? null,
+        duration: video.duration ?? null,
+        resolution: video.resolution ?? null,
+        aspectRatio: video.aspectRatio ?? null,
+        videoUrl: video.videoUrl
+      }));
+    return NextResponse.json({ ok: true, videos });
+  } catch (error) {
+    const result = videoErrorResult(error);
+    return NextResponse.json(result.body, { status: result.status });
   }
 }
 
