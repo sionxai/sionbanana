@@ -1117,3 +1117,10 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
   Codex 검증 미실행(키체인 크래시) → CEO: 워크트리 tsc·lint·306/306, 병합본 **314/314**. 커밋 `8bf3fd50`, 병합 `8a5d42f5`(로컬 전용), 재빌드·재기동.
   **브라우저 실검증(3002):** 탭 전환 → 영상 선택 → 프로브 표시(루프: 주기 45프레임 = 1.88초·구간 53~98 / 원샷: 구간 1~110·제안 8프레임·파생 2fps) → '모션 생성' → 대화상자 닫힘 → 새 프로젝트 "여전사 검 베기 (화면 영상)" 배지 "영상 프레임 8장 · 검증된 배치 · 원본 24fps · 재생 2fps · 원샷 · 구간 1~110" 확인. 브라우저 페인의 좌표 클릭이 스케일 문제로 빗나가 탭 전환·선택은 페이지 스크립트(mousedown/change 이벤트)로 수행 — 기능 검증에는 영향 없음.
 - **판정: PASS · 완료(A+B).** 생성 예산 실사용: 이미지 1회, 영상 1편. 워크트리 `sb-wo-023-video-motion`은 병합 완료·clean 상태로 유지(정리는 대표 확인 후). 후속 후보: 스프라이트용 영상 프롬프트 프리셋·`lastFrame=source` 루프 닫기(P1, 생성 2~4편), 720p 단가 비교 1편.
+
+### 조사 기록 — GPT 이미지 2.5 "코덱스 반영" 재계측 + 전역 MCP·스킬 마무리 (2026-09-10, 대표 질의)
+
+- **전역 MCP:** user 스코프 등록은 메인 폴더 `scripts/mcp-server.mjs` 하나이며 병합본이다. 등록 명령을 그대로 stdio로 띄워 `tools/list` 확인 — 도구 24개, `probe_video_frames` 노출, `create_motion` 소스 generate/reference/video/upload·grid 비필수·설명에 probe/videoId 안내. 설정 변경 불필요. 이미 떠 있는 세션은 MCP 재시작 필요.
+- **스킬(대표 승인 "오케이"):** `~/.claude/skills/sionbanana-remote/SKILL.md`에 video 소스 타입 + "영상→모션(WO-023)" 워크플로 항목 추가(67→68행). 다른 줄 불변.
+- **이미지 2.5 재계측(대표 "코덱스에 업데이트됐다"):** 브리지 에코 프로브 2요청(첫 이벤트에서 중단) — `tool.model` 미지정: `gpt-image-2-codex` / `tool.model=gpt-image-2.5-flare`: `gpt-image-2-codex`(무시). 오늘 07:19 KST까지 생성된 사이드카 `imageBackend.model` 전부 `gpt-image-2-codex`. 9월 1~9일 실파일 픽셀 예산 중앙값 1.57MP로 불변. Codex CLI 0.153.4 바이너리 문자열에 2.5·flare·sunburst 없음(내장 image_gen 안내는 gpt-image-2/1.5). 공식 변경 이력(9월)에 이미지 항목 없음. 발표문은 "Codex에서도 제공"이라 하나 **우리 경로(`codex/responses` image_generation 도구)에서는 관측 불가** — 에코 이름이 별칭이라 백엔드만 바뀌었을 가능성은 배제 못 하나 출력 예산·속도 변화 증거 없음.
+- **조치:** 코드 변경 없음. 감지 수단은 WO-019(`health.imageBackend`·사이드카) + 픽셀 예산 표본. 선택지(미승인): 도구 `model`을 env로 지정 가능하게 하는 5줄 내 변경 — 브리지가 `model`을 존중하기 시작하면 코드 없이 전환.
