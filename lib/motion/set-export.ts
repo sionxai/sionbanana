@@ -10,6 +10,7 @@ import sharp from "sharp";
 
 import {
   buildMotionExportReview,
+  buildTexturePackerAtlas,
   MotionExportBlockedError,
   type MotionExportReview
 } from "@/lib/motion/export";
@@ -137,6 +138,7 @@ function buildReadme(input: {
   const lines = [
     "Sion Banana Motion Set Export",
     "Authoritative runtime assets: sprite-sheet.png + animation.json.",
+    "sprite-sheet.json is a TexturePacker JSON Hash atlas (Phaser load.atlas, PixiJS) with normalized per-frame pivots; animation.json stays authoritative for playback order, fps and loop.",
     `Frame size: ${input.frameWidth}x${input.frameHeight}px; actions: ${input.actionCount}; exported frames: ${input.frameCount}.`,
     "Each action occupies one row in sprite-sheet.png; empty cells are transparent.",
     "Frames share a common ground line while preserving their original per-frame vertical motion.",
@@ -303,6 +305,10 @@ export async function buildSetExportBundle(
       .png()
       .toBuffer();
     await fs.writeFile(path.join(bundleDirectory, "sprite-sheet.png"), sheetBuffer, { flag: "wx" });
+    const sheetMetadata = await sharp(sheetBuffer).metadata();
+    if (sheetMetadata.width === undefined || sheetMetadata.height === undefined) {
+      throw new Error("Unable to read sprite-sheet.png dimensions.");
+    }
 
     let nextIndex = 0;
     const sourceProjectIds: Record<string, string> = {};
@@ -372,6 +378,17 @@ export async function buildSetExportBundle(
       )}\n`,
       { encoding: "utf8", flag: "wx" }
     );
+    const atlas = buildTexturePackerAtlas({
+      sheetWidth: sheetMetadata.width,
+      sheetHeight: sheetMetadata.height,
+      frames,
+      animations
+    });
+    await fs.writeFile(
+      path.join(bundleDirectory, "sprite-sheet.json"),
+      `${JSON.stringify(atlas, null, 2)}\n`,
+      { encoding: "utf8", flag: "wx" }
+    );
 
     const gifWarnings: string[] = [];
     const previewEntries: string[] = [];
@@ -420,7 +437,7 @@ export async function buildSetExportBundle(
     try {
       await execFileAsync(
         ZIP_PATH,
-        ["-q", "-0", "-r", zipPath, "sprite-sheet.png", "animation.json", "frames", "README.txt", ...previewEntries],
+        ["-q", "-0", "-r", zipPath, "sprite-sheet.png", "animation.json", "sprite-sheet.json", "frames", "README.txt", ...previewEntries],
         { cwd: bundleDirectory, maxBuffer: 4 * 1024 * 1024 }
       );
     } catch (error) {
