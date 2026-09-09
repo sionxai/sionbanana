@@ -5,13 +5,22 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
 import {
   createVideo,
+  createSionBananaMcpServer,
   getVideo,
   TOOL_NAMES,
   videoCreateInputSchema,
   videoGetInputSchema
 } from "../scripts/mcp-server.mjs";
+import {
+  buildVideoPayload,
+  normalizeConfig as normalizeVideoConfig,
+  parseArgs as parseVideoArgs
+} from "../scripts/agent-video.mjs";
 
 const PNG_BUFFER = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+9sL5WQAAAABJRU5ErkJggg==",
@@ -239,6 +248,196 @@ test("video schemas reject unknown fields, traversal ids, and unsupported source
     false
   );
   assert.equal(videoGetInputSchema.safeParse({ jobId: "video-job", extra: true }).success, false);
+});
+
+test("create_video records optional last-frame and reference image ids", async t => {
+  const context = await videoFixture(t);
+  context.spawnImpl = () => ({ once() { return this; }, unref() {} });
+
+  const result = await createVideo(
+    {
+      name: "banana transition",
+      source: { type: "imageId", imageId: "image_first" },
+      lastFrame: { type: "imageId", imageId: "image_last" },
+      referenceImages: [
+        { type: "imageId", imageId: "image_ref_1" },
+        { type: "imageId", imageId: "image_ref_2" }
+      ],
+      prompt: "Interpolate the banana mascot."
+    },
+    context
+  );
+
+  assert.deepEqual(result, {
+    ok: true,
+    jobId: result.jobId,
+    status: "running",
+    sourceImageId: "image_first",
+    lastFrameImageId: "image_last",
+    referenceImageIds: ["image_ref_1", "image_ref_2"]
+  });
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "video-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.deepEqual(job.request, {
+    sourceImageId: "image_first",
+    lastFrameImageId: "image_last",
+    referenceImageIds: ["image_ref_1", "image_ref_2"],
+    prompt: "Interpolate the banana mascot."
+  });
+});
+
+test("create_video accepts reference-only input and omits a source image id", async t => {
+  const context = await videoFixture(t);
+  context.spawnImpl = () => ({ once() { return this; }, unref() {} });
+
+  const result = await createVideo(
+    {
+      referenceImages: [{ type: "imageId", imageId: "image_ref_1" }],
+      prompt: "Keep the character consistent."
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  assert.equal("sourceImageId" in result, false);
+  assert.deepEqual(result.referenceImageIds, ["image_ref_1"]);
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "video-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.equal("sourceImageId" in job.request, false);
+  assert.deepEqual(job.request.referenceImageIds, ["image_ref_1"]);
+});
+
+test("create_video returns optional frame ids in mock mode", async t => {
+  const context = { ...(await videoFixture(t)), mock: true };
+  const result = await createVideo(
+    {
+      source: { type: "imageId", imageId: "image_first" },
+      lastFrame: { type: "imageId", imageId: "image_last" },
+      referenceImages: [{ type: "imageId", imageId: "image_ref_1" }],
+      prompt: "Mock a frame transition."
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.sourceImageId, "image_first");
+  assert.equal(result.lastFrameImageId, "image_last");
+  assert.deepEqual(result.referenceImageIds, ["image_ref_1"]);
+  assert.equal(result.mocked, true);
+});
+
+test("create_video preserves optional frame ids after a wait", async t => {
+  const context = await videoFixture(t);
+  context.spawnImpl = () => ({ once() { return this; }, unref() {} });
+  const result = await createVideo(
+    {
+      source: { type: "imageId", imageId: "image_first" },
+      lastFrame: { type: "imageId", imageId: "image_last" },
+      referenceImages: [{ type: "imageId", imageId: "image_ref_1" }],
+      prompt: "Wait for a frame transition.",
+      waitMs: 1
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.sourceImageId, "image_first");
+  assert.equal(result.lastFrameImageId, "image_last");
+  assert.deepEqual(result.referenceImageIds, ["image_ref_1"]);
+});
+
+test("create_video schemas keep frame-reference acceptance and discovery in sync", async t => {
+  const server = createSionBananaMcpServer();
+  const client = new Client({ name: "sionbanana-video-schema-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  const registeredSchema = server._registeredTools.create_video.inputSchema;
+  const inputs = [
+    {
+      source: { type: "imageId", imageId: "image_first" },
+      lastFrame: { type: "imageId", imageId: "image_last" },
+      referenceImages: [{ type: "imageId", imageId: "image_ref_1" }],
+      prompt: "Animate."
+    },
+    { referenceImages: [{ type: "imageId", imageId: "image_ref_1" }], prompt: "Animate." },
+    { prompt: "Animate." },
+    {
+      source: { type: "imageId", imageId: "image_first" },
+      referenceImages: Array.from({ length: 4 }, (_, index) => ({
+        type: "imageId",
+        imageId: `image_ref_${index + 1}`
+      })),
+      prompt: "Animate."
+    }
+  ];
+
+  for (const input of inputs) {
+    assert.equal(registeredSchema.safeParse(input).success, videoCreateInputSchema.safeParse(input).success);
+  }
+
+  const listedTool = (await client.listTools()).tools.find(tool => tool.name === "create_video");
+  assert.ok(listedTool);
+  assert.equal(typeof listedTool.inputSchema.properties.source, "object");
+  assert.equal(typeof listedTool.inputSchema.properties.lastFrame, "object");
+  assert.equal(typeof listedTool.inputSchema.properties.referenceImages, "object");
+  assert.equal(listedTool.inputSchema.properties.referenceImages.maxItems, 3);
+  assert.equal(listedTool.inputSchema.additionalProperties, false);
+});
+
+test("create_video rejects missing required source/reference input and too many references", async t => {
+  const context = await videoFixture(t);
+  const missing = await createVideo({ prompt: "Animate." }, context);
+  assert.equal(missing.ok, false);
+  const tooMany = await createVideo(
+    {
+      source: { type: "imageId", imageId: "image_first" },
+      referenceImages: Array.from({ length: 4 }, (_, index) => ({
+        type: "imageId",
+        imageId: `image_ref_${index + 1}`
+      })),
+      prompt: "Animate."
+    },
+    context
+  );
+  assert.equal(tooMany.ok, false);
+});
+
+test("agent-video parses optional frame ids and builds a reference-only payload", () => {
+  const config = normalizeVideoConfig(
+    parseVideoArgs(["--reference-ids", "image_ref_1, image_ref_2", "--last-frame-id", "image_last", "--prompt", "Animate."])
+  );
+  assert.deepEqual(buildVideoPayload(config), {
+    prompt: "Animate.",
+    lastFrameImageId: "image_last",
+    referenceImageIds: ["image_ref_1", "image_ref_2"]
+  });
+  assert.throws(
+    () => normalizeVideoConfig({ sourceId: "image_first", referenceIds: "image_ref_1,,image_ref_2", prompt: "Animate." }),
+    /comma-separated/
+  );
+  assert.throws(
+    () => normalizeVideoConfig({ sourceId: "image_first", referenceIds: "a,b,c,d", prompt: "Animate." }),
+    /at most 3/
+  );
+  assert.throws(() => normalizeVideoConfig({ prompt: "Animate." }), /source-id or --reference-ids/);
+});
+
+test("agent-video keeps legacy source-only config payloads valid", () => {
+  assert.deepEqual(
+    buildVideoPayload({
+      sourceId: "image_first",
+      prompt: "Animate.",
+      duration: null,
+      resolution: null,
+      aspect: null,
+      model: null
+    }),
+    { sourceImageId: "image_first", prompt: "Animate." }
+  );
 });
 
 test("get_video polls a running job to a verified ready video without base64", async t => {

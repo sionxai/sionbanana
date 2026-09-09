@@ -170,10 +170,12 @@ const videoSourceSchema = z
       });
     }
   });
-export const videoCreateInputSchema = z
+const videoCreateInputBaseSchema = z
   .object({
     name: z.string().trim().min(1).optional(),
-    source: videoSourceSchema,
+    source: videoSourceSchema.optional(),
+    lastFrame: videoSourceSchema.optional(),
+    referenceImages: z.array(videoSourceSchema).min(1).max(3).optional(),
     prompt: z.string().trim().min(1).max(8000),
     duration: videoDurationSchema.optional(),
     resolution: z.string().trim().min(1).max(32).optional(),
@@ -182,6 +184,18 @@ export const videoCreateInputSchema = z
     waitMs: z.number().int().min(0).max(30_000).default(0)
   })
   .strict();
+export const videoCreateInputSchema = videoCreateInputBaseSchema
+  .superRefine((input, issueContext) => {
+    if (!input.source && !input.referenceImages) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "source 또는 referenceImages 중 하나는 필요합니다."
+      });
+    }
+  });
+// TODO: Remove once the MCP SDK treats Zod v3 effects as object schemas during tools/list.
+// Discovery needs the base shape, while parsing still uses this refined schema at tool invocation.
+Object.defineProperty(videoCreateInputSchema, "shape", { value: videoCreateInputBaseSchema.shape });
 export const videoGetInputSchema = z
   .object({
     jobId: z.string().trim().min(1).regex(VIDEO_ID_RE),
@@ -634,17 +648,12 @@ export function createSionBananaMcpServer(options = {}) {
     "create_video",
     {
       title: "Create Video",
-      description: "Starts image-to-video generation in a detached worker and returns a pollable job id.",
-      inputSchema: {
-        name: z.string().trim().min(1).optional(),
-        source: videoSourceSchema,
-        prompt: z.string().trim().min(1).max(8000),
-        duration: videoDurationSchema.optional(),
-        resolution: z.string().trim().min(1).max(32).optional(),
-        aspectRatio: z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9:_-]+$/).optional(),
-        model: z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.:-]+$/).optional(),
-        waitMs: z.number().int().min(0).max(30_000).default(0)
-      },
+      description:
+        "Starts image-to-video generation in a detached worker and returns a pollable job id. " +
+        "`source`는 첫 프레임 고정, `lastFrame`은 마지막 프레임 고정(둘 다 주면 그 사이를 보간), " +
+        "`referenceImages`(최대 3)는 프레임을 잠그지 않는 외형 참조. `source`와 `referenceImages` 중 하나는 필수. " +
+        "`lastFrame`·`referenceImages`는 grok-imagine-video-1.5 계열에서만 동작하며 구형 모델이면 400.",
+      inputSchema: videoCreateInputSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -1311,8 +1320,26 @@ export async function createVideo(input, context) {
   }
 
   let sourceImageId;
+  let lastFrameImageId;
+  let referenceImageIds;
   try {
-    sourceImageId = await resolveVideoSourceImageId(parsedInput.source, parsedInput.name, context);
+    sourceImageId = parsedInput.source
+      ? await resolveVideoSourceImageId(parsedInput.source, parsedInput.name, context)
+      : undefined;
+    lastFrameImageId = parsedInput.lastFrame
+      ? await resolveVideoSourceImageId(parsedInput.lastFrame, parsedInput.name ? `${parsedInput.name}-last` : undefined, context)
+      : undefined;
+    referenceImageIds = parsedInput.referenceImages
+      ? await Promise.all(
+          parsedInput.referenceImages.map((referenceImage, index) =>
+            resolveVideoSourceImageId(
+              referenceImage,
+              parsedInput.name ? `${parsedInput.name}-ref-${index + 1}` : undefined,
+              context
+            )
+          )
+        )
+      : undefined;
   } catch (error) {
     return { ok: false, reason: errorMessage(error) };
   }
@@ -1323,7 +1350,9 @@ export async function createVideo(input, context) {
       ok: true,
       jobId,
       status: "running",
-      sourceImageId,
+      ...(sourceImageId ? { sourceImageId } : {}),
+      ...(lastFrameImageId ? { lastFrameImageId } : {}),
+      ...(referenceImageIds ? { referenceImageIds } : {}),
       mocked: true
     };
   }
@@ -1340,7 +1369,9 @@ export async function createVideo(input, context) {
       deadlineIso: new Date(createdAt + videoGenerationTimeoutMs() + VIDEO_DEADLINE_BUFFER_MS).toISOString(),
       ...(parsedInput.name ? { name: parsedInput.name } : {}),
       request: {
-        sourceImageId,
+        ...(sourceImageId ? { sourceImageId } : {}),
+        ...(lastFrameImageId ? { lastFrameImageId } : {}),
+        ...(referenceImageIds ? { referenceImageIds } : {}),
         prompt: parsedInput.prompt,
         ...(parsedInput.duration !== undefined ? { duration: parsedInput.duration } : {}),
         ...(parsedInput.resolution ? { resolution: parsedInput.resolution } : {}),
@@ -1384,10 +1415,17 @@ export async function createVideo(input, context) {
     if (parsedInput.waitMs > 0 && job.status === "running") {
       return {
         ...(await getVideo({ jobId, waitMs: parsedInput.waitMs }, context)),
-        sourceImageId
+        ...(sourceImageId ? { sourceImageId } : {}),
+        ...(lastFrameImageId ? { lastFrameImageId } : {}),
+        ...(referenceImageIds ? { referenceImageIds } : {})
       };
     }
-    return { ...videoJobResult(jobId, job), sourceImageId };
+    return {
+      ...videoJobResult(jobId, job),
+      ...(sourceImageId ? { sourceImageId } : {}),
+      ...(lastFrameImageId ? { lastFrameImageId } : {}),
+      ...(referenceImageIds ? { referenceImageIds } : {})
+    };
   } catch (error) {
     return {
       ok: false,

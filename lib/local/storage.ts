@@ -382,6 +382,8 @@ export async function saveVideoBuffer(
 
 export type VideoMetadata = {
   sourceImageId?: string;
+  lastFrameImageId?: string;
+  referenceImageIds?: string[];
   prompt?: string;
   model?: string;
   duration?: number;

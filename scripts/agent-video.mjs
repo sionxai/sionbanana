@@ -48,11 +48,13 @@ export async function runVideoGeneration(config) {
   };
 }
 
-function buildVideoPayload(config) {
+export function buildVideoPayload(config) {
   const payload = {
-    sourceImageId: config.sourceId,
+    ...(config.sourceId ? { sourceImageId: config.sourceId } : {}),
     prompt: config.prompt
   };
+  if (config.lastFrameId) payload.lastFrameImageId = config.lastFrameId;
+  if (config.referenceIds?.length) payload.referenceImageIds = config.referenceIds;
   if (config.duration !== null) payload.duration = config.duration;
   if (config.resolution) payload.resolution = config.resolution;
   if (config.aspect) payload.aspectRatio = config.aspect;
@@ -60,7 +62,7 @@ function buildVideoPayload(config) {
   return payload;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const result = {};
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -96,17 +98,18 @@ function parseArgs(argv) {
   return result;
 }
 
-function normalizeConfig(raw) {
+export function normalizeConfig(raw) {
   if (raw.help) {
     return { help: true };
   }
 
   const sourceId = asTrimmedString(raw.sourceId);
-  if (!sourceId) {
-    throw new Error("--source-id is required");
-  }
-  if (!/^[A-Za-z0-9_\-]+$/.test(sourceId)) {
-    throw new Error("--source-id contains invalid characters");
+  assertImageId(sourceId, "--source-id");
+  const lastFrameId = asTrimmedString(raw.lastFrameId);
+  assertImageId(lastFrameId, "--last-frame-id");
+  const referenceIds = parseReferenceIds(raw.referenceIds);
+  if (!sourceId && referenceIds.length === 0) {
+    throw new Error("--source-id or --reference-ids is required");
   }
 
   const prompt = asTrimmedString(raw.prompt);
@@ -124,6 +127,8 @@ function normalizeConfig(raw) {
 
   return {
     sourceId,
+    lastFrameId,
+    referenceIds,
     prompt,
     duration,
     resolution: asTrimmedString(raw.resolution) || null,
@@ -133,6 +138,29 @@ function normalizeConfig(raw) {
     port,
     portExplicit: raw.portExplicit === true
   };
+}
+
+function assertImageId(value, label) {
+  if (value && !/^[A-Za-z0-9_\-]+$/.test(value)) {
+    throw new Error(`${label} contains invalid characters`);
+  }
+}
+
+function parseReferenceIds(value) {
+  const raw = asTrimmedString(value);
+  if (!raw) return [];
+
+  const ids = raw.split(",").map(id => id.trim());
+  if (ids.some(id => !id)) {
+    throw new Error("--reference-ids must be a comma-separated list of image ids");
+  }
+  if (ids.length > 3) {
+    throw new Error("--reference-ids supports at most 3 image ids");
+  }
+  for (const id of ids) {
+    assertImageId(id, "--reference-ids");
+  }
+  return ids;
 }
 
 async function findHealthyServer(preferredPort, explicit) {
@@ -221,10 +249,12 @@ function printJson(value) {
 
 function printHelp() {
   process.stdout.write(`Usage:
-  node scripts/agent-video.mjs --source-id <image-id> --prompt "..." [options]
+  node scripts/agent-video.mjs --prompt "..." (--source-id <image-id> | --reference-ids <id,id,id>) [options]
 
 Options:
-  --source-id           Required local image id from /api/images/<id>
+  --source-id           Optional first-frame local image id from /api/images/<id>
+  --last-frame-id       Optional last-frame local image id (Grok 1.5 models only)
+  --reference-ids       Optional comma-separated appearance reference image ids, maximum 3 (Grok 1.5 models only)
   --prompt              Required video prompt
   --duration            Optional duration. Default: API default
   --resolution          Optional resolution. Default: 720p
