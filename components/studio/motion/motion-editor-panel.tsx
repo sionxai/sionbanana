@@ -717,7 +717,16 @@ export function MotionEditorPanel({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
-            {project.layoutValidated === true ? (
+            {project.sourceImage.video ? (
+              <>
+                <Badge variant="secondary">
+                  영상 프레임 {project.sourceImage.video.frameIndices.length}장 · 검증된 배치
+                </Badge>
+                <span className="w-full text-xs text-muted-foreground">
+                  영상 {project.sourceImage.video.videoId.slice(0, 8)} · 원본 {project.sourceImage.video.sourceFps}fps · 재생 {project.sourceImage.video.derivedFps}fps · {project.sourceImage.video.mode === "loop" ? "루프" : "원샷"} · 구간 {project.sourceImage.video.segment.start}~{project.sourceImage.video.segment.end}
+                </span>
+              </>
+            ) : project.layoutValidated === true ? (
               <>
                 <span className="text-sm text-muted-foreground">
                   감지 결과 {project.grid.cols} × {project.grid.rows}
