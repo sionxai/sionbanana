@@ -1088,3 +1088,14 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - 유지: `arduino-environment-data-project-1cc604`(다른 세션)·`friendly-pasteur-0d29a6`(detached, 다른 세션)·`key-visual-work-721540`(이 세션 작업 디렉터리).
 - **CEO 실수 1건(무해):** 1차 스크립트가 `git worktree list --porcelain` 출력을 `awk '{print $2}'`로 잘라 저장소 경로의 공백(`2. coding`)에서 깨졌다.
   모든 항목이 "(detached)·미병합"으로 오판돼 **아무것도 지우지 않은 채** 끝났다(안전한 실패). `sed 's/^worktree //'`로 전체 줄을 받아 재실행.
+
+### SB WO-022 — MCP 도구 설명 보강: atlas 내용물·409 처리 절차 (2026-09-09, 대표 승인)
+
+- 발단: 대표 질의 "수정된 MCP에 설명이 다 들어가 있나". CEO 확인 — 검토 게이트·승인 규칙·영상 프레임 입력·CONTENT_LOSS·되돌리기 의미·requiresReview는 있었으나
+  **`sprite-sheet.json`·atlas·pivot·TexturePacker는 0회**(WO-021이 MCP를 의도적으로 제외), `export_motion` 응답에 파일 목록 없음, 게이트 문구가 `reasons`에 무엇을 넣을지 미안내.
+- 변경(문자열 4곳, CEO 직접 — 5줄 이내 예외): `export_motion`·`export_motion_set` 설명에 ZIP 내용물(atlas·pivot 0~1·setOrigin 수동 호출 금지·animation.json 정본·frameTags 참고값·응답 필드),
+  게이트 문구에 "`review.outstandingIssues`를 그대로 `reasons`로 / `blockingIssues`는 승인 불가 → `revert_motion_frames` 후 재생성", `approve_motion_review`에 reasons 출처·CONFLICT 자기교정.
+  승인 범위(3곳)에 4번째(approve 설명)를 더했다 — 같은 의도라 포함하고 명시한다.
+- 검증 — 설명을 단언하는 테스트 0건. 워크트리 293/293 → 병합본 **301/301**. MCP `tools/list` 실응답으로 설명 노출 확인(아래 기록 시점 이후 확인).
+- 커밋 `3637084b`, 병합 `20e1880f`(로컬 전용). 재빌드 불필요(MCP는 세션마다 새로 뜨는 별도 프로세스). **이미 떠 있는 세션의 MCP는 재시작 전까지 옛 설명을 본다.**
+- **판정: PASS · 완료.**
