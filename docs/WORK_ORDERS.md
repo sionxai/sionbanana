@@ -1080,3 +1080,11 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - 절차 — 상태 변경 체인을 `set -e`+파일 출력+종료 코드 직접 검사로 묶어 실행(WO-020 재발 방지). 병합 전 겹침 재확인(없음), 병합 후 unmerged 0 확인.
 - 커밋 `a33e8734`, 병합 `10eb2cf4`(로컬 전용). 상주 서버 반영. Codex 쿼터는 리셋 후 1회 사용.
 - **판정: PASS · 완료.** 한계: Phaser에서 실제 `load.atlas`로 재생하는 검증은 TEF 쪽 작업이라 하지 않았다(다른 저장소, 인계 없음). `frameTags`는 Aseprite 관례이며 Phaser `load.atlas`는 읽지 않는다(정보용).
+
+### 정리 기록 — 워크트리·브랜치 정리 (2026-09-09, 대표 승인)
+
+- 삭제(병합 완료·clean 확인 후): 워크트리 `sb-wo-017-fit-boundary`·`018-review-gate`·`019-image-backend`·`020-video-frames`·`021-atlas-export` + 각 브랜치.
+  워크트리 없이 남아 있던 병합 완료 브랜치 `claude/sb-wo-004`~`016` 13개(`git branch -d` — 미병합이면 거부되는 안전 삭제).
+- 유지: `arduino-environment-data-project-1cc604`(다른 세션)·`friendly-pasteur-0d29a6`(detached, 다른 세션)·`key-visual-work-721540`(이 세션 작업 디렉터리).
+- **CEO 실수 1건(무해):** 1차 스크립트가 `git worktree list --porcelain` 출력을 `awk '{print $2}'`로 잘라 저장소 경로의 공백(`2. coding`)에서 깨졌다.
+  모든 항목이 "(detached)·미병합"으로 오판돼 **아무것도 지우지 않은 채** 끝났다(안전한 실패). `sed 's/^worktree //'`로 전체 줄을 받아 재실행.
