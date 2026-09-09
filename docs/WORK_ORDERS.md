@@ -946,3 +946,39 @@
 - 테스트용으로 만든 승인 기록은 `DELETE .../review-approval`로 되돌렸다. 복원 확인 —
   `reviewApproval: null`, 오버라이드 0건, 프레임 6개·제외 0건, 내보내기 다시 409(원상태).
 - 재빌드·재기동 2회(문구 수정 반영 포함). 전체 테스트 **278/278** · tsc 0.
+
+### SB WO-019 — 실제 이미지 백엔드 계측·기록 (Images 2.5 전환 감지 대비)
+
+- 발단: 대표가 "GPT 이미지 신모델 대응"을 지시(2026-09-09). ChatGPT Images 2.5가 2026-09-08 출시됐고 API 모델은
+  `gpt-image-2.5-flare`·`gpt-image-2.5-sunburst`다.
+- **CEO 조사 결론: 지금 우리 구조로는 2.5로 바꿀 수 없다.** Codex OAuth 브리지가 이미지 모델을 서버에서 고정한다.
+  실측(`scratchpad/probe-echo-raw.mjs`) —
+  ```
+  보낸 것 : quality=high  size=1536x1024  output_format=webp  model=gpt-image-2.5-flare
+  서버 에코: quality=auto  size=auto       output_format=webp  model=gpt-image-2-codex
+  ```
+  · `output_format`·`moderation`만 존중되고 **`model`·`quality`·`size`는 덮인다.**
+  · 엉터리 모델명(`__invalid_model_name__`)도 **400이 아니라 200**으로 조용히 덮인다 — 검증조차 하지 않는다.
+  · 오케스트레이터를 `gpt-6-astra`·`gpt-5.6-terra`로 바꿔도 백엔드는 동일하다.
+- **부수 발견 2건.** ① 우리가 넣어온 `quality`·`size`는 **효과가 없었다**(결과가 요청보다 크게 돌아오던 현상의 원인이 `size=auto`).
+  ② 사이드카가 `model`에 라우팅 모델(`gpt-5.6-sol`)을 기록해왔다 — 이미지를 만든 건 `gpt-image-2-codex`이므로
+  **출처 기록이 비어 있는 게 아니라 틀려 있었다.**
+- 웹 조사 — Codex 앱에 비활성 이미지 업그레이드 게이트가 9/3부터 노출(공식 일정·롤아웃 계획 없음).
+  전례상 서버 측 교체다(2026-04-21 `gpt-image-2`가 `gpt-image-1.5`를 대체). **따라서 전환일에 클라이언트 변경은 불필요하다.**
+  API 키로 2.5 직접 호출은 가능하나 정본 §4(별도 과금 금지)에 걸리므로 정본 개정 사안으로 보류.
+- 그래서 모델 교체 대신 **계측**을 했다: 서버 에코를 기록해 전환일을 자동으로 감지하고, 틀린 출처 기록을 바로잡는다.
+- 위임 — 6파일, 왕복 1회. Maker는 키체인 크래시로 검증 미실행·**INCONCLUSIVE 정직 보고**. 검증은 CEO 실행.
+- **CEO 변경 시도 1건 → 철회.** 빈 에코가 이전 값을 덮지 않도록 가드를 넣었다가 테스트가 거부해 되돌렸다.
+  Codex 구현이 옳다 — 관측하지 않은 값을 이번 산출물에 붙이는 것은 **출처를 바로잡으려는 이 작업의 목적과 반대**다.
+- 설계 요점 — 생성 라우트는 모듈 getter가 아니라 **호출별 결과값**을 쓴다. 병렬 생성에서 귀속이 정확하고,
+  테스트가 서로 다른 백엔드 두 개를 돌려주며 각 사이드카가 자기 것을 받았는지 확인한다.
+  요청 페이로드·응답 본문·기존 필드 의미는 바꾸지 않았다(추가만).
+- CEO 재실행 — 병합본 전체 **285/285**(278+7) · tsc 0.
+- **실서버 검증(재빌드·재기동 후 실생성 1회)** —
+  · 생성 전 헬스 `imageBackend: null` → 생성 후
+    `{model: "gpt-image-2-codex", quality: "auto", size: "auto", moderation: "low", outputFormat: "png", background: "auto"}`
+  · 사이드카: `model: "gpt-5.6-sol"`(라우팅, 하위호환 유지) + `imageBackend.model: "gpt-image-2-codex"`(실제),
+    `quality: "high"`(요청) 옆에 `imageBackend.quality: "auto"`(적용) — **불일치가 이제 기록에 보인다.**
+- 커밋 — `952dbaa3`, 병합 `(아래 참조)`. 상주 서버 재빌드·재기동 완료.
+- **판정: PASS · 완료.** 남은 한계: 마스크 편집 경로는 모듈 getter를 쓰므로 동시 요청 시 귀속이 어긋날 수 있다
+  (오늘은 모든 경로가 같은 백엔드라 무해하나, 전환일에는 오귀속 가능). 관측값은 인메모리라 재시작 시 초기화된다(지속 기록은 사이드카가 담당).
