@@ -193,6 +193,53 @@ function gammaMatte() {
   };
 }
 
+test("video grid provenance and validated layout survive rebuilding while legacy grids stay unvalidated", async t => {
+  await useTempDataDir(t);
+  const sourceVideo = {
+    videoId: "stored_video-1", sourceFps: 24, frameCount: 48, width: 32, height: 32,
+    mode: "loop", period: 12, segment: { start: 0, end: 12 }, frameIndices: [0, 6], derivedFps: 4
+  };
+  const input = {
+    name: "Video provenance", sheetBuffer: await testSheet(), sliceMode: "grid",
+    grid: { cols: 2, rows: 1 }, matte: gammaMatte()
+  };
+  const created = await createProject({ ...input, sourceVideo });
+  assert.equal(created.layoutValidated, true);
+  assert.equal(created.sliceConfidence, 1);
+  assert.deepEqual(created.sourceImage.video, sourceVideo);
+  const rebuilt = await rebuildProject(created.id, { matte: { ...gammaMatte(), tolerance: 20 } });
+  assert.equal(rebuilt.layoutValidated, true);
+  assert.equal(rebuilt.sliceConfidence, 1);
+  assert.deepEqual(rebuilt.sourceImage.video, sourceVideo);
+  assert.deepEqual((await readProject(created.id)).sourceImage.video, sourceVideo);
+  const legacy = await createProject(input);
+  assert.equal(legacy.layoutValidated, false);
+  assert.equal(legacy.sourceImage.video, undefined);
+  assert.equal((await rebuildProject(legacy.id, { matte: { ...gammaMatte(), tolerance: 20 } })).layoutValidated, false);
+});
+
+test("video creation validates paired range and optional grid before resolving a stored video", async t => {
+  await useTempDataDir(t);
+  const { POST } = await loadMotionRouteHandlers();
+  const { NextRequest } = await import("next/server");
+  for (const [source, grid, status, code] of [
+    [{ type: "video", videoId: "missing" }, undefined, 404, "VIDEO_NOT_FOUND"],
+    [{ type: "video", videoId: "missing", start: 0 }, undefined, 400, undefined],
+    [{ type: "video", videoId: "missing", end: 12 }, undefined, 400, undefined],
+    [{ type: "video", videoId: "../missing" }, undefined, 400, undefined],
+    [{ type: "generate", prompt: "fixture" }, undefined, 400, undefined]
+  ]) {
+    const response = await POST(new NextRequest("http://localhost/api/motion/projects", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Video validation", source, grid })
+    }));
+    const body = await response.json();
+    assert.equal(response.status, status);
+    assert.equal(body.ok, false);
+    if (code) assert.equal(body.code, code);
+  }
+});
+
 test("projectDir rejects traversal, absolute paths, and special characters", () => {
   assert.throws(() => projectDir("../escape"), /letters, numbers, and hyphens/);
   assert.throws(() => projectDir("/absolute"), /letters, numbers, and hyphens/);

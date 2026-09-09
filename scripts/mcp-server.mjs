@@ -102,6 +102,17 @@ const motionSourceSchema = z
         action: motionActionSchema.optional()
       })
       .strict(),
+    z
+      .object({
+        type: z.literal("video"),
+        videoId: z.string().trim().min(1).regex(VIDEO_ID_RE),
+        subjectType: z.enum(["character", "object"]).default("character"),
+        mode: z.enum(["loop", "oneshot"]).default("loop"),
+        count: z.number().int().min(2).max(24).default(8),
+        start: z.number().int().min(0).optional(),
+        end: z.number().int().positive().optional()
+      })
+      .strict(),
     motionUploadSourceSchema
   ])
   .superRefine((source, issueContext) => {
@@ -109,6 +120,12 @@ const motionSourceSchema = z
       issueContext.addIssue({
         code: z.ZodIssueCode.custom,
         message: "upload source must include dataUrl or imagePath"
+      });
+    }
+    if (source.type === "video" && (source.start === undefined) !== (source.end === undefined)) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "video source start and end must be provided together"
       });
     }
   });
@@ -135,18 +152,33 @@ const motionAdvancedSchema = z
     loop: z.enum(["loop", "pingpong", "once"]).optional()
   })
   .strict();
-export const motionCreateInputSchema = z.object({
-  name: z.string().trim().min(1),
-  grid: z
-    .object({
-      cols: z.number().int().min(1).max(12),
-      rows: z.number().int().min(1).max(12)
-    })
-    .strict(),
-  source: motionSourceSchema,
-  advanced: motionAdvancedSchema.optional(),
-  waitMs: z.number().int().min(0).max(30_000).default(0)
-});
+const motionCreateInputBaseSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    grid: z
+      .object({
+        cols: z.number().int().min(1).max(12),
+        rows: z.number().int().min(1).max(12)
+      })
+      .strict()
+      .optional(),
+    source: motionSourceSchema,
+    advanced: motionAdvancedSchema.optional(),
+    waitMs: z.number().int().min(0).max(30_000).default(0)
+  });
+export const motionCreateInputSchema = motionCreateInputBaseSchema
+  .superRefine((input, issueContext) => {
+    if (input.source.type !== "video" && !input.grid) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["grid"],
+        message: "grid is required unless source.type is video"
+      });
+    }
+  });
+// TODO: Remove once the MCP SDK treats Zod v3 effects as object schemas during tools/list.
+// Discovery needs the base shape, while parsing still uses this refined schema at tool invocation.
+Object.defineProperty(motionCreateInputSchema, "shape", { value: motionCreateInputBaseSchema.shape });
 const videoImageIdSchema = z.string().trim().min(1).max(160).regex(VIDEO_ID_RE);
 const videoDurationSchema = z.union([
   z.number().int().positive().max(30),
@@ -200,6 +232,14 @@ export const videoGetInputSchema = z
   .object({
     jobId: z.string().trim().min(1).regex(VIDEO_ID_RE),
     waitMs: z.number().int().min(0).max(30_000).default(0)
+  })
+  .strict();
+export const videoFrameProbeInputSchema = z
+  .object({
+    videoId: z.string().trim().min(1).regex(VIDEO_ID_RE),
+    mode: z.enum(["loop", "oneshot"]).optional(),
+    count: z.number().int().min(2).max(24).optional(),
+    subjectType: z.enum(["character", "object"]).optional()
   })
   .strict();
 const motionSetReferenceSchema = z.union([
@@ -406,6 +446,7 @@ const TOOL_NAMES = [
   "get_motion",
   "create_video",
   "get_video",
+  "probe_video_frames",
   "export_motion",
   "approve_motion_review",
   "list_motion",
@@ -613,8 +654,8 @@ export function createSionBananaMcpServer(options = {}) {
     {
       title: "Create Motion",
       description:
-        "Starts motion-project generation in a detached worker and immediately returns a pollable job id. Presets: idle, walk, run, jump, attack, reload, hit, fall, stun, getup, custom; movement presets loop and one-shot presets play once by default.",
-      inputSchema: motionCreateInputSchema.shape,
+        "Starts motion-project generation in a detached worker and immediately returns a pollable job id. Presets: idle, walk, run, jump, attack, reload, hit, fall, stun, getup, custom; movement presets loop and one-shot presets play once by default. `source.type: 'video'` uses a `videoId` confirmed by get_video: loop detects a period and oneshot detects its activity segment; count defaults to 8 (2–24), and start/end select a manual segment together. Run probe_video_frames first. Video synthesis validates its own grid, so fixed-grid approval is not required and video grid input is ignored.",
+      inputSchema: motionCreateInputSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -652,7 +693,8 @@ export function createSionBananaMcpServer(options = {}) {
         "Starts image-to-video generation in a detached worker and returns a pollable job id. " +
         "`source`는 첫 프레임 고정, `lastFrame`은 마지막 프레임 고정(둘 다 주면 그 사이를 보간), " +
         "`referenceImages`(최대 3)는 프레임을 잠그지 않는 외형 참조. `source`와 `referenceImages` 중 하나는 필수. " +
-        "`lastFrame`·`referenceImages`는 grok-imagine-video-1.5 계열에서만 동작하며 구형 모델이면 400.",
+        "`lastFrame`·`referenceImages`는 grok-imagine-video-1.5 계열에서만 동작하며 구형 모델이면 400. " +
+        "스프라이트용 영상 프롬프트 요건: 단색 크로마 그린 #00FF00 배경, 카메라 완전 고정, 제자리(treadmill) 동작, 전신이 중앙 70% 안, 크기 일정, 그림자·텍스트 없음, 루프는 같은 자세로 끝나게, 원샷은 한 사이클만.",
       inputSchema: videoCreateInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -680,6 +722,23 @@ export function createSionBananaMcpServer(options = {}) {
       }
     },
     input => getVideo(input, context)
+  );
+
+  registerJsonTool(
+    server,
+    "probe_video_frames",
+    {
+      title: "Probe Video Frames",
+      description:
+        "Reads a video frame contact sheet for sprite motion setup and returns `video`(width, height, fps, frameCount, durationSec), `loop`(period, start, closureError), `segment`, `suggested`(mode, range, frameIndices, derivedFps), and contactSheetPath. It writes one preview PNG and creates no motion project.",
+      inputSchema: videoFrameProbeInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      }
+    },
+    input => probeVideoFrames(input, context)
   );
 
   registerJsonTool(
@@ -1193,7 +1252,7 @@ export async function createMotion(input, context) {
     ).toISOString();
     const request = {
       name: parsedInput.name,
-      grid: parsedInput.grid,
+      ...(source.type === "video" ? {} : { grid: parsedInput.grid }),
       source,
       ...(parsedInput.advanced ?? {})
     };
@@ -1470,6 +1529,49 @@ export async function getVideo(input, context) {
       return videoJobResult(parsedInput.jobId, record.job);
     }
     return await readyVideoResult(parsedInput.jobId, record.job, record.path, context);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+export async function probeVideoFrames(input, context) {
+  let parsedInput;
+  try {
+    parsedInput = videoFrameProbeInputSchema.parse(input);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+
+  try {
+    const { baseUrl } = await findMotionServer(context.fetchImpl);
+    const searchParams = new URLSearchParams();
+    if (parsedInput.mode !== undefined) searchParams.set("mode", parsedInput.mode);
+    if (parsedInput.count !== undefined) searchParams.set("count", String(parsedInput.count));
+    if (parsedInput.subjectType !== undefined) searchParams.set("subjectType", parsedInput.subjectType);
+    const query = searchParams.toString();
+    const url = `${baseUrl}/api/video/${encodeURIComponent(parsedInput.videoId)}/frames${query ? `?${query}` : ""}`;
+    const response = await context.fetchImpl(url, { method: "GET" });
+    const text = await response.text();
+    const body = text ? parseJson(text, `Invalid JSON response from ${url}`) : {};
+    if (!response.ok) {
+      const responseBody = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+      return {
+        ...responseBody,
+        ok: false,
+        reason: typeof body?.reason === "string"
+          ? body.reason
+          : `${response.status} ${response.statusText || "video frame probe failed"}`
+      };
+    }
+    if (body?.ok !== true || typeof body.contactSheet !== "string") {
+      throw new Error("video frame probe response was incomplete");
+    }
+
+    const previewsRoot = await videoDirectory(context, "motion-previews", true);
+    const contactSheetPath = videoIdPath(previewsRoot, parsedInput.videoId, ".contact.png");
+    await atomicWriteFile(contactSheetPath, decodeContactSheetPng(body.contactSheet));
+    const { contactSheet, ...result } = body;
+    return { ...result, contactSheetPath };
   } catch (error) {
     return { ok: false, reason: errorMessage(error) };
   }
@@ -2751,6 +2853,18 @@ function assertMotionDataUrlSize(dataUrl) {
   }
 }
 
+function decodeContactSheetPng(dataUrl) {
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]*={0,2})$/.exec(dataUrl);
+  if (!match || !match[1] || match[1].length % 4 !== 0) {
+    throw new Error("video frame probe contactSheet must be a base64 PNG data URL");
+  }
+  const buffer = Buffer.from(match[1], "base64");
+  if (detectMotionImageMime(buffer) !== "image/png") {
+    throw new Error("video frame probe contactSheet must contain a PNG image");
+  }
+  return buffer;
+}
+
 function detectMotionImageMime(buffer) {
   if (
     buffer.length >= 8 &&
@@ -2883,6 +2997,7 @@ async function readyMotionResult(jobId, job, context) {
   const frames = Array.from({ length: frameCount }, (_, index) =>
     path.join(directory, "derived", "frames", `f${String(index + 1).padStart(2, "0")}.png`)
   );
+  const sourceVideo = project.sourceImage?.video;
   return {
     ok: true,
     jobId,
@@ -2898,6 +3013,17 @@ async function readyMotionResult(jobId, job, context) {
       frames,
       project: projectPath
     },
+    ...(sourceVideo
+      ? {
+          video: {
+            mode: sourceVideo.mode,
+            period: sourceVideo.period,
+            segment: sourceVideo.segment,
+            frameIndices: sourceVideo.frameIndices,
+            derivedFps: sourceVideo.derivedFps
+          }
+        }
+      : {}),
     ...(layoutValidated === true && typeof job.sliceConfidence === "number"
       ? { sliceConfidence: job.sliceConfidence }
       : layoutValidated === true && typeof projectSliceConfidence === "number"

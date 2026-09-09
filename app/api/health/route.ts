@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCodexAuthStatus } from "@/lib/codex-oauth";
+import { ffmpegAvailability } from "@/lib/motion/video-frames";
 import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -26,6 +27,7 @@ export async function GET() {
       textModel: DEFAULT_TEXT_MODEL,
       imageModel: DEFAULT_IMAGE_MODEL
     },
-    imageBackend: getLastObservedImageBackend()
+    imageBackend: getLastObservedImageBackend(),
+    ffmpeg: await ffmpegAvailability()
   });
 }

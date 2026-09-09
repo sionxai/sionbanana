@@ -5,6 +5,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import sharp from "sharp";
 
 import {
@@ -13,6 +15,7 @@ import {
   createMotionCandidate,
   createMotionSet,
   createMotion,
+  createSionBananaMcpServer,
   exportMotionSet,
   getMotionCandidate,
   getMotionSet,
@@ -30,6 +33,7 @@ import {
   motionSetGetInputSchema,
   motionSetListInputSchema,
   revertMotionFrames,
+  probeVideoFrames,
   TOOL_NAMES
 } from "../scripts/mcp-server.mjs";
 
@@ -104,6 +108,62 @@ test("create_motion input accepts new presets and rejects unknown actions", () =
     }).success,
     false
   );
+  assert.equal(
+    motionCreateInputSchema.safeParse({
+      name: "missing grid",
+      source: { type: "generate", prompt: "walk", action: "walk" }
+    }).success,
+    false
+  );
+  for (const source of [
+    { type: "video", videoId: "video_123", start: 0 },
+    { type: "video", videoId: "video_123", end: 8 },
+    { type: "video", videoId: "video_123", unexpected: true }
+  ]) {
+    assert.equal(motionCreateInputSchema.safeParse({ name: "video", source }).success, false);
+  }
+});
+
+test("create_motion accepts a video source without a grid and ignores supplied video grids", async t => {
+  const context = await motionFixture(t);
+  context.spawnImpl = () => ({
+    once() {
+      return this;
+    },
+    unref() {}
+  });
+  const source = {
+    type: "video",
+    videoId: "video_123",
+    mode: "oneshot",
+    count: 6,
+    start: 2,
+    end: 11
+  };
+  const result = await createMotion(
+    {
+      name: "video jump",
+      grid: { cols: 4, rows: 2 },
+      source
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  const job = JSON.parse(
+    await fs.readFile(path.join(context.dataRoot, "motion-jobs", `${result.jobId}.json`), "utf8")
+  );
+  assert.equal(Object.hasOwn(job.request, "grid"), false);
+  assert.deepEqual(job.request.source, {
+    ...source,
+    subjectType: "character"
+  });
+
+  const mockResult = await createMotion(
+    { name: "mock video", source: { type: "video", videoId: "video_123" } },
+    await motionFixture(t, true)
+  );
+  assert.equal(mockResult.ok, true);
+  assert.equal(mockResult.mocked, true);
 });
 
 test("create_motion sends advanced motion controls to the route request body", async t => {
@@ -212,6 +272,15 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
       rows: [{ repeated: false, ratio: 0.1 }, { repeated: true, ratio: 0.99 }],
       excludedFrames: [2, 3]
     },
+    sourceImage: {
+      video: {
+        mode: "loop",
+        period: 4,
+        segment: { start: 0, end: 7 },
+        frameIndices: [0, 2, 4, 6],
+        derivedFps: 12
+      }
+    },
     frames: [{ index: 0 }, { index: 1 }]
   };
   await writeJson(path.join(context.dataRoot, "motion-jobs", `${jobId}.json`), {
@@ -230,6 +299,13 @@ test("get_motion returns a ready project and absolute asset paths", async t => {
   assert.equal(result.layoutValidated, true);
   assert.deepEqual(result.mirrorDetection, { mirroredRows: [1] });
   assert.deepEqual(result.duplicateDetection, { repeatedRows: [1], excludedFrames: [2, 3] });
+  assert.deepEqual(result.video, {
+    mode: "loop",
+    period: 4,
+    segment: { start: 0, end: 7 },
+    frameIndices: [0, 2, 4, 6],
+    derivedFps: 12
+  });
   assert.equal(result.sliceConfidence, 0.91);
   assert.equal(path.isAbsolute(result.paths.dir), true);
   assert.equal(path.isAbsolute(result.paths.sheet), true);
@@ -537,6 +613,105 @@ test("TOOL_NAMES exposes all motion MCP tools", () => {
   assert.equal(TOOL_NAMES.includes("get_motion"), true);
   assert.equal(TOOL_NAMES.includes("list_motion"), true);
   assert.equal(TOOL_NAMES.includes("approve_motion_review"), true);
+  assert.equal(TOOL_NAMES.includes("probe_video_frames"), true);
+});
+
+test("probe_video_frames saves the contact sheet and leaves its data URL out of the response", async t => {
+  const context = await motionFixture(t);
+  const videoId = "video_123";
+  const contactSheet = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 255, b: 0, alpha: 1 } }
+  })
+    .png()
+    .toBuffer();
+  context.fetchImpl = async (url, options = {}) => {
+    const value = String(url);
+    if (value === "http://localhost:3002/api/health") return jsonResponse({ ok: true });
+    assert.equal(
+      value,
+      "http://localhost:3002/api/video/video_123/frames?mode=oneshot&count=6&subjectType=object"
+    );
+    assert.equal(options.method, "GET");
+    return jsonResponse({
+      ok: true,
+      video: { width: 32, height: 32, fps: 24, frameCount: 48, durationSec: 2 },
+      loop: null,
+      segment: { start: 2, end: 11 },
+      suggested: {
+        mode: "oneshot",
+        range: { start: 2, end: 11 },
+        frameIndices: [2, 4, 6],
+        derivedFps: 9
+      },
+      contactSheet: `data:image/png;base64,${contactSheet.toString("base64")}`
+    });
+  };
+
+  const result = await probeVideoFrames(
+    { videoId, mode: "oneshot", count: 6, subjectType: "object" },
+    context
+  );
+  const contactSheetPath = path.join(context.dataRoot, "motion-previews", `${videoId}.contact.png`);
+  assert.deepEqual(result, {
+    ok: true,
+    video: { width: 32, height: 32, fps: 24, frameCount: 48, durationSec: 2 },
+    loop: null,
+    segment: { start: 2, end: 11 },
+    suggested: {
+      mode: "oneshot",
+      range: { start: 2, end: 11 },
+      frameIndices: [2, 4, 6],
+      derivedFps: 9
+    },
+    contactSheetPath
+  });
+  assert.deepEqual(await fs.readFile(contactSheetPath), contactSheet);
+  assert.equal(path.isAbsolute(result.contactSheetPath), true);
+  assert.equal(Object.hasOwn(result, "contactSheet"), false);
+  await assert.rejects(fs.access(path.join(context.dataRoot, "motion-assets")));
+});
+
+test("probe_video_frames preserves the frame API error code", async t => {
+  const context = await motionFixture(t);
+  context.fetchImpl = async url => {
+    const value = String(url);
+    if (value === "http://localhost:3002/api/health") return jsonResponse({ ok: true });
+    assert.equal(value, "http://localhost:3002/api/video/missing_video/frames");
+    return jsonResponse(
+      { ok: false, reason: "Stored video was not found.", code: "VIDEO_NOT_FOUND" },
+      404
+    );
+  };
+
+  assert.deepEqual(await probeVideoFrames({ videoId: "missing_video" }, context), {
+    ok: false,
+    reason: "Stored video was not found.",
+    code: "VIDEO_NOT_FOUND"
+  });
+});
+
+test("tools/list exposes video frame probing and its create_motion guidance", async t => {
+  const server = createSionBananaMcpServer();
+  const client = new Client({ name: "sionbanana-motion-schema-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+
+  const tools = (await client.listTools()).tools;
+  const probe = tools.find(tool => tool.name === "probe_video_frames");
+  const createMotionTool = tools.find(tool => tool.name === "create_motion");
+  assert.ok(probe);
+  assert.equal(probe.annotations?.readOnlyHint, true);
+  assert.match(probe.description, /one preview PNG/i);
+  assert.match(probe.description, /frameIndices/);
+  assert.match(probe.description, /contactSheetPath/);
+  assert.ok(createMotionTool);
+  assert.match(createMotionTool.description, /probe_video_frames/);
+  assert.match(createMotionTool.description, /videoId/);
 });
 
 test("approve_motion_review sends approval reasons and note to the approval route", async t => {
