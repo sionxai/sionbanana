@@ -240,7 +240,15 @@ export async function saveImageBuffer(
 export type ImageMetadata = {
   rawPrompt?: string;
   refinedPrompt?: string;
+  /** 라우팅(오케스트레이션) 모델. 이미지를 실제로 생성한 모델은 imageBackend.model 이다. */
   model?: string;
+  /** 서버가 실제로 사용한 이미지 백엔드. 최상위 `model`은 라우팅 모델이므로 이것과 다르다. */
+  imageBackend?: {
+    model?: string;
+    quality?: string;
+    size?: string;
+    observedAtIso: string;
+  };
   mode?: string;
   createdAtIso?: string;
   [key: string]: unknown;
