@@ -1059,3 +1059,24 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - **WO-021 상태:** 스펙 작성 완료(125줄), 위임 즉시 실패(429), 워크트리 `claude/sb-wo-021-atlas-export` **clean·미착수**. CEO 독립 검증기(`verify-atlas.mjs`, Phaser JSONHash 파서 규칙 재현) 준비됨. 스펙 요지는 아래.
 - **WO-021 스펙 요지(대장 보존용):** 단일·세트 내보내기에 `sprite-sheet.json`(TexturePacker JSON Hash) **항상 추가**, 플래그 없음. 프레임 키 = 인덱스 문자열, `rotated/trimmed=false`, `sourceSize/spriteSourceSize`=셀 크기, **`pivot`은 프레임 기준 0~1 정규화(소수 4자리)** — Phaser `JSONHash`가 `anchor||pivot`을 `customPivot`으로 읽고 `setOriginFromFrame`이 `originX/Y`(0~1)에 그대로 대입함을 소스로 확인. `meta`: app/version/image/format/size(실제 PNG)/scale/`frameTags`(연속 구간 애니만, loop·once→forward, pingpong→pingpong). 변경 파일 3개(`export.ts`·`set-export.ts`·`motion-export.test.mjs`), 게이트 뒤에서 생성, 기존 산출물 불변. 배경: TEF(Phaser 3)가 적군 에셋에 이미 이 포맷을 쓰고 K2만 격자 로더+보정 스크립트라, pivot 실은 atlas가 그 보정을 불필요하게 한다.
 - **재개 조건:** 2026-09-15 13:05 KST 이후 위임 재시도, 또는 대표 결정(크레딧 구매 / CEO 직접 구현 — 위임 프로토콜 예외 승인 필요).
+
+### SB WO-021 — TexturePacker JSON Hash atlas 내보내기 (Phaser/PixiJS 호환) + 정규화 pivot (2026-09-09)
+
+- 발단: 대표 질의 "TEF를 엔진으로 옮길까(Godot?)" 조사 중 확인 — TEF는 이미 Phaser 3(27,126줄·테스트 87파일, 코어 3계층 Phaser 참조 0)이고,
+  적군 에셋은 **TexturePacker JSON Hash**로 `load.atlas`, K2만 `load.spritesheet` + `rx/ry` 앵커 보정 스크립트였다. Godot 이전은 권하지 않았고,
+  대신 시온바나나에 **표준 atlas 내보내기**(TEF 전용 아님)를 추가하기로 대표 승인.
+- 설계 근거(Phaser 소스, 1차 자료): `textures/parsers/JSONHash.js`는 `anchor||pivot`을 `customPivot`으로 저장, `gameobjects/components/Origin.js`의
+  `setOriginFromFrame`은 `originX/Y`(0~1)에 그대로 대입 → **pivot은 프레임 기준 0~1 정규화**로 내보낸다. `meta`는 읽지 않으므로 `frameTags`는 부가 정보.
+- 위임 — 1차 시도는 ChatGPT 구독 한도 소진(429)으로 즉시 실패(사고 기록 참조). **대표가 한도를 리셋**한 뒤 최소 프로브(HTTP 200)로 확인하고 재위임, 왕복 1회.
+  Maker는 키체인 크래시로 검증 미실행·INCONCLUSIVE 정직 보고. 3파일만 변경. 검증은 CEO 실행.
+- CEO 검수 — 삭제된 어서션 4줄 추적: `unzipJson` 일반화, README 8→9줄(추가 문구 반영), **"깨끗한 세트" 테스트가 새 세트 atlas 테스트에 흡수되며
+  `requiresReview===false` 어서션이 2→3개로 증가** — 약화 아님. 빌더는 스펙과 동일(0 크기→0.5, 소수 4자리, 연속 구간 태그, PNG 실측 크기).
+- CEO 재실행 — 워크트리 293/293 · 병합본 **301/301** · tsc 0.
+- **CEO 독립 검증(Phaser JSONHash 파서 규칙 재현 검증기)** — ① 격리 auto 프로젝트 e2e: 전 항목 통과, TEF 적군 atlas의 프레임·meta 필드 ⊆ 우리 산출물(우리는 `pivot` 추가).
+  ② **실서버 K2 사격 프로젝트**(승인→내보내기→검증→승인 해제): 6프레임 · `meta.size` 2586×466 == PNG 실측 · pivot 0~1 · rect·pivot이 `animation.json`과 일치 ·
+  frameTag 0..5 forward · 번들에 `sprite-sheet.json` 포함 · 승인 해제 후 `reviewApproval: null` 복원.
+- 산출물 계약: 단일·세트 번들에 `sprite-sheet.json` **항상 포함**(플래그 없음). 키=인덱스 문자열, `rotated/trimmed=false`, `sourceSize/spriteSourceSize`=셀,
+  `pivot` 0~1, `meta{app,version,image,format,size,scale,frameTags}`. 반복·비순차 재생 순서는 태그 생략 — **`animation.json`이 재생 순서·fps·loop의 정본**.
+- 절차 — 상태 변경 체인을 `set -e`+파일 출력+종료 코드 직접 검사로 묶어 실행(WO-020 재발 방지). 병합 전 겹침 재확인(없음), 병합 후 unmerged 0 확인.
+- 커밋 `a33e8734`, 병합 `10eb2cf4`(로컬 전용). 상주 서버 반영. Codex 쿼터는 리셋 후 1회 사용.
+- **판정: PASS · 완료.** 한계: Phaser에서 실제 `load.atlas`로 재생하는 검증은 TEF 쪽 작업이라 하지 않았다(다른 저장소, 인계 없음). `frameTags`는 Aseprite 관례이며 Phaser `load.atlas`는 읽지 않는다(정보용).
