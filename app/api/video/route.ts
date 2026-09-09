@@ -8,7 +8,8 @@ import {
   generateGrokVideo,
   GrokVideoError,
   maxDurationForGrokVideoModel,
-  resolveDefaultGrokVideoModel
+  resolveDefaultGrokVideoModel,
+  supportsFrameReferences
 } from "@/lib/grok-video";
 import { readImageById, saveVideoBuffer, saveVideoMetadata } from "@/lib/local/storage";
 import { generateId } from "@/lib/utils";
@@ -17,17 +18,28 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024;
+const imageIdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9_\-]+$/);
 
 const requestSchema = z
   .object({
-    sourceImageId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_\-]+$/),
+    sourceImageId: imageIdSchema.optional(),
+    lastFrameImageId: imageIdSchema.optional(),
+    referenceImageIds: z.array(imageIdSchema).min(1).max(3).optional(),
     prompt: z.string().min(1, "프롬프트를 입력해주세요.").max(8000),
     duration: z.number().int().positive().max(30).optional(),
     resolution: z.string().min(1).max(32).optional(),
     aspectRatio: z.string().min(1).max(32).regex(/^[A-Za-z0-9:_\-]+$/).optional(),
     model: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.:\-]+$/).optional()
   })
-  .strict();
+  .strict()
+  .superRefine((payload, issueContext) => {
+    if (!payload.sourceImageId && !payload.referenceImageIds) {
+      issueContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceImageId 또는 referenceImageIds 중 하나는 필요합니다."
+      });
+    }
+  });
 
 type VideoPayload = z.infer<typeof requestSchema>;
 
@@ -55,6 +67,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         { status: 400 }
       );
     }
+    if ((payload.lastFrameImageId || payload.referenceImageIds) && !supportsFrameReferences(model)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: `${model} does not support last_frame or reference_images; use a grok-imagine-video-1.5 model.`
+        },
+        { status: 400 }
+      );
+    }
     const result = await executeVideoGeneration(request, payload, model);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
@@ -68,9 +89,19 @@ async function executeVideoGeneration(
   payload: VideoPayload,
   model: string
 ): Promise<Record<string, unknown>> {
-  const sourceImage = await readLocalImageAsDataUri(payload.sourceImageId);
+  const sourceImage = payload.sourceImageId
+    ? await readLocalImageAsDataUri(payload.sourceImageId)
+    : undefined;
+  const lastFrameImage = payload.lastFrameImageId
+    ? await readLocalImageAsDataUri(payload.lastFrameImageId)
+    : undefined;
+  const referenceImages = payload.referenceImageIds
+    ? await Promise.all(payload.referenceImageIds.map(id => readLocalImageAsDataUri(id)))
+    : undefined;
   const generated = await generateGrokVideo({
-    sourceImageDataUri: sourceImage.dataUri,
+    sourceImageDataUri: sourceImage?.dataUri,
+    lastFrameDataUri: lastFrameImage?.dataUri,
+    referenceImageDataUris: referenceImages?.map(image => image.dataUri),
     prompt: payload.prompt,
     duration: payload.duration,
     resolution: payload.resolution,
@@ -92,7 +123,9 @@ async function executeVideoGeneration(
   await saveVideoMetadata(
     id,
     {
-      sourceImageId: payload.sourceImageId,
+      ...(payload.sourceImageId ? { sourceImageId: payload.sourceImageId } : {}),
+      ...(payload.lastFrameImageId ? { lastFrameImageId: payload.lastFrameImageId } : {}),
+      ...(payload.referenceImageIds ? { referenceImageIds: payload.referenceImageIds } : {}),
       prompt: payload.prompt,
       model: responseModel,
       duration,
@@ -111,7 +144,9 @@ async function executeVideoGeneration(
     videoUrl: `/api/videos/${id}`,
     storagePath: saved.relativePath,
     requestId,
-    sourceImageId: payload.sourceImageId,
+    ...(payload.sourceImageId ? { sourceImageId: payload.sourceImageId } : {}),
+    ...(payload.lastFrameImageId ? { lastFrameImageId: payload.lastFrameImageId } : {}),
+    ...(payload.referenceImageIds ? { referenceImageIds: payload.referenceImageIds } : {}),
     model: responseModel,
     duration,
     resolution,
@@ -119,10 +154,14 @@ async function executeVideoGeneration(
     createdAtIso,
     contentType: generated.contentType,
     bytes: saved.bytes,
-    sourceImage: {
-      mimeType: sourceImage.mimeType,
-      bytes: sourceImage.bytes
-    },
+    ...(sourceImage
+      ? {
+          sourceImage: {
+            mimeType: sourceImage.mimeType,
+            bytes: sourceImage.bytes
+          }
+        }
+      : {}),
     usage: generated.usage ?? null
   };
 }

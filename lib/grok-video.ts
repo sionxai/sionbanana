@@ -25,6 +25,8 @@ export type GrokVideoProgressEvent =
 
 export interface GenerateGrokVideoOptions {
   sourceImageDataUri?: string;
+  lastFrameDataUri?: string;
+  referenceImageDataUris?: string[];
   prompt: string;
   duration?: number;
   resolution?: string;
@@ -81,9 +83,14 @@ export function resolveDefaultGrokVideoModel(env: NodeJS.ProcessEnv = process.en
 }
 
 export function maxDurationForGrokVideoModel(model: string): number {
-  return /(^|[^0-9])1\.5([^0-9]|$)/.test(model)
+  return isGrokVideo15Model(model)
     ? GROK_VIDEO_15_MAX_DURATION_SECONDS
     : GROK_VIDEO_MAX_DURATION_SECONDS;
+}
+
+/** last_frame·reference_images를 받는 모델인가. 1.5 계열만 지원한다(구형은 거부). */
+export function supportsFrameReferences(model: string): boolean {
+  return isGrokVideo15Model(model);
 }
 
 export async function generateGrokVideo(options: GenerateGrokVideoOptions): Promise<GenerateGrokVideoResult> {
@@ -100,6 +107,28 @@ export async function generateGrokVideo(options: GenerateGrokVideoOptions): Prom
       status: 400,
       code: "GROK_VIDEO_INVALID_SOURCE_IMAGE"
     });
+  }
+  if (options.lastFrameDataUri && !isImageDataUri(options.lastFrameDataUri)) {
+    throw new GrokVideoError("last frame은 image/* base64 data URI여야 합니다.", {
+      status: 400,
+      code: "GROK_VIDEO_INVALID_LAST_FRAME"
+    });
+  }
+  if (options.referenceImageDataUris && options.referenceImageDataUris.length > 3) {
+    throw new GrokVideoError("referenceImageDataUris는 최대 3장까지 지원합니다.", {
+      status: 400,
+      code: "GROK_VIDEO_TOO_MANY_REFERENCE_IMAGES"
+    });
+  }
+  if (options.referenceImageDataUris) {
+    for (const [index, referenceImageDataUri] of options.referenceImageDataUris.entries()) {
+      if (!isImageDataUri(referenceImageDataUri)) {
+        throw new GrokVideoError(`reference image ${index + 1}은 image/* base64 data URI여야 합니다.`, {
+          status: 400,
+          code: "GROK_VIDEO_INVALID_REFERENCE_IMAGE"
+        });
+      }
+    }
   }
 
   const model = options.model?.trim() || resolveDefaultGrokVideoModel();
@@ -119,6 +148,12 @@ export async function generateGrokVideo(options: GenerateGrokVideoOptions): Prom
   }
   if (options.sourceImageDataUri) {
     payload.image = { url: options.sourceImageDataUri };
+  }
+  if (options.lastFrameDataUri) {
+    payload.last_frame = { url: options.lastFrameDataUri };
+  }
+  if (options.referenceImageDataUris?.length) {
+    payload.reference_images = options.referenceImageDataUris.map(url => ({ url }));
   }
 
   const requestId = await submitVideoRequest(proxyUrl, payload, options.signal);
@@ -482,6 +517,10 @@ function isMp4Container(buffer: Buffer): boolean {
 
 function isImageDataUri(value: string): boolean {
   return /^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(value);
+}
+
+function isGrokVideo15Model(model: string): boolean {
+  return /(^|[^0-9])1\.5([^0-9]|$)/.test(model);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
