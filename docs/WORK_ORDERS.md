@@ -1049,3 +1049,13 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - 메인 폴더의 6월 미커밋 `agent-video.mjs` 변경(`/[A-Za-z0-9_\-]+/`→`/[A-Za-z0-9_-]+/`, 기능 동일)은 WO-020이 그 줄을 대체해 **자연 소멸**. 손 이식하지 않았다.
 - 커밋 `5f080d2a`, 병합 `f1f4b06d`(로컬 전용). 상주 서버 반영, 모델 가드 실서버 확인(구형 모델+`lastFrame` → 400 사유). 브리지 스킬 `create_video`·모델 기본값 줄 갱신.
 - **판정: PASS · 완료.** 한계: `reference_images` 최대 3은 문서 미명시라 가정. 병렬 2편 동시 생성은 문제 없었으나 xAI 동시성 한도는 미측정.
+
+### 사고 기록 — ChatGPT 구독 사용량 한도 소진, 생성 경로 전면 차단 (2026-09-09 ~ 2026-09-15 13:05 KST)
+
+- **증상:** `chatgpt.com/backend-api/codex/responses`가 **HTTP 429 `usage_limit_reached`**(plan `pro`, `resets_in_seconds: 486400`). 이미지 생성 경로와 도구 없는 텍스트 경로 **모두** 거부. Codex CLI도 동일 한도로 exit 1("try again at Sep 15th, 1:05 PM").
+- **영향:** 시온바나나의 ChatGPT 구독 경로 전부 — 이미지 생성·스토리보드/프롬프트 텍스트·마스크 편집·모션 시트·Codex 위임. **Grok 영상(xAI 프록시 18645)은 별도 쿼터라 정상**(당일 3편 생성 확인).
+- **원인(당일 소비):** Codex 위임 8회(WO-017 A/B/C·018 A/B/C·019·020, 각 6~10만 토큰) + 이미지 실생성 약 12장 + 엔드포인트 프로브 다수(중단 스트림 포함). **위임·생성·프로브가 한 풀을 쓴다**는 점을 예산에 반영하지 않았다.
+- **CEO 판단 오류:** 프로브를 "생성 완료 전 중단이라 비용 없음"으로 취급했으나 한도 산정에는 요청 자체가 잡힐 수 있다(미검증 추정). 하루 위임 8회는 이 플랜에서 지속 불가능한 속도였다.
+- **WO-021 상태:** 스펙 작성 완료(125줄), 위임 즉시 실패(429), 워크트리 `claude/sb-wo-021-atlas-export` **clean·미착수**. CEO 독립 검증기(`verify-atlas.mjs`, Phaser JSONHash 파서 규칙 재현) 준비됨. 스펙 요지는 아래.
+- **WO-021 스펙 요지(대장 보존용):** 단일·세트 내보내기에 `sprite-sheet.json`(TexturePacker JSON Hash) **항상 추가**, 플래그 없음. 프레임 키 = 인덱스 문자열, `rotated/trimmed=false`, `sourceSize/spriteSourceSize`=셀 크기, **`pivot`은 프레임 기준 0~1 정규화(소수 4자리)** — Phaser `JSONHash`가 `anchor||pivot`을 `customPivot`으로 읽고 `setOriginFromFrame`이 `originX/Y`(0~1)에 그대로 대입함을 소스로 확인. `meta`: app/version/image/format/size(실제 PNG)/scale/`frameTags`(연속 구간 애니만, loop·once→forward, pingpong→pingpong). 변경 파일 3개(`export.ts`·`set-export.ts`·`motion-export.test.mjs`), 게이트 뒤에서 생성, 기존 산출물 불변. 배경: TEF(Phaser 3)가 적군 에셋에 이미 이 포맷을 쓰고 K2만 격자 로더+보정 스크립트라, pivot 실은 atlas가 그 보정을 불필요하게 한다.
+- **재개 조건:** 2026-09-15 13:05 KST 이후 위임 재시도, 또는 대표 결정(크레딧 구매 / CEO 직접 구현 — 위임 프로토콜 예외 승인 필요).
