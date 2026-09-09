@@ -1099,3 +1099,5 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - 검증 — 설명을 단언하는 테스트 0건. 워크트리 293/293 → 병합본 **301/301**. MCP `tools/list` 실응답으로 설명 노출 확인(아래 기록 시점 이후 확인).
 - 커밋 `3637084b`, 병합 `20e1880f`(로컬 전용). 재빌드 불필요(MCP는 세션마다 새로 뜨는 별도 프로세스). **이미 떠 있는 세션의 MCP는 재시작 전까지 옛 설명을 본다.**
 - **판정: PASS · 완료.**
+- (추가 확인) 인메모리 클라이언트로 `tools/list` 실응답을 받아 검증: `export_motion`(717자)·`export_motion_set`(501자)·`approve_motion_review`(210자) 설명에
+  `sprite-sheet.json`·`pivot`·`animation.json`·`frameTags`·`outstandingIssues`·`blockingIssues` 모두 포함 — **파일 텍스트가 아니라 에이전트가 받는 응답 기준으로 확인.** 스크립트 `list-tools.mjs`.
