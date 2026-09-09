@@ -1101,3 +1101,15 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - **판정: PASS · 완료.**
 - (추가 확인) 인메모리 클라이언트로 `tools/list` 실응답을 받아 검증: `export_motion`(717자)·`export_motion_set`(501자)·`approve_motion_review`(210자) 설명에
   `sprite-sheet.json`·`pivot`·`animation.json`·`frameTags`·`outstandingIssues`·`blockingIssues` 모두 포함 — **파일 텍스트가 아니라 에이전트가 받는 응답 기준으로 확인.** 스크립트 `list-tools.mjs`.
+
+### SB WO-023 — 영상→모션 브리지: Grok 영상에서 스프라이트 모션 에셋 생성 (2026-09-10, 대표 승인)
+
+- **발단:** 대표 보고 "이미지 생성→모션 추출은 어색하고 영상 생성→모션 추출은 자연스러웠다". CEO 확인 — 2026-09-09 대표가 `create_video`(Grok 1.5, 참조 이미지)로 만든 한나라 유닛 영상 약 40편은 프롬프트(크로마 그린 #00FF00·카메라 고정·제자리 동작)가 실제로 지켜졌고, 저장소 함수(`applyMatte`→`analyzeFrame`→`normalizeFrames`→`packSheet`)를 프레임에 그대로 돌리면 8프레임 시트가 완성됨(드라이런, 생성 호출 0).
+  실측: 720p 121프레임 전수 잔여 픽셀 0(허용치 45), 달리기 주기 22프레임(0.92초) 자동 검출, 원샷은 인접 프레임 차이로 활동 구간 검출. 480p 축소 모의도 동일(잔여 0·주기 동일·캐릭터 높이 520px).
+- **결정(대표):** 480p 기본, 합성 시트로 기존 파이프라인 재사용(별도 프로젝트 타입 없음), 판단 지점 4곳(베이스 이미지 컨펌·영상 접촉 시트·프레임 선택·문제 프레임 수정)은 사람/에이전트, 나머지는 도구.
+- **A(브리지, Codex 위임 1회·왕복 0):** `lib/motion/video-frames.ts`(ffmpeg/ffprobe `execFile` 인자 배열, 시그니처 자기유사도 주기 검출·활동 구간 검출·N×1 합성·출처 계산·임시 디렉터리 정리), `types`(`sourceImage.video` 출처 스키마), `storage`(영상 합성 격자는 `layoutValidated: true`·`sliceConfidence: 1`, 재빌드에도 보존), `lib/local/storage.ts`(`resolveVideoPath`, 심볼릭 링크 거부), API `POST /api/motion/projects` `source.type:"video"`(grid 생략 가능) + `GET /api/video/[id]/frames` 프로브(접촉 시트 data URL) + `health.ffmpeg`, MCP `create_motion` video 소스·`probe_video_frames`·`get_motion` video 요약·설명 갱신. 새 npm 의존성 없음(시스템 ffmpeg 8.0.1).
+  Codex는 키체인 크래시(-50/139)로 검증 미실행 보고 → CEO 실행: 워크트리 **306/306**·tsc 통과, 병합본 **314/314**. diff 검수: 스펙 이탈 없음, 직접 수정 0줄. 커밋 `1e3b3bcb`, 병합 `23c25559`(로컬 전용), 재빌드·재기동 후 `health.ffmpeg {true,true}`.
+- **실물 검증(여전사 검 베기):** 베이스 이미지 `ctrax578714mtumg8u0`(gpt-image-2, 3:4) → 영상 `hxmxr3qclcmtumhiyf`(Grok 1.5, **480p 원생성**, 4:3, 5초, 참조 1장) → API 프로브 200(활동 구간 1~110, 제안 8프레임) → 생성 201(`layoutValidated: true`, 출처 기록, 캔버스 529×422) → 내보내기 200(검토 차단 없음, atlas 8프레임, pivot 정규화) → MCP 경로(`probe_video_frames`→`create_motion`→`get_motion`) 6초 완료. 임시 프레임 디렉터리 잔존 0.
+  생성 예산: 이미지 1회, 영상 1편(예산 각 2 이내). 영상 응답 `usage.cost_in_usd_ticks = 4,100,000,000`(5초 480p) — 1달러=100억 ticks 가정 시 약 $0.41(**환산 미확인**), 사이드카에는 usage 미저장.
+- **한계:** 원샷 파생 fps는 원본 템포(이번 2fps) — 게임용 재생 속도는 생성·내보내기 `fps`로 지정(검증은 8fps). 균등 샘플은 키포즈 선택이 아니며 조정은 `start`/`end`·프레임 수로. 초록 계열 의상은 기존 시트 경로와 같은 위험. 720p 단가 비교 미측정. `create_motion` 즉시 응답의 `layoutValidated: false`는 실행 중 잡의 기존 표기(프로젝트 생성 전)로 이번 변경과 무관.
+- **정본:** COMPANY.md "영상 생성 공급자 및 활성화 시점" 미결정·LATER-002 보류 상태에서 모션 품질 개선 목적으로 영상 경로를 추가 — 결정 로그 반영은 대표 결정 사항으로 남김.
