@@ -124,7 +124,7 @@ function OriginalVideoPreview({ video }: { video: VideoProvenance }) {
             controls
             muted
             playsInline
-            preload="metadata"
+            preload="auto"
             src={`/api/videos/${encodeURIComponent(video.videoId)}`}
             className="max-h-60 w-full rounded object-contain"
           />
