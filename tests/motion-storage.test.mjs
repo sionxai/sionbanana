@@ -119,6 +119,63 @@ async function fourCellGammaStrip() {
   return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
+async function eightCellSubjectSequenceSheet() {
+  const cellWidth = 100;
+  const width = cellWidth * 8;
+  const height = 72;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  const set = (x, y, color) => {
+    const offset = (y * width + x) * 4;
+    pixels[offset] = color[0];
+    pixels[offset + 1] = color[1];
+    pixels[offset + 2] = color[2];
+  };
+  for (let cell = 0; cell < 8; cell += 1) {
+    for (let y = 18; y < 56; y += 1) {
+      for (let x = 18; x < 40; x += 1) set(cell * cellWidth + x, y, [20, 80, 180]);
+    }
+    if (cell === 3) {
+      for (let y = 5; y < 37; y += 1) {
+        for (let x = 60; x < 94; x += 1) set(cell * cellWidth + x, y, [220, 100, 20]);
+      }
+      // Projection-only noise keeps auto slicing at eight cells while remaining disconnected.
+      for (let y = 3; y < 6; y += 1) {
+        for (let x = 40; x < 59; x += 1) set(cell * cellWidth + x, y, [220, 100, 20]);
+      }
+      set(cell * cellWidth + 59, 3, [220, 100, 20]);
+      set(cell * cellWidth + 59, 55, [220, 100, 20]);
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function twoCellSubjectAndEmptySheet() {
+  const width = 160;
+  const height = 64;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  for (let y = 14; y < 50; y += 1) {
+    for (let x = 50; x < 70; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = 20;
+      pixels[offset + 1] = 80;
+      pixels[offset + 2] = 180;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
 async function mirroredGammaSheet() {
   const width = 96;
   const height = 96;
@@ -216,6 +273,59 @@ test("video grid provenance and validated layout survive rebuilding while legacy
   assert.equal(legacy.layoutValidated, false);
   assert.equal(legacy.sourceImage.video, undefined);
   assert.equal((await rebuildProject(legacy.id, { matte: { ...gammaMatte(), tolerance: 20 } })).layoutValidated, false);
+});
+
+test("grid projects track the sequence subject while auto projects retain largest-component analysis", async t => {
+  await useTempDataDir(t);
+  const input = {
+    sheetBuffer: await eightCellSubjectSequenceSheet(),
+    grid: { cols: 8, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte(),
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  };
+  const gridProject = await createProject({ name: "Grid subject sequence", sliceMode: "grid", ...input });
+  const autoProject = await createProject({ name: "Auto largest component", sliceMode: "auto", ...input });
+  const rebuilt = await rebuildProject(gridProject.id, {
+    matte: { ...gridProject.matte, tolerance: 1 }
+  });
+
+  assert.equal(new Set(gridProject.frames.map(frame => `${frame.pivot.x},${frame.pivot.y}`)).size, 1);
+  assert.equal(gridProject.frames[3].trim.x, gridProject.frames[0].trim.x);
+  assert.ok(gridProject.frames[3].trim.w > gridProject.frames[0].trim.w);
+  assert.equal(autoProject.frames.length, 8);
+  assert.ok(autoProject.frames[3].trim.x < autoProject.frames[0].trim.x);
+  assert.equal(gridProject.normalizePivotX, "foot");
+  assert.equal(rebuilt.normalizePivotX, "foot");
+});
+
+test("grid preserve projects persist empty cells with canvas-relative trims", async t => {
+  await useTempDataDir(t);
+  const project = await createProject({
+    name: "Grid preserve empty cell",
+    sheetBuffer: await twoCellSubjectAndEmptySheet(),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte(),
+    normalizeScale: "none",
+    normalizePivotX: "preserve",
+    normalizePivotY: "pin"
+  });
+  const persisted = await readProject(project.id);
+  const rebuilt = await rebuildProject(project.id, {});
+
+  for (const current of [project, persisted, rebuilt]) {
+    const currentEmpty = current.frames[1];
+    assert.deepEqual(currentEmpty.trim, {
+      x: currentEmpty.pivot.x,
+      y: currentEmpty.pivot.y,
+      w: 0,
+      h: 0
+    });
+    assert.equal(currentEmpty.trim.x >= 0 && currentEmpty.trim.y >= 0, true);
+    assert.equal(Object.hasOwn(currentEmpty, "subject"), false);
+  }
 });
 
 test("video creation validates paired range and optional grid before resolving a stored video", async t => {

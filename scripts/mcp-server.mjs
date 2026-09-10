@@ -143,7 +143,7 @@ const motionAdvancedSchema = z
   .object({
     sliceMode: z.enum(["auto", "grid"]).optional(),
     normalizeScale: z.enum(["none", "height", "area"]).optional(),
-    normalizePivotX: z.enum(["foot", "centroid"]).optional(),
+    normalizePivotX: z.enum(["foot", "centroid", "preserve"]).optional(),
     normalizePivotY: z.enum(["pin", "preserve"]).optional(),
     matte: motionMatteSchema.optional(),
     autoFlipRows: z.boolean().optional(),
@@ -654,7 +654,7 @@ export function createSionBananaMcpServer(options = {}) {
     {
       title: "Create Motion",
       description:
-        "Starts motion-project generation in a detached worker and immediately returns a pollable job id. Presets: idle, walk, run, jump, attack, reload, hit, fall, stun, getup, custom; movement presets loop and one-shot presets play once by default. `source.type: 'video'` uses a `videoId` confirmed by get_video: loop detects a period and oneshot detects its activity segment; count defaults to 8 (2–24), and start/end select a manual segment together. Run probe_video_frames first. Video synthesis validates its own grid, so fixed-grid approval is not required and video grid input is ignored.",
+        "Starts motion-project generation in a detached worker and immediately returns a pollable job id. Presets: idle, walk, run, jump, attack, reload, hit, fall, stun, getup, custom; movement presets loop and one-shot presets play once by default. `source.type: 'video'` uses a `videoId` confirmed by get_video: loop detects a period and oneshot detects its activity segment; count defaults to 8 (2–24), and start/end select a manual segment together. Run probe_video_frames first. Video synthesis validates its own grid, so fixed-grid approval is not required and video grid input is ignored. `advanced.normalizePivotX: 'preserve'` keeps frame positions and uses one shared pivot (the fixed-camera video default); video defaults are preserve/preserve/none.",
       inputSchema: motionCreateInputSchema,
       annotations: {
         readOnlyHint: false,

@@ -16,6 +16,7 @@ type ImageInfo = {
 
 export type FrameAnalysis = {
   trim: FrameRect;
+  subject: FrameRect;
   pivot: Pivot;
   centroid: { x: number };
 };
@@ -28,7 +29,7 @@ export type NormalizeFrameInput = {
   sourceY?: number;
 };
 
-export type NormalizedFrame = FrameAnalysis & {
+export type NormalizedFrame = Omit<FrameAnalysis, "subject"> & {
   buf: Buffer;
   appliedScale: number;
 };
@@ -36,7 +37,7 @@ export type NormalizedFrame = FrameAnalysis & {
 export type NormalizeOptions = {
   margin?: number;
   normalizeScale?: "none" | "height" | "area";
-  normalizePivotX?: "foot" | "centroid";
+  normalizePivotX?: "foot" | "centroid" | "preserve";
   normalizePivotY?: "pin" | "preserve";
   rowSize?: number;
   scaleClamp?: number;
@@ -726,7 +727,31 @@ export async function applyMatte(frameBuf: Buffer, matte: MatteSpec): Promise<Bu
   return encodeRgba(image);
 }
 
-export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
+type AnalyzeFrameOptions = {
+  referenceBox?: FrameRect;
+};
+
+function frameRectIou(left: FrameRect, right: FrameRect): number {
+  const intersectionLeft = Math.max(left.x, right.x);
+  const intersectionTop = Math.max(left.y, right.y);
+  const intersectionRight = Math.min(left.x + left.w, right.x + right.w);
+  const intersectionBottom = Math.min(left.y + left.h, right.y + right.h);
+  const intersectionW = Math.max(0, intersectionRight - intersectionLeft);
+  const intersectionH = Math.max(0, intersectionBottom - intersectionTop);
+  const intersection = intersectionW * intersectionH;
+  if (intersection === 0) return 0;
+  return intersection / (left.w * left.h + right.w * right.h - intersection);
+}
+
+function lowerMedian(values: number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor((sorted.length - 1) / 2)];
+}
+
+export async function analyzeFrame(
+  rgbaBuf: Buffer,
+  opts: AnalyzeFrameOptions = {}
+): Promise<FrameAnalysis> {
   const image = await decodeRgba(rgbaBuf);
   const foreground = new Uint8Array(image.width * image.height);
   let minX = image.width;
@@ -748,6 +773,7 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
   if (maxX < 0) {
     return {
       trim: { x: 0, y: 0, w: 0, h: 0 },
+      subject: { x: 0, y: 0, w: 0, h: 0 },
       pivot: { x: 0, y: 0 },
       centroid: { x: 0 }
     };
@@ -756,8 +782,10 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
   const visited = new Uint8Array(foreground.length);
   const queue = new Int32Array(foreground.length);
   const minimumArea = Math.max(4, Math.ceil(image.width * image.height * MIN_COMPONENT_AREA_RATIO));
-  let largest: number[] = [];
-  let largestEligible: number[] = [];
+  type Component = { pixels: number[]; rect: FrameRect };
+  let largest: Component = { pixels: [], rect: { x: 0, y: 0, w: 0, h: 0 } };
+  let largestEligible: Component = { pixels: [], rect: { x: 0, y: 0, w: 0, h: 0 } };
+  const eligible: Component[] = [];
 
   for (let seed = 0; seed < foreground.length; seed += 1) {
     if (!foreground[seed] || visited[seed]) continue;
@@ -766,6 +794,10 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
     queue[0] = seed;
     visited[seed] = 1;
     const component: number[] = [];
+    let componentMinX = image.width;
+    let componentMinY = image.height;
+    let componentMaxX = -1;
+    let componentMaxY = -1;
 
     while (queueStart < queueEnd) {
       const index = queue[queueStart];
@@ -773,6 +805,10 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
       component.push(index);
       const x = index % image.width;
       const y = Math.floor(index / image.width);
+      componentMinX = Math.min(componentMinX, x);
+      componentMinY = Math.min(componentMinY, y);
+      componentMaxX = Math.max(componentMaxX, x);
+      componentMaxY = Math.max(componentMaxY, y);
 
       for (let dy = -1; dy <= 1; dy += 1) {
         for (let dx = -1; dx <= 1; dx += 1) {
@@ -789,29 +825,83 @@ export async function analyzeFrame(rgbaBuf: Buffer): Promise<FrameAnalysis> {
       }
     }
 
-    if (component.length > largest.length) largest = component;
-    if (component.length >= minimumArea && component.length > largestEligible.length) {
-      largestEligible = component;
+    const candidate = {
+      pixels: component,
+      rect: {
+        x: componentMinX,
+        y: componentMinY,
+        w: componentMaxX - componentMinX + 1,
+        h: componentMaxY - componentMinY + 1
+      }
+    };
+    if (candidate.pixels.length > largest.pixels.length) largest = candidate;
+    if (candidate.pixels.length >= minimumArea) {
+      eligible.push(candidate);
+    }
+    if (candidate.pixels.length >= minimumArea && candidate.pixels.length > largestEligible.pixels.length) {
+      largestEligible = candidate;
     }
   }
 
-  if (largestEligible.length > 0) largest = largestEligible;
+  let subject = largestEligible.pixels.length > 0 ? largestEligible : largest;
+  const referenceBox = opts.referenceBox;
+  if (referenceBox && referenceBox.w > 0 && referenceBox.h > 0 && eligible.length > 0) {
+    let bestIou = -1;
+    for (const candidate of eligible) {
+      const iou = frameRectIou(candidate.rect, referenceBox);
+      if (
+        iou > bestIou ||
+        (iou === bestIou && candidate.pixels.length > subject.pixels.length)
+      ) {
+        subject = candidate;
+        bestIou = iou;
+      }
+    }
+  }
 
   const centroidX = Math.round(
-    largest.reduce((sum, index) => sum + (index % image.width), 0) / largest.length
+    subject.pixels.reduce((sum, index) => sum + (index % image.width), 0) / subject.pixels.length
   );
-  const sortedY = largest.map(index => Math.floor(index / image.width)).sort((a, b) => a - b);
+  const sortedY = subject.pixels
+    .map(index => Math.floor(index / image.width))
+    .sort((a, b) => a - b);
   const baseline = sortedY[Math.floor((sortedY.length - 1) * BASELINE_QUANTILE)];
-  const baselinePixels = largest.filter(index => Math.floor(index / image.width) >= baseline);
+  const baselinePixels = subject.pixels.filter(index => Math.floor(index / image.width) >= baseline);
   const pivotX = Math.round(
     baselinePixels.reduce((sum, index) => sum + (index % image.width), 0) / baselinePixels.length
   );
 
   return {
     trim: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+    subject: subject.rect,
     pivot: { x: pivotX, y: baseline },
     centroid: { x: centroidX }
   };
+}
+
+function referenceBoxFrom(analyses: FrameAnalysis[]): FrameRect | null {
+  const subjects = analyses.filter(analysis => analysis.subject.w > 0 && analysis.subject.h > 0);
+  if (subjects.length < 2) return null;
+  return {
+    x: lowerMedian(subjects.map(subject => subject.subject.x)),
+    y: lowerMedian(subjects.map(subject => subject.subject.y)),
+    w: lowerMedian(subjects.map(subject => subject.subject.w)),
+    h: lowerMedian(subjects.map(subject => subject.subject.h))
+  };
+}
+
+export async function analyzeFrameSequence(buffers: Buffer[]): Promise<FrameAnalysis[]> {
+  let analyses = await Promise.all(buffers.map(buffer => analyzeFrame(buffer)));
+  if (buffers.length <= 2 || !referenceBoxFrom(analyses)) return analyses;
+
+  for (let iteration = 0; iteration < 2; iteration += 1) {
+    const referenceBox = referenceBoxFrom(analyses);
+    if (!referenceBox) break;
+    analyses = await Promise.all(
+      buffers.map(buffer => analyzeFrame(buffer, { referenceBox }))
+    );
+  }
+  return analyses;
 }
 
 export async function normalizeFrames(
@@ -827,9 +917,13 @@ export async function normalizeFrames(
   if (normalizeScale !== "none" && normalizeScale !== "height" && normalizeScale !== "area") {
     throw new RangeError('opts.normalizeScale must be "none", "height", or "area".');
   }
-  const normalizePivotX = opts.normalizePivotX ?? "foot";
-  if (normalizePivotX !== "foot" && normalizePivotX !== "centroid") {
-    throw new RangeError('opts.normalizePivotX must be "foot" or "centroid".');
+  const normalizePivotX = opts.normalizePivotX ?? "centroid";
+  if (
+    normalizePivotX !== "foot" &&
+    normalizePivotX !== "centroid" &&
+    normalizePivotX !== "preserve"
+  ) {
+    throw new RangeError('opts.normalizePivotX must be "foot", "centroid", or "preserve".');
   }
   const normalizePivotY = opts.normalizePivotY ?? "pin";
   if (normalizePivotY !== "pin" && normalizePivotY !== "preserve") {
@@ -913,6 +1007,13 @@ export async function normalizeFrames(
       : positiveMetrics.length % 2 === 0
         ? (positiveMetrics[middle - 1] + positiveMetrics[middle]) / 2
         : positiveMetrics[middle];
+  const preservePivotXs = analyzed
+    .filter(frame => frame.trim.w > 0 && frame.trim.h > 0)
+    .map(frame => frame.pivot.x);
+  const sharedAnchorX =
+    normalizePivotX === "preserve" && preservePivotXs.length > 0
+      ? lowerMedian(preservePivotXs)
+      : 0;
   const scaled = analyzed.map((frame, index) => {
     const metric = metrics[index];
     const requestedScale =
@@ -925,7 +1026,9 @@ export async function normalizeFrames(
     const height =
       frame.trim.h === 0 ? 0 : Math.max(1, Math.round(frame.trim.h * appliedScale));
     const anchorX =
-      normalizePivotX === "centroid" && frame.centroid
+      normalizePivotX === "preserve"
+        ? sharedAnchorX
+        : normalizePivotX === "centroid" && frame.centroid
         ? frame.centroid.x
         : frame.pivot.x;
     return {
@@ -968,7 +1071,10 @@ export async function normalizeFrames(
   const normalized = await Promise.all(
     scaled.map(async frame => {
       const trim = {
-        x: sharedPivot.x - frame.pivotOffset.x,
+        x:
+          normalizePivotX === "preserve" && (frame.trim.w === 0 || frame.trim.h === 0)
+            ? sharedPivot.x
+            : sharedPivot.x - frame.pivotOffset.x,
         y: sharedPivot.y - frame.pivotOffset.y - frame.liftScaled,
         w: frame.width,
         h: frame.height

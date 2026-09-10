@@ -180,6 +180,7 @@ test("create_motion sends advanced motion controls to the route request body", a
       grid: { cols: 4, rows: 2 },
       source: { type: "generate", prompt: "reload", action: "reload" },
       advanced: {
+        normalizePivotX: "preserve",
         autoFlipRows: true,
         autoExcludeRepeatedRows: true,
         fps: 8,
@@ -196,12 +197,14 @@ test("create_motion sends advanced motion controls to the route request body", a
     {
       autoFlipRows: job.request.autoFlipRows,
       autoExcludeRepeatedRows: job.request.autoExcludeRepeatedRows,
+      normalizePivotX: job.request.normalizePivotX,
       fps: job.request.fps,
       loop: job.request.loop
     },
     {
       autoFlipRows: true,
       autoExcludeRepeatedRows: true,
+      normalizePivotX: "preserve",
       fps: 8,
       loop: "once"
     }
@@ -712,6 +715,7 @@ test("tools/list exposes video frame probing and its create_motion guidance", as
   assert.ok(createMotionTool);
   assert.match(createMotionTool.description, /probe_video_frames/);
   assert.match(createMotionTool.description, /videoId/);
+  assert.match(createMotionTool.description, /preserve/);
 });
 
 test("approve_motion_review sends approval reasons and note to the approval route", async t => {

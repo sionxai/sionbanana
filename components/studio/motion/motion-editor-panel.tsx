@@ -648,9 +648,9 @@ export function MotionEditorPanel({
             type="single"
             value={project.normalizePivotX}
             disabled={disabled}
-            className="grid grid-cols-2 gap-2"
+            className="grid grid-cols-3 gap-2"
             onValueChange={value => {
-              if (value === "foot" || value === "centroid") {
+              if (value === "foot" || value === "centroid" || value === "preserve") {
                 void commitNormalizePivotX(value);
               }
             }}
@@ -661,7 +661,13 @@ export function MotionEditorPanel({
             <ToggleGroupItem value="centroid" disabled={disabled}>
               몸통 중심
             </ToggleGroupItem>
+            <ToggleGroupItem value="preserve" disabled={disabled}>
+              원본 위치 유지
+            </ToggleGroupItem>
           </ToggleGroup>
+          <p className="text-xs text-muted-foreground">
+            카메라 고정 영상용: 프레임을 옮기지 않고 pivot 하나를 공유합니다.
+          </p>
         </CardContent>
       </Card>
 

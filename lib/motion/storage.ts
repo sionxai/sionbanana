@@ -18,6 +18,7 @@ import {
 } from "@/lib/motion/fit-check";
 import {
   analyzeFrame,
+  analyzeFrameSequence,
   applyMatte,
   computeGrid,
   detectFrameRects,
@@ -377,12 +378,15 @@ async function buildArtifacts(input: {
       excludedFrames: [...autoExcluded]
     };
   }
-  const prepared = await Promise.all(
-    oriented.map(async (buffer, index) => {
-      const analysis = await analyzeFrame(buffer);
-      return { buf: buffer, ...analysis, sourceY: sourceRects[index].y };
-    })
-  );
+  const analyses =
+    input.sliceMode === "grid"
+      ? await analyzeFrameSequence(oriented)
+      : await Promise.all(oriented.map(buffer => analyzeFrame(buffer)));
+  const prepared = oriented.map((buffer, index) => ({
+    buf: buffer,
+    ...analyses[index],
+    sourceY: sourceRects[index].y
+  }));
   const normalized = await normalizeFrames(prepared, {
     normalizeScale: input.normalizeScale,
     normalizePivotX: input.normalizePivotX,
