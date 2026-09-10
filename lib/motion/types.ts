@@ -8,10 +8,12 @@ export const matteModeValues = ["none", "keyColor", "edgeFlood"] as const;
 export const animationLoopValues = ["loop", "pingpong", "once"] as const;
 export const sliceModeValues = ["auto", "grid"] as const;
 export const normalizeScaleValues = ["none", "height", "area"] as const;
-export const normalizePivotXValues = ["foot", "centroid"] as const;
+export const normalizePivotXValues = ["foot", "centroid", "preserve"] as const;
 export const normalizePivotYValues = ["pin", "preserve"] as const;
 export const candidateModeValues = ["mask", "strip", "upload"] as const;
 export const candidateStatusValues = ["pending", "running", "ready", "failed"] as const;
+export const ALIGNMENT_OUTLIER_RATIO = 0.15;
+export const ALIGNMENT_OUTLIER_MIN_PX = 24;
 
 const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
 
@@ -208,6 +210,17 @@ export const duplicateDetectionSchema = z
   })
   .strict();
 
+export const alignmentSchema = z
+  .object({
+    anchor: z.enum(normalizePivotXValues),
+    cellWidth: z.number().int().positive(),
+    medianAnchorX: z.number().int(),
+    deviations: z.array(z.number().int().nonnegative().nullable()),
+    threshold: z.number().int().positive(),
+    outliers: z.array(z.number().int().nonnegative())
+  })
+  .strict();
+
 export const motionProjectSchema = z
   .object({
     id: z.string().trim().min(1),
@@ -225,6 +238,7 @@ export const motionProjectSchema = z
     matte: matteSpecSchema,
     mirrorDetection: mirrorDetectionSchema.nullable().default(null),
     duplicateDetection: duplicateDetectionSchema.nullable().default(null),
+    alignment: alignmentSchema.nullable().default(null),
     reviewApproval: z
       .object({
         approvedAtIso: z.string().datetime(),
@@ -251,6 +265,7 @@ export type Candidate = z.infer<typeof candidateSchema>;
 export type Animation = z.infer<typeof animationSchema>;
 export type MirrorDetection = z.infer<typeof mirrorDetectionSchema>;
 export type DuplicateDetection = z.infer<typeof duplicateDetectionSchema>;
+export type Alignment = z.infer<typeof alignmentSchema>;
 export type MotionProject = z.infer<typeof motionProjectSchema>;
 export type SliceMode = z.infer<typeof motionProjectSchema>["sliceMode"];
 export type NormalizeScale = z.infer<typeof motionProjectSchema>["normalizeScale"];
@@ -301,6 +316,10 @@ export function parseMotionProject(input: unknown): MotionProject {
     project.duplicateDetection === undefined
       ? null
       : project.duplicateDetection;
+  const alignment =
+    !Object.prototype.hasOwnProperty.call(project, "alignment") || project.alignment === undefined
+      ? null
+      : project.alignment;
   return motionProjectSchema.parse({
     ...project,
     sliceMode,
@@ -310,7 +329,8 @@ export function parseMotionProject(input: unknown): MotionProject {
     normalizePivotX,
     normalizePivotY,
     mirrorDetection,
-    duplicateDetection
+    duplicateDetection,
+    alignment
   });
 }
 

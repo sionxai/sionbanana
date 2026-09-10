@@ -298,8 +298,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       const project = await createProject({
         name: payload.name, sheetBuffer: sheet, sliceMode: "grid",
         grid: gridSpecSchema.parse({ cols, rows: 1 }), matte,
-        normalizeScale: payload.normalizeScale ?? "area",
-        normalizePivotX: payload.normalizePivotX ?? "centroid",
+        normalizeScale: payload.normalizeScale ?? "none",
+        normalizePivotX: payload.normalizePivotX ?? "preserve",
         normalizePivotY: payload.normalizePivotY ?? "preserve",
         autoFlipRows: false, autoExcludeRepeatedRows: false,
         defaultAnimation: { fps: payload.fps ?? provenance.derivedFps, loop: payload.loop ?? (source.mode === "loop" ? "loop" : "once") },

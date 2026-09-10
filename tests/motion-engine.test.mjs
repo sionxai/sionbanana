@@ -10,6 +10,7 @@ import sharp from "sharp";
 
 import {
   analyzeFrame,
+  analyzeFrameSequence,
   applyMatte,
   computeGrid,
   detectFrameRects,
@@ -559,6 +560,70 @@ test("analyzeFrame bases pivot on the main silhouette instead of corner noise", 
   assert.ok(analysis.pivot.y >= 26 && analysis.pivot.y <= 27);
 });
 
+test("analyzeFrame uses a reference subject without trimming disconnected effects", async () => {
+  const input = await rgbaPng(80, 64, (_data, set) => {
+    for (let y = 18; y < 48; y += 1) {
+      for (let x = 12; x < 30; x += 1) set(x, y, 20, 80, 180);
+    }
+    for (let y = 4; y < 32; y += 1) {
+      for (let x = 45; x < 75; x += 1) set(x, y, 220, 100, 20);
+    }
+  });
+
+  const withoutReference = await analyzeFrame(input);
+  const withReference = await analyzeFrame(input, {
+    referenceBox: { x: 12, y: 18, w: 18, h: 30 }
+  });
+
+  assert.deepEqual(withoutReference.subject, { x: 45, y: 4, w: 30, h: 28 });
+  assert.equal(withoutReference.pivot.x, 60);
+  assert.equal(withoutReference.centroid.x, 60);
+  assert.deepEqual(withReference.subject, { x: 12, y: 18, w: 18, h: 30 });
+  assert.deepEqual(withoutReference.trim, withReference.trim);
+  assert.deepEqual(withReference.trim, { x: 12, y: 4, w: 63, h: 44 });
+  assert.equal(withReference.pivot.x, 21);
+});
+
+test("analyzeFrameSequence keeps a shared subject through larger disconnected effects", async () => {
+  const frames = await Promise.all(
+    Array.from({ length: 8 }, (_, index) =>
+      rgbaPng(100, 72, (_data, set) => {
+        for (let y = 18; y < 56; y += 1) {
+          for (let x = 18; x < 40; x += 1) set(x, y, 20, 80, 180);
+        }
+        if (index === 2 || index === 6) {
+          for (let y = 5; y < 37; y += 1) {
+            for (let x = 60; x < 94; x += 1) set(x, y, 220, 100, 20);
+          }
+        }
+      })
+    )
+  );
+  const sequence = await analyzeFrameSequence(frames);
+  const cleanFrames = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      rgbaPng(100, 72, (_data, set) => {
+        for (let y = 18; y < 56; y += 1) {
+          for (let x = 18; x < 40; x += 1) set(x, y, 20, 80, 180);
+        }
+      })
+    )
+  );
+  const cleanSequence = await analyzeFrameSequence(cleanFrames);
+  const cleanSingles = await Promise.all(cleanFrames.map(frame => analyzeFrame(frame)));
+
+  assert.ok(
+    Math.max(...sequence.map(analysis => analysis.pivot.x)) -
+      Math.min(...sequence.map(analysis => analysis.pivot.x)) <=
+      2
+  );
+  assert.deepEqual(
+    sequence.map(analysis => analysis.subject),
+    Array.from({ length: 8 }, () => ({ x: 18, y: 18, w: 22, h: 38 }))
+  );
+  assert.deepEqual(cleanSequence, cleanSingles);
+});
+
 test("applyMatte edgeFlood removes connected white background but preserves enclosed white", async () => {
   const input = await rgbaPng(12, 12, (data, set) => {
     for (let y = 0; y < 12; y += 1) {
@@ -868,7 +933,10 @@ test('normalizeFrames "none" preserves legacy geometry and pixels', async () => 
   );
   const expectedCanvas = { w: maxRight - minLeft + 4, h: maxBottom - minTop + 4 };
   const expectedPivot = { x: 2 - minLeft, y: 2 - minTop };
-  const normalized = await normalizeFrames(inputs, { normalizeScale: "none" });
+  const normalized = await normalizeFrames(inputs, {
+    normalizeScale: "none",
+    normalizePivotX: "foot"
+  });
 
   assert.deepEqual(normalized.canvas, expectedCanvas);
   for (let index = 0; index < normalized.frames.length; index += 1) {
@@ -993,6 +1061,49 @@ test('normalizeFrames "preserve" expands the canvas so lifted frames are not cli
   }
 });
 
+test('normalizeFrames "preserve" keeps horizontal cell offsets and shares one pivot', async () => {
+  const inputs = await Promise.all(
+    [0, 20, 40].map(offset =>
+      rgbaPng(100, 64, (_data, set) => {
+        for (let y = 14; y < 50; y += 1) {
+          for (let x = 20 + offset; x < 40 + offset; x += 1) set(x, y, 20, 80, 180);
+        }
+      })
+    )
+  );
+  const [preserved, footAligned] = await Promise.all([
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotX: "preserve" }),
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotX: "foot" })
+  ]);
+  const preservedX = preserved.frames.map(frame => frame.trim.x);
+
+  assert.deepEqual(
+    preservedX.map(x => x - preservedX[0]),
+    [0, 20, 40]
+  );
+  assert.equal(new Set(preserved.frames.map(frame => `${frame.pivot.x},${frame.pivot.y}`)).size, 1);
+  assert.equal(new Set(footAligned.frames.map(frame => frame.trim.x)).size, 1);
+  assert.equal(new Set(footAligned.frames.map(frame => `${frame.pivot.x},${frame.pivot.y}`)).size, 1);
+});
+
+test('normalizeFrames "preserve" keeps empty-frame trim coordinates in the canvas', async () => {
+  const subject = await rgbaPng(100, 64, (_data, set) => {
+    for (let y = 14; y < 50; y += 1) {
+      for (let x = 50; x < 70; x += 1) set(x, y, 20, 80, 180);
+    }
+  });
+  const empty = await rgbaPng(100, 64, () => {});
+  const normalized = await normalizeFrames([subject, empty], {
+    normalizeScale: "none",
+    normalizePivotX: "preserve"
+  });
+
+  assert.equal(normalized.frames[1].trim.w, 0);
+  assert.equal(normalized.frames[1].trim.h, 0);
+  assert.equal(normalized.frames[1].trim.x, normalized.frames[1].pivot.x);
+  assert.ok(normalized.frames[1].trim.x >= 0);
+});
+
 test("analyzeFrame returns a centroid x distinct from the foot pivot for an asymmetric frame", async () => {
   const input = await rgbaPng(64, 40, (_data, set) => {
     for (let y = 5; y <= 24; y += 1) {
@@ -1064,4 +1175,28 @@ test('normalizeFrames "centroid" aligns body centers better than foot pivots', a
     centroidDeviation < footDeviation,
     `centroid deviation ${centroidDeviation} must be smaller than foot deviation ${footDeviation}`
   );
+});
+
+test("normalizeFrames defaults horizontal alignment to centroid", async () => {
+  const makeFrame = async side =>
+    rgbaPng(64, 40, (_data, set) => {
+      for (let y = 5; y <= 24; y += 1) {
+        for (let x = 20; x <= 39; x += 1) set(x, y, 200, 30, 30);
+      }
+      for (let y = 25; y <= 34; y += 1) {
+        const distance = y - 24;
+        set(side === "left" ? 20 - distance : 39 + distance, y, 30, 90, 180);
+      }
+      const footStart = side === "left" ? 5 : 44;
+      for (let x = footStart; x <= footStart + 10; x += 1) set(x, 35, 30, 90, 180);
+    });
+  const inputs = await Promise.all([makeFrame("left"), makeFrame("right")]);
+  const analyses = await Promise.all(inputs.map(input => analyzeFrame(input)));
+  const [defaults, centroid] = await Promise.all([
+    normalizeFrames(inputs, { normalizeScale: "none" }),
+    normalizeFrames(inputs, { normalizeScale: "none", normalizePivotX: "centroid" })
+  ]);
+
+  assert.notEqual(analyses[0].pivot.x, analyses[0].centroid.x);
+  assert.deepEqual(defaults, centroid);
 });

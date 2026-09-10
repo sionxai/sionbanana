@@ -18,6 +18,7 @@ import {
 } from "@/lib/motion/fit-check";
 import {
   analyzeFrame,
+  analyzeFrameSequence,
   applyMatte,
   computeGrid,
   detectFrameRects,
@@ -29,6 +30,8 @@ import {
   type FrameAnalysis
 } from "@/lib/motion/engine";
 import {
+  ALIGNMENT_OUTLIER_MIN_PX,
+  ALIGNMENT_OUTLIER_RATIO,
   animationSchema,
   frameSchema,
   gridSpecSchema,
@@ -264,6 +267,48 @@ function resolveAnimations(
   ];
 }
 
+function lowerMedian(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor((sorted.length - 1) / 2)]!;
+}
+
+function buildGridAlignment(
+  sourceRects: Frame["source"][],
+  prepared: Array<FrameAnalysis & { buf: Buffer; sourceY: number }>,
+  frames: Frame[],
+  anchor: NormalizePivotX
+): MotionProject["alignment"] {
+  const cellWidth = sourceRects[0]?.w;
+  if (!cellWidth || cellWidth < 1) {
+    throw new Error("Grid alignment requires a positive cell width.");
+  }
+  const anchors = prepared.map((frame, index) => {
+    if (frames[index]?.excluded || frame.subject.w === 0 || frame.subject.h === 0) return null;
+    return anchor === "centroid" ? frame.centroid.x : frame.pivot.x;
+  });
+  const validAnchors = anchors.filter((value): value is number => value !== null);
+  const medianAnchorX = validAnchors.length > 0 ? lowerMedian(validAnchors) : 0;
+  const deviations = anchors.map(anchorX =>
+    anchorX === null ? null : Math.abs(anchorX - medianAnchorX)
+  );
+  const threshold = Math.max(
+    Math.round(cellWidth * ALIGNMENT_OUTLIER_RATIO),
+    ALIGNMENT_OUTLIER_MIN_PX
+  );
+  const outliers =
+    validAnchors.length < 2
+      ? []
+      : deviations.flatMap((deviation, index) => (deviation !== null && deviation > threshold ? [index] : []));
+  return {
+    anchor,
+    cellWidth,
+    medianAnchorX,
+    deviations,
+    threshold,
+    outliers
+  };
+}
+
 async function buildArtifacts(input: {
   id: string;
   name: string;
@@ -377,12 +422,15 @@ async function buildArtifacts(input: {
       excludedFrames: [...autoExcluded]
     };
   }
-  const prepared = await Promise.all(
-    oriented.map(async (buffer, index) => {
-      const analysis = await analyzeFrame(buffer);
-      return { buf: buffer, ...analysis, sourceY: sourceRects[index].y };
-    })
-  );
+  const analyses =
+    input.sliceMode === "grid"
+      ? await analyzeFrameSequence(oriented)
+      : await Promise.all(oriented.map(buffer => analyzeFrame(buffer)));
+  const prepared = oriented.map((buffer, index) => ({
+    buf: buffer,
+    ...analyses[index],
+    sourceY: sourceRects[index].y
+  }));
   const normalized = await normalizeFrames(prepared, {
     normalizeScale: input.normalizeScale,
     normalizePivotX: input.normalizePivotX,
@@ -416,6 +464,10 @@ async function buildArtifacts(input: {
     input.name,
     input.defaultAnimation
   );
+  const alignment =
+    input.sliceMode === "grid"
+      ? buildGridAlignment(sourceRects, prepared, frames, input.normalizePivotX)
+      : null;
   const project = parseMotionProject({
     id: input.id,
     name: input.name,
@@ -435,6 +487,7 @@ async function buildArtifacts(input: {
     matte,
     mirrorDetection,
     duplicateDetection,
+    alignment,
     reviewApproval: input.reviewApproval,
     frames,
     animations

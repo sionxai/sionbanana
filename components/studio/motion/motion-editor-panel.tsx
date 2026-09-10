@@ -29,6 +29,7 @@ type MotionEditorPanelProps = {
 };
 
 type EditorProjectPatch = Parameters<MotionEditorPanelProps["updateProject"]>[0];
+type VideoProvenance = NonNullable<MotionProject["sourceImage"]["video"]>;
 
 const SLIDER_KEYS = new Set([
   "ArrowLeft",
@@ -52,6 +53,7 @@ function reviewReasonLabel(reason: string): string {
   if (reason === "intentional-empty") return "의도한 빈 프레임으로 적용됨";
   if (reason === "boundary-touch") return "내용이 셀 경계에 닿음(손실 없음)";
   if (reason === "content-loss-allowed") return "내용이 잘린 채 적용됨 — 내보낼 수 없습니다";
+  if (reason === "alignment-outlier") return "프레임 정렬 이탈 — 피사체 위치가 다른 프레임과 크게 다름";
   if (reason === "layout-validation-unknown") return "배치 검증 기록이 없음";
   if (reason === "layout-not-validated") return "고정 격자 — 배치 미검증";
   return reason;
@@ -60,6 +62,93 @@ function reviewReasonLabel(reason: string): string {
 function reviewIssueLabel(issue: string): string {
   const frameIssue = /^frame-(\d+)-(.+)$/.exec(issue);
   return frameIssue ? `${frameIssue[1]}번 프레임 — ${reviewReasonLabel(frameIssue[2])}` : reviewReasonLabel(issue);
+}
+
+function OriginalVideoPreview({ video }: { video: VideoProvenance }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mountedRef = useRef(true);
+  const selectedFrameIndex = video.frameIndices.reduce((closestIndex, frameIndex) =>
+    Math.abs(frameIndex / video.sourceFps - currentTime) <
+    Math.abs(closestIndex / video.sourceFps - currentTime)
+      ? frameIndex
+      : closestIndex
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!isExpanded || !videoElement) return;
+
+    const handleTimeUpdate = () => {
+      if (mountedRef.current) setCurrentTime(videoElement.currentTime);
+    };
+
+    handleTimeUpdate();
+    videoElement.addEventListener("timeupdate", handleTimeUpdate);
+    return () => videoElement.removeEventListener("timeupdate", handleTimeUpdate);
+  }, [isExpanded]);
+
+  const seekToFrame = (frameIndex: number) => {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
+    const nextTime = frameIndex / video.sourceFps;
+    videoElement.currentTime = nextTime;
+    videoElement.pause();
+    if (mountedRef.current) setCurrentTime(nextTime);
+  };
+
+  return (
+    <div className="w-full space-y-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded(expanded => !expanded)}
+      >
+        원본 영상
+      </Button>
+      {isExpanded ? (
+        <div className="space-y-3">
+          <video
+            ref={videoRef}
+            key={video.videoId}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            src={`/api/videos/${encodeURIComponent(video.videoId)}`}
+            className="max-h-60 w-full rounded object-contain"
+          />
+          <p className="text-xs text-muted-foreground">
+            원본 {video.sourceFps}fps · 구간 {video.segment.start}~{video.segment.end} · 선택 프레임 {video.frameIndices.length}장
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {video.frameIndices.map(frameIndex => (
+              <Button
+                key={frameIndex}
+                type="button"
+                variant={frameIndex === selectedFrameIndex ? "secondary" : "outline"}
+                size="sm"
+                aria-pressed={frameIndex === selectedFrameIndex}
+                onClick={() => seekToFrame(frameIndex)}
+              >
+                #{frameIndex} ({(frameIndex / video.sourceFps).toFixed(2)}s)
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function MotionEditorPanel({
@@ -648,9 +737,9 @@ export function MotionEditorPanel({
             type="single"
             value={project.normalizePivotX}
             disabled={disabled}
-            className="grid grid-cols-2 gap-2"
+            className="grid grid-cols-3 gap-2"
             onValueChange={value => {
-              if (value === "foot" || value === "centroid") {
+              if (value === "foot" || value === "centroid" || value === "preserve") {
                 void commitNormalizePivotX(value);
               }
             }}
@@ -661,7 +750,13 @@ export function MotionEditorPanel({
             <ToggleGroupItem value="centroid" disabled={disabled}>
               몸통 중심
             </ToggleGroupItem>
+            <ToggleGroupItem value="preserve" disabled={disabled}>
+              원본 위치 유지
+            </ToggleGroupItem>
           </ToggleGroup>
+          <p className="text-xs text-muted-foreground">
+            카메라 고정 영상용: 프레임을 옮기지 않고 pivot 하나를 공유합니다.
+          </p>
         </CardContent>
       </Card>
 
@@ -725,6 +820,10 @@ export function MotionEditorPanel({
                 <span className="w-full text-xs text-muted-foreground">
                   영상 {project.sourceImage.video.videoId.slice(0, 8)} · 원본 {project.sourceImage.video.sourceFps}fps · 재생 {project.sourceImage.video.derivedFps}fps · {project.sourceImage.video.mode === "loop" ? "루프" : "원샷"} · 구간 {project.sourceImage.video.segment.start}~{project.sourceImage.video.segment.end}
                 </span>
+                <OriginalVideoPreview
+                  key={`${project.id}:${project.sourceImage.video.videoId}`}
+                  video={project.sourceImage.video}
+                />
               </>
             ) : project.layoutValidated === true ? (
               <>
