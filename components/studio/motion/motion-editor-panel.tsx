@@ -29,6 +29,7 @@ type MotionEditorPanelProps = {
 };
 
 type EditorProjectPatch = Parameters<MotionEditorPanelProps["updateProject"]>[0];
+type VideoProvenance = NonNullable<MotionProject["sourceImage"]["video"]>;
 
 const SLIDER_KEYS = new Set([
   "ArrowLeft",
@@ -61,6 +62,93 @@ function reviewReasonLabel(reason: string): string {
 function reviewIssueLabel(issue: string): string {
   const frameIssue = /^frame-(\d+)-(.+)$/.exec(issue);
   return frameIssue ? `${frameIssue[1]}번 프레임 — ${reviewReasonLabel(frameIssue[2])}` : reviewReasonLabel(issue);
+}
+
+function OriginalVideoPreview({ video }: { video: VideoProvenance }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mountedRef = useRef(true);
+  const selectedFrameIndex = video.frameIndices.reduce((closestIndex, frameIndex) =>
+    Math.abs(frameIndex / video.sourceFps - currentTime) <
+    Math.abs(closestIndex / video.sourceFps - currentTime)
+      ? frameIndex
+      : closestIndex
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!isExpanded || !videoElement) return;
+
+    const handleTimeUpdate = () => {
+      if (mountedRef.current) setCurrentTime(videoElement.currentTime);
+    };
+
+    handleTimeUpdate();
+    videoElement.addEventListener("timeupdate", handleTimeUpdate);
+    return () => videoElement.removeEventListener("timeupdate", handleTimeUpdate);
+  }, [isExpanded]);
+
+  const seekToFrame = (frameIndex: number) => {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
+    const nextTime = frameIndex / video.sourceFps;
+    videoElement.currentTime = nextTime;
+    videoElement.pause();
+    if (mountedRef.current) setCurrentTime(nextTime);
+  };
+
+  return (
+    <div className="w-full space-y-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded(expanded => !expanded)}
+      >
+        원본 영상
+      </Button>
+      {isExpanded ? (
+        <div className="space-y-3">
+          <video
+            ref={videoRef}
+            key={video.videoId}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            src={`/api/videos/${encodeURIComponent(video.videoId)}`}
+            className="max-h-60 w-full rounded object-contain"
+          />
+          <p className="text-xs text-muted-foreground">
+            원본 {video.sourceFps}fps · 구간 {video.segment.start}~{video.segment.end} · 선택 프레임 {video.frameIndices.length}장
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {video.frameIndices.map(frameIndex => (
+              <Button
+                key={frameIndex}
+                type="button"
+                variant={frameIndex === selectedFrameIndex ? "secondary" : "outline"}
+                size="sm"
+                aria-pressed={frameIndex === selectedFrameIndex}
+                onClick={() => seekToFrame(frameIndex)}
+              >
+                #{frameIndex} ({(frameIndex / video.sourceFps).toFixed(2)}s)
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function MotionEditorPanel({
@@ -732,6 +820,10 @@ export function MotionEditorPanel({
                 <span className="w-full text-xs text-muted-foreground">
                   영상 {project.sourceImage.video.videoId.slice(0, 8)} · 원본 {project.sourceImage.video.sourceFps}fps · 재생 {project.sourceImage.video.derivedFps}fps · {project.sourceImage.video.mode === "loop" ? "루프" : "원샷"} · 구간 {project.sourceImage.video.segment.start}~{project.sourceImage.video.segment.end}
                 </span>
+                <OriginalVideoPreview
+                  key={`${project.id}:${project.sourceImage.video.videoId}`}
+                  video={project.sourceImage.video}
+                />
               </>
             ) : project.layoutValidated === true ? (
               <>

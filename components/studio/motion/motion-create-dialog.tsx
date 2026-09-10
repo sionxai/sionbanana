@@ -672,6 +672,17 @@ export function MotionCreateDialog({ open, onClose, onCreated }: MotionCreateDia
                         </option>
                       ))}
                     </select>
+                    {selectedVideoId ? (
+                      <video
+                        key={selectedVideoId}
+                        controls
+                        muted
+                        playsInline
+                        preload="metadata"
+                        src={`/api/videos/${encodeURIComponent(selectedVideoId)}`}
+                        className="max-h-60 w-full rounded object-contain"
+                      />
+                    ) : null}
                   </div>
 
                   <div className="space-y-2">
