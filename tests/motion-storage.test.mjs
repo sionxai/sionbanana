@@ -155,6 +155,55 @@ async function eightCellSubjectSequenceSheet() {
   return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
+async function eightCellAlignmentSheet(shiftedCell = null, shift = 0) {
+  const cellWidth = 100;
+  const width = cellWidth * 8;
+  const height = 72;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  for (let cell = 0; cell < 8; cell += 1) {
+    const left = 20 + (cell === shiftedCell ? shift : 0);
+    for (let y = 16; y < 56; y += 1) {
+      for (let x = left; x < left + 20; x += 1) {
+        const offset = (y * width + cell * cellWidth + x) * 4;
+        pixels[offset] = 20;
+        pixels[offset + 1] = 80;
+        pixels[offset + 2] = 180;
+      }
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function alignmentSheet(anchors, cellWidth = 100) {
+  const width = cellWidth * anchors.length;
+  const height = 72;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    pixels[offset] = 255;
+    pixels[offset + 1] = 0;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  for (const [cell, anchor] of anchors.entries()) {
+    if (anchor === null) continue;
+    for (let y = 16; y < 56; y += 1) {
+      for (let x = anchor - 10; x < anchor + 10; x += 1) {
+        const offset = (y * width + cell * cellWidth + x) * 4;
+        pixels[offset] = 20;
+        pixels[offset + 1] = 80;
+        pixels[offset + 2] = 180;
+      }
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
 async function twoCellSubjectAndEmptySheet() {
   const width = 160;
   const height = 64;
@@ -300,6 +349,125 @@ test("grid projects track the sequence subject while auto projects retain larges
   assert.equal(rebuilt.normalizePivotX, "foot");
 });
 
+test("grid alignment records shifted subjects, excludes non-target frames, and remains absent for auto slices", async t => {
+  await useTempDataDir(t);
+  const input = {
+    grid: { cols: 8, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte: gammaMatte(),
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  };
+  const shifted = await createProject({
+    name: "Shifted grid alignment",
+    sheetBuffer: await eightCellAlignmentSheet(3, 40),
+    sliceMode: "grid",
+    ...input
+  });
+  assert.deepEqual(shifted.alignment, {
+    anchor: "foot",
+    cellWidth: 100,
+    medianAnchorX: 30,
+    deviations: [0, 0, 0, 40, 0, 0, 0, 0],
+    threshold: 24,
+    outliers: [3]
+  });
+
+  const normal = await createProject({
+    name: "Normal grid alignment",
+    sheetBuffer: await eightCellAlignmentSheet(),
+    sliceMode: "grid",
+    ...input
+  });
+  assert.deepEqual(normal.alignment?.deviations, [0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(normal.alignment?.outliers, []);
+
+  const excluded = await rebuildProject(shifted.id, {
+    frames: shifted.frames.map(frame => ({ ...frame, excluded: frame.index === 3 }))
+  });
+  assert.deepEqual(excluded.alignment?.deviations, [0, 0, 0, null, 0, 0, 0, 0]);
+  assert.deepEqual(excluded.alignment?.outliers, []);
+
+  const noValidAnchors = await rebuildProject(excluded.id, {
+    frames: excluded.frames.map(frame => ({ ...frame, excluded: true }))
+  });
+  assert.equal(noValidAnchors.alignment?.medianAnchorX, 0);
+  assert.deepEqual(noValidAnchors.alignment?.deviations, [null, null, null, null, null, null, null, null]);
+  assert.deepEqual(noValidAnchors.alignment?.outliers, []);
+
+  const auto = await createProject({
+    name: "Auto alignment is unavailable",
+    sheetBuffer: await eightCellSubjectSequenceSheet(),
+    sliceMode: "auto",
+    ...input
+  });
+  assert.equal(auto.alignment, null);
+});
+
+test("grid alignment uses the ratio threshold, a lower median, and null deviations for empty cells", async t => {
+  await useTempDataDir(t);
+  const matte = gammaMatte();
+  const ratioGrid = { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" };
+  const equalBoundary = await createProject({
+    name: "Alignment equality boundary",
+    sheetBuffer: await alignmentSheet([30, 60], 200),
+    sliceMode: "grid",
+    grid: ratioGrid,
+    matte,
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  });
+  assert.deepEqual(equalBoundary.alignment, {
+    anchor: "foot",
+    cellWidth: 200,
+    medianAnchorX: 30,
+    deviations: [0, 30],
+    threshold: 30,
+    outliers: []
+  });
+
+  const pastBoundary = await createProject({
+    name: "Alignment past boundary",
+    sheetBuffer: await alignmentSheet([30, 61], 200),
+    sliceMode: "grid",
+    grid: ratioGrid,
+    matte,
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  });
+  assert.deepEqual(pastBoundary.alignment?.deviations, [0, 31]);
+  assert.deepEqual(pastBoundary.alignment?.outliers, [1]);
+
+  const lowerMedian = await createProject({
+    name: "Alignment lower median",
+    sheetBuffer: await alignmentSheet([20, 40, 60, 80]),
+    sliceMode: "grid",
+    grid: { cols: 4, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte,
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  });
+  assert.equal(lowerMedian.alignment?.medianAnchorX, 40);
+  assert.deepEqual(lowerMedian.alignment?.deviations, [20, 0, 20, 40]);
+
+  const empty = await createProject({
+    name: "Empty alignment cells",
+    sheetBuffer: await alignmentSheet([null, null]),
+    sliceMode: "grid",
+    grid: { cols: 2, rows: 1, gutter: 0, remainderPolicy: "distribute" },
+    matte,
+    normalizeScale: "none",
+    normalizePivotX: "foot",
+    normalizePivotY: "pin"
+  });
+  assert.equal(empty.alignment?.medianAnchorX, 0);
+  assert.deepEqual(empty.alignment?.deviations, [null, null]);
+  assert.deepEqual(empty.alignment?.outliers, []);
+});
+
 test("grid preserve projects persist empty cells with canvas-relative trims", async t => {
   await useTempDataDir(t);
   const project = await createProject({
@@ -325,6 +493,9 @@ test("grid preserve projects persist empty cells with canvas-relative trims", as
     });
     assert.equal(currentEmpty.trim.x >= 0 && currentEmpty.trim.y >= 0, true);
     assert.equal(Object.hasOwn(currentEmpty, "subject"), false);
+    assert.equal(current.alignment?.anchor, "preserve");
+    assert.deepEqual(current.alignment?.deviations, [0, null]);
+    assert.deepEqual(current.alignment?.outliers, []);
   }
 });
 
@@ -439,6 +610,8 @@ test("projects record whether their layout was validated and retain unknown lega
     animations: []
   };
   assert.equal(parseMotionProject(legacyProject).layoutValidated, null);
+  assert.equal(parseMotionProject(legacyProject).alignment, null);
+  assert.equal(parseMotionProject({ ...legacyProject, alignment: undefined }).alignment, null);
   assert.equal(parseMotionProject({ ...legacyProject, sliceMode: "auto" }).layoutValidated, null);
   assert.equal(
     parseMotionProject({ ...legacyProject, sliceMode: "grid", layoutValidated: true }).layoutValidated,

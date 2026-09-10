@@ -52,6 +52,7 @@ function reviewReasonLabel(reason: string): string {
   if (reason === "intentional-empty") return "의도한 빈 프레임으로 적용됨";
   if (reason === "boundary-touch") return "내용이 셀 경계에 닿음(손실 없음)";
   if (reason === "content-loss-allowed") return "내용이 잘린 채 적용됨 — 내보낼 수 없습니다";
+  if (reason === "alignment-outlier") return "프레임 정렬 이탈 — 피사체 위치가 다른 프레임과 크게 다름";
   if (reason === "layout-validation-unknown") return "배치 검증 기록이 없음";
   if (reason === "layout-not-validated") return "고정 격자 — 배치 미검증";
   return reason;

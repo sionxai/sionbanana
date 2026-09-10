@@ -431,7 +431,7 @@ const MOTION_CANDIDATE_REVERT_TOOL_DESCRIPTION =
 const MOTION_REVIEW_APPROVAL_TOOL_DESCRIPTION =
   "미리보기로 확인한 뒤 검수 사유를 명시적으로 승인한다. `reasons`에는 export 409 응답의 `review.outstandingIssues` 배열을 그대로 넘긴다(현재 미결 사유를 모두 포함해야 하며, 일부만 넘기면 409 CONFLICT로 실제 목록을 돌려준다). 내용 손실이 기록된 프레임(`review.blockingIssues`)은 승인으로 해제할 수 없다.";
 const MOTION_EXPORT_REVIEW_GATE_DESCRIPTION =
-  " 검수 승인이 필요한 항목이 남아 있으면 409(EXPORT_BLOCKED)로 거부한다. 응답 `review.outstandingIssues` 배열을 그대로 approve_motion_review의 `reasons`로 넘겨 승인한 뒤 다시 시도한다. `review.blockingIssues`(content-loss-allowed)는 승인으로 풀 수 없다 — 해당 프레임을 revert_motion_frames로 되돌리고 후보를 다시 만든다.";
+  " 검수 승인이 필요한 항목이 남아 있으면 409(EXPORT_BLOCKED)로 거부한다. 응답 `review.outstandingIssues` 배열을 그대로 approve_motion_review의 `reasons`로 넘겨 승인한 뒤 다시 시도한다. `review.blockingIssues`(content-loss-allowed)는 승인으로 풀 수 없다 — 해당 프레임을 revert_motion_frames로 되돌리고 후보를 다시 만든다. `alignment-outlier`는 프레임 간 앵커 편차가 셀 폭 15%(최소 24px)를 넘는 프레임 — 미리보기로 확인 후 승인하거나 `advanced.normalizePivotX:'preserve'`·구간 조정으로 다시 만든다.";
 
 const TOOL_NAMES = [
   "health_check",

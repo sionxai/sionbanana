@@ -10,6 +10,7 @@ import sharp from "sharp";
 
 import {
   buildExportBundle,
+  buildMotionExportReview,
   buildTexturePackerAtlas,
   MotionExportBlockedError,
   sanitizeExportFilename
@@ -612,6 +613,56 @@ test("motion export fit review issues use the included frame index", async t => 
   assert.ok(exported.meta.review.issues.includes("layout-not-validated"));
   assert.ok(exported.meta.review.issues.includes("frame-1-content-loss"));
   assert.equal(exported.meta.review.issues.includes("frame-2-content-loss"), false);
+});
+
+test("alignment outliers use compact export numbers, remain approvable, and honor review offsets", async t => {
+  const project = await createFixture(t, "Alignment review export");
+  const reviewProject = {
+    ...project,
+    sliceMode: "grid",
+    layoutValidated: true,
+    sliceConfidence: 1,
+    reviewApproval: null,
+    frames: project.frames.map((frame, index) => ({ ...frame, excluded: index === 0 })),
+    alignment: {
+      anchor: "foot",
+      cellWidth: 3,
+      medianAnchorX: 1,
+      deviations: [null, 0, 40],
+      threshold: 24,
+      outliers: [2]
+    }
+  };
+  await persistProject(reviewProject);
+  const included = reviewProject.frames.filter(frame => !frame.excluded);
+  const initialReview = buildMotionExportReview(reviewProject, included);
+  assert.deepEqual(initialReview.approvableIssues, ["frame-2-alignment-outlier"]);
+  assert.deepEqual(initialReview.outstandingIssues, ["frame-2-alignment-outlier"]);
+  assert.deepEqual(
+    buildMotionExportReview(reviewProject, included, 4).outstandingIssues,
+    ["frame-6-alignment-outlier"]
+  );
+
+  await assert.rejects(
+    buildExportBundle(reviewProject, { includeGif: false }),
+    error =>
+      error instanceof MotionExportBlockedError &&
+      error.status === 409 &&
+      error.review.blockingIssues.length === 0 &&
+      error.review.issues.includes("frame-2-alignment-outlier") &&
+      error.review.outstandingIssues.includes("frame-2-alignment-outlier")
+  );
+
+  const approved = await setReviewApproval(project.id, {
+    reasons: ["frame-2-alignment-outlier"],
+    note: "alignment previewed"
+  });
+  const approvedReview = buildMotionExportReview(
+    approved,
+    approved.frames.filter(frame => !frame.excluded)
+  );
+  assert.deepEqual(approvedReview.outstandingIssues, []);
+  assert.deepEqual(approved.reviewApproval?.approvedReasons, ["frame-2-alignment-outlier"]);
 });
 
 test("candidate review reasons survive application, require approval, and are exported with approval metadata", async t => {

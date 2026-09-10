@@ -200,6 +200,9 @@ export function buildMotionExportReview(
     issueSet.add("low-slice-confidence");
   }
   for (const [index, frame] of frames.entries()) {
+    if (project.alignment?.outliers.includes(frame.index)) {
+      issueSet.add(`frame-${frameIndexOffset + index + 1}-alignment-outlier`);
+    }
     for (const reason of frame.override?.fit?.reasons ?? []) {
       issueSet.add(`frame-${frameIndexOffset + index + 1}-${reason}`);
     }
