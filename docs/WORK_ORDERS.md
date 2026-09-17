@@ -1146,3 +1146,15 @@ SB WO-019가 요청값과 실제 적용값을 나란히 기록하므로, 다시 
 - **WO-025 결과:** 커밋 `c1db70e8`, 보정 `84119d04`, 병합 `8cb64dbf`·`33f0d743`. Codex 1회·왕복 0. 브라우저 실검증: 편집 화면 "원본 영상" 펼침 → `/api/videos/<id>` 로드(5.04초) → 칩 #13~#58 표시 → "#39" 클릭 시 1.625초로 이동·일시정지·칩 강조. 영상 탭 인라인 플레이어 로드 확인.
   - **발견·보정:** `/api/videos/[id]`가 Range 미지원이라 `preload="metadata"`에서는 브라우저가 탐색 불가로 보고 시각 이동을 무시(실측: seekable [0,0]). 로컬 소용량이라 `preload="auto"` 2줄 보정으로 해결(첫 로드부터 seekable 0~5.04). **후속 권장:** 라우트 Range(206) 지원 — 대용량·원격 시 필요.
   - **판정: PASS · 완료.**
+
+### 정리 기록 — 코드 통합 기준 `main` 복원 (2026-09-17, 대표 승인 · DEC-011)
+
+- **이유:** `feature/webtoon-studio`는 2026-06-02 웹툰 스튜디오용으로 생겼으나 2026-08-16 DEC-008부터 엔진 전체의 통합 기준으로 쓰였다. `main`은 2026-08-06 `9751b62a`에서 멈춘 조상(갈라진 커밋 0)이라 "웹툰 가지가 왜 트렁크냐"는 혼동이 생겼다. 지시서 `docs/tasks/TASK_trunk_main_restore.md`(makemov 세션 조사, 대표 승인).
+- **사전 발견·분리(대표 결정 "분리만 잘해서"):** 정본에 2026-09-09부터 미커밋인 09-01 분석 갱신 12줄(+`analytics-status.json`)이 있었다(같은 갱신의 현황판은 기커밋). 결정 기록과 섞이지 않게 **먼저 따로 커밋** `79484eaa`.
+- **0단계** DEC-011 기록 + 지시서 커밋 `fe214841`. **1단계** `git fetch origin` — 원격 `main`(`bfe49df8`, 06-01)은 로컬 `main`의 조상, 앞선 커밋 0 → 멈춤 조건 아님. 원격 `feature/webtoon-studio`=`5af8de94`(07-22).
+- **2단계** `git fetch . feature/webtoon-studio:main` — `9751b62a` → `fe214841`(빨리감기, `-f` 미사용). 작업본 파일 변화 0.
+- **3단계** 표기 갱신 커밋 `829ae54d`: COMPANY 헤더·버전 로그(`0.1.3+trunk.1`)·`AGENTS.md`·`CLAUDE.md`·대장 상단 규칙(새 WO base = `main`)·현황판 저장소 스냅샷. 지시서 목록 밖이던 현황판 한 줄은 같은 "현재값" 표기라 포함. 이력 문장(DEC-008, WO 기록)은 보존 — grep 결과 남은 표기는 모두 "그전은·이전·당시" 문맥.
+- **4단계 보류:** 추적 수정 3개(`scripts/agent-generate.mjs`·`scripts/storyboard.mjs`·`tests/storyboard.test.mjs`, 다른 세션 소유)가 남아 작업본은 `feature/webtoon-studio`에 둔다. **전환 전까지 커밋할 때마다 `git fetch . feature/webtoon-studio:main`으로 `main`을 따라 올린다.**
+- **6단계:** 병합 완료 가지 `claude/sb-wo-023-video-motion`(was `8bf3fd50`)·`claude/sb-wo-024-alignment`(was `84119d04`) `git branch -d`. `feature/webtoon-studio`는 유지(2026-10-01 이후 의존 없으면 삭제를 별도 결정).
+- **검증:** `main`=`feature/webtoon-studio` 동일, 상호 조상 참, 작업본 23→20줄(차이는 승인된 분석 2파일·지시서 1파일 커밋뿐, 나머지 다른 세션 파일 불변), 헬스 `authenticated: true`(서버·빌드 무관 — 같은 커밋), 워크트리 3개 경로·브랜치·해시 불변. 워크트리 비교 1차 스크립트는 경로 공백으로 오판해 재비교.
+- **미결(대표 승인 필요):** 7단계 원격 `git push origin main`(force 아님, 원격 main이 16+커밋 뒤처짐), 원격 `feature/webtoon-studio` 처리, 4단계 작업본 전환(소유 세션의 3파일 정리 후).
