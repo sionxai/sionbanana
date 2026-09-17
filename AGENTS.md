@@ -17,7 +17,7 @@
 
 ## 현재 정본·작업 경계 (2026-08-16)
 - `docs/COMPANY.md`는 활성 정본 `0.1.3`, `docs/WORK_ORDERS.md`의 `SB WO-003`은 독립 Checker PASS와 CEO `CANONICAL_CONFIRMED` 판정으로 완료 상태입니다.
-- 승인된 후보는 `bfea5938`, canonical 승인 기록 기준은 `715cde98`, 코드 통합 기준은 `feature/webtoon-studio`의 `f90b8751`입니다. 2026-08-17 병합 브랜치 2개만 비강제 삭제했고 worktree 3개와 연결 branch는 보존했습니다. 추가 삭제와 외부 push·deploy는 별도 승인 전까지 금지합니다.
+- 승인된 후보는 `bfea5938`, canonical 승인 기록 기준은 `715cde98`, 코드 통합 기준은 `main`입니다(2026-09-17 DEC-011 복원, 그전은 `feature/webtoon-studio`의 `f90b8751`). 2026-08-17 병합 브랜치 2개만 비강제 삭제했고 worktree 3개와 연결 branch는 보존했습니다. 추가 삭제와 외부 push·deploy는 별도 승인 전까지 금지합니다.
 - Webtoon Studio 관련 untracked 16파일은 사용자 WIP입니다. 명시된 작업지시 없이 stage·정리·이동하거나 clean checkout 구현으로 설명하지 않습니다.
 - T-01 미션 확장은 `UNAPPROVED — implement 금지`입니다. 대표 승인 전에는 광범위 제품 확장을 작업 범위로 추론하지 않습니다.
 - 현재 코드 기본 모델은 텍스트·이미지 모두 `gpt-5.5`이고 이미지 모드는 `image_generation` 도구를 사용합니다. 저장은 파일시스템과 일부 `localStorage`의 혼합 상태이며 SQLite는 아직 후속 작업입니다.

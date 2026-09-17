@@ -4,6 +4,7 @@
 > - 지시·보고·대화에서 지시는 **`SB WO-###`**로 부른다 (타 프로젝트 대장과 혼동 방지).
 > - 상태 흐름: `초안 → 발행 → 진행 → 검수 → 완료/반려`. 상태 변경은 즉시 이 문서에 반영한다.
 > - 작업 세션은 자기 브랜치 커밋까지만 수행한다. 병합·push·배포는 CEO가 검수 후 수행한다.
+> - 2026-09-17부터 코드 통합 기준은 `main`이다(COMPANY.md DEC-011). 새 WO 워크트리는 `main`을 base로 만든다: `git worktree add .claude/worktrees/<이름> -b claude/<이름> main`. 이전 WO 기록 속 `feature/webtoon-studio`는 당시 사실이므로 고쳐 쓰지 않는다.
 > - 현황판 `docs/dashboard.html`은 이 대장과 COMPANY.md를 요약하는 뷰어 전용 문서다 (COMPANY.md §7-9).
 
 ## 대표자 할 일

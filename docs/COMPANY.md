@@ -4,7 +4,7 @@
 > - 현재 버전: **0.1.3**
 > - 승인 기준: **0.1.3**
 > - 승인일: **2026-08-16**
-> - 기준 코드 통합 상태: `feature/webtoon-studio` / `f90b87513f566c532e6335f86ab514fcf88ca6a6`
+> - 기준 코드 통합 상태: `main` / `fe214841a42ee648d4d49d67cf176722d6453bea` (2026-09-17 DEC-011 복원. 이전: `feature/webtoon-studio` / `f90b87513f566c532e6335f86ab514fcf88ca6a6`)
 > - 검수 대상: `bfea5938984ebbe3d6c6a1b6d40303d0e4c387fe` / 독립 Checker `PASS`
 > - 저장소 판정: **CANONICAL_CONFIRMED** (2026-08-17 R3 cleanup 검수·실행 기록)
 
@@ -230,6 +230,7 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 | 0.1.3 | 2026-08-16 | 후보 `bfea5938` 독립 Checker PASS와 CEO 재검증을 반영해 활성 정본으로 승격. NOW-002 완료, 저장소 판정 `READY_FOR_CLEANUP`. | SB WO-003 검수 로그, DEC-009 |
 | 0.1.3+cleanup.1 | 2026-08-17 | exact local cleanup으로 병합 브랜치 2개만 비강제 삭제하고 worktree 3개·WIP 41경로·ignored 자산을 보존. 최종 판정 `CANONICAL_CONFIRMED`. | R3 cleanup Checker PASS, DEC-010 |
 | 0.1.3+analytics.2 | 2026-09-01 | 외부 유입 provider missing/last-good를 보존하고 09-01 로컬 원장·기간 비교·CEO 조치를 갱신. | `docs/analytics-status.json`, `docs/dashboard.html` |
+| 0.1.3+trunk.1 | 2026-09-17 | DEC-011: 코드 통합 기준을 `main`으로 복원(빨리감기, 코드 변경 없음). 헤더 통합 상태·`AGENTS.md`·`CLAUDE.md`·대장 규칙·현황판 저장소 스냅샷을 `main`으로 갱신하고, 날짜·해시가 붙은 이력 문장(DEC-008 본문, WO 기록)은 보존했다. | `docs/tasks/TASK_trunk_main_restore.md` |
 
 ## 11. 관련 문서
 
