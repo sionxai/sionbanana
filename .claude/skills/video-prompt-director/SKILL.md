@@ -146,7 +146,7 @@ remix 깊이는 **2회까지**. 더 쌓였으면 가장 깨끗한 원본(첫 생
 
 #### 모드 선택 기준
 
-- **②를 쓴다**: 피사체가 제자리에서 표정·자세·환경이 A에서 B로 가는 컷 / 컷 경계를 매치컷으로 붙이는 컷 / **고정 카메라 원테이크의 크기·구도를 잠글 때(시작=끝 같은 이미지)**. ~~카메라 무빙이 서사인 컷~~ — 실측 실패(아래).
+- **②를 쓴다**: 피사체가 제자리에서 표정·자세·환경이 A에서 B로 가는 컷 / 컷 경계를 매치컷으로 붙이는 컷 / **고정 카메라 원테이크의 크기·구도를 잠글 때(시작=끝 같은 이미지)**. 카메라 무빙이 서사인 컷은 ②로 풀리지 않는다(② 실측 규칙).
 - **①을 쓴다**: 끝 상태를 고정하면 오히려 뻣뻣해지는 컷 — 군중 반응, 자연스러운 표정 흔들림, 입자·불길·물결 같은 무작위 모션.
 - **③을 더한다**: 캐릭터가 프레임 안에서 크게 움직여 정체성이 흔들릴 위험이 있는 컷. 이미지 단계의 8슬롯과 **별개**로 영상 단계에서 한 번 더 잡는다.
 
@@ -199,6 +199,7 @@ Audio: a distant muffled closing announcement and a faint ghostly disembodied vo
 | ~~"마지막을 첫 프레임과 같게" 루프 문구~~ | 전 버전 루프 이음 실패. **① 프롬프트로는 안 된다.** 대신 **② 끝 프레임에 첫 키이미지를 주면 닫힌다**(첫↔끝 2.5/255, 2026-09-14 — §영상 변환 3모드) |
 | ~~"카메라 고정·화각 유지"로 피사체 크기를 잡으려는 것~~ | 배경 이탈은 원래 1.84~2.16으로 멀쩡했다. **카메라는 처음부터 고정이었고 피사체만 커진다 — 축이 다르다** (철칙 2로 해결한다) |
 | ~~"그루터기 기준 상대 크기 고정" 같은 상대 크기 문단~~ | 축1이 당시 12표본 최악값을 넘었다. 1표본이라 인과 단정은 못 하나 **개선 증거 0** |
+| ~~컷마다 `afade` 페이드 + 단일 패스 `loudnorm` + 배속 컷 `atempo`로 조립~~ | 이음매 16곳 중 15곳이 −20dB 아래로 꺼지고, 게인 펌핑·96kHz 출력·웃음 뭉개짐(`iru-dream-3` V5, 2026-09-14). **컷별 정적 게인 + 등전력 크로스페이드 + 리미터**로 대체 — §편집 조립 |
 
 > 회차별 원시 실측치·실험 대장은 작품 저장소에 남긴다 —
 > `/Users/nohshinhee/Documents/2. coding/makemov/works/<작품>/02-콘티/영상프롬프트가이드.md`.
@@ -258,7 +259,7 @@ MiniMax H3 768P는 폴백으로 쓸 수 있으나 **표정·동작이 약하다(
   node scripts/agent-video.mjs --source-id <키프레임 image-id> --prompt "<5블록>" \
     [--duration N] [--resolution 720p] [--aspect 16:9] --model grok-imagine-video-1.5 [--port 3002]
   ```
-  > **⚠ `--model`을 생략하면 구버전이 쓰인다.** 엔진 기본값은 `grok-imagine-video`다(`lib/grok-video.ts:6 DEFAULT_GROK_VIDEO_MODEL`). **최신은 `grok-imagine-video-1.5`이므로 매번 명시한다.** (2026-09-03 대표 지적으로 발견. 기본값 자체를 올리는 건 엔진 변경이라 미착수.)
-  **MCP 경로(다른 세션 포함, SB WO-004)**: `mcp__sionbanana__create_video`(`source:{type:"imageId", imageId}` + prompt + duration/resolution/aspectRatio/**model** → jobId 즉시 반환) → `mcp__sionbanana__get_video`(폴링, ready 시 검증된 절대 videoPath). CLI와 동일 계약 — **`model`도 optional이라 생략하면 똑같이 구버전이 쓰인다**(`scripts/mcp-server.mjs:423`).
+  > **`--model`은 명시한다.** 엔진 기본값은 2026-09-09(SB WO-020)부터 `grok-imagine-video-1.5`다(`lib/grok-video.ts:6 FALLBACK_GROK_VIDEO_MODEL`, env `SIONBANANA_GROK_VIDEO_MODEL`로 변경 가능). 구버전 `grok-imagine-video`는 16~30초가 필요할 때만 일부러 지정한다(1.5는 15초 상한). (2026-09-03에는 기본값이 구버전이라 대표 지적이 있었고, 이후 엔진에서 올렸다.)
+  **MCP 경로(다른 세션 포함, SB WO-004)**: `mcp__sionbanana__create_video`(`source:{type:"imageId", imageId}` + prompt + duration/resolution/aspectRatio/**model** → jobId 즉시 반환) → `mcp__sionbanana__get_video`(폴링, ready 시 검증된 절대 videoPath). CLI와 동일 계약 — **`model`도 optional이며 생략하면 같은 엔진 기본값(1.5)이 쓰인다**(`scripts/mcp-server.mjs`).
   (`--source-id` = 키프레임의 `/api/images/<id>` id — storyboard summary의 `jobs[].ids`에서 가져온다.) API 직접 호출은 `/api/video`(`{sourceImageId, prompt, duration, resolution, aspectRatio}`). 결과 영상은 `data/videos/`에 저장되고 앱 생성기록에 자동 병합된다. Grok은 단일 prompt 안에서 `Shot Switch`로 멀티샷을 낸다.
 - **모드 B (외부)**: Seedance/Kling/Veo 등은 출력 샷리스트를 사용자가 해당 툴에 직접 투입.
