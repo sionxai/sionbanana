@@ -111,6 +111,17 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 - 핵심 제작 흐름과 무관한 시각적 화려함
 - 공개 배포가 승인되지 않은 단계의 가입자·트래픽 수
 
+### 5.4 최신 분석 증거 (2026-09-01 KST)
+
+- 공개 배포는 `not_deployed`, 웹 분석은 `not_instrumented`다. GA4·Search Console·문의·
+  예약·구매 원천은 missing이며 2026-08-15 외부 last-good 시각을 보존한다.
+- 2026-09-01 09:13:31 KST 로컬 원장 exact 집계는 images 5,982, videos 209,
+  agent runs 3,385, motion projects 27, webtoon projects 1이다. 단위가 달라 합산하지 않는다.
+- 최근 7일은 직전 7일 대비 images +772, agent runs +546, videos -78이다. PPT 관련
+  agent-run category가 상위지만 원인·고객 수요·매출로 해석하지 않는다.
+- 이번 주 조치는 핵심 KPI 제작 표본 수집, PPT 사용 급증의 작업 목적 분류, 영상 사용
+  감소가 공급자·품질·수요 중 무엇인지 재현 가능한 작업 기록으로 구분하는 것이다.
+
 ## 6. 로드맵
 
 상태는 `대기`, `착수`, `검수`, `완료`, `보류`만 사용한다. 코드나 파일이 존재하는
@@ -217,6 +228,7 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 | 0.1.3-candidate | 2026-08-16 | SB WO-003 보존·통합 사실, 실제 인증·모델·저장 상태, Webtoon WIP 경계를 반영하고 NOW-002를 `canonical 후보 검수`로 이동. 완료·승격 판정은 Checker와 CEO 대기. | 코드 통합 기준 `f90b8751`, SB WO-003 SourceRefs |
 | 0.1.3 | 2026-08-16 | 후보 `bfea5938` 독립 Checker PASS와 CEO 재검증을 반영해 활성 정본으로 승격. NOW-002 완료, 저장소 판정 `READY_FOR_CLEANUP`. | SB WO-003 검수 로그, DEC-009 |
 | 0.1.3+cleanup.1 | 2026-08-17 | exact local cleanup으로 병합 브랜치 2개만 비강제 삭제하고 worktree 3개·WIP 41경로·ignored 자산을 보존. 최종 판정 `CANONICAL_CONFIRMED`. | R3 cleanup Checker PASS, DEC-010 |
+| 0.1.3+analytics.2 | 2026-09-01 | 외부 유입 provider missing/last-good를 보존하고 09-01 로컬 원장·기간 비교·CEO 조치를 갱신. | `docs/analytics-status.json`, `docs/dashboard.html` |
 
 ## 11. 관련 문서
 
