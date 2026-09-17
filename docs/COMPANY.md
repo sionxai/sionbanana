@@ -184,6 +184,7 @@ Sion Banana는 단일 이미지를 많이 만드는 도구가 아니다. 시나�
 | DEC-008 | 2026-08-16 | `feature/webtoon-studio`에 CEO 문서·local main skill 이력·Arduino PPT 자산을 삭제 없이 보존한 canonical 후보를 두고 독립 Checker 판정 전에는 완료·정본 승격을 선언하지 않는다. | `SB WO-003`, 보존 커밋 `661bc1c5`·`55eabb0c`·`f90b8751` | 완료 |
 | DEC-009 | 2026-08-16 | 후보 `bfea5938`을 v0.1.3 활성 정본으로 승인하고 저장소를 `READY_FOR_CLEANUP`으로 판정한다. 정리·삭제·push·deploy는 별도 T-02 승인 전까지 계속 금지한다. | 독립 Checker PASS, CEO AIDE 원계약·제외 WIP 집계 재검증 | 유지 |
 | DEC-010 | 2026-08-17 | R3 Checker가 승인한 완전 병합·미사용 브랜치 `claude/key-visual-work-721540`, `claude/skill-hope-lessons`만 `git branch -d`로 삭제하고, ignored 파일 또는 고유 커밋이 있는 worktree 3개와 연결 branch는 보존한다. 저장소 판정은 `CANONICAL_CONFIRMED`다. | R3 Checker DoD 5/5 PASS, 실행 후 branch/worktree/status 재대조 | 유지 |
+| DEC-011 | 2026-09-17 | 코드 통합 기준을 `main`으로 복원한다. `feature/webtoon-studio`는 2026-09-17 `6494d96c`까지의 통합 기준이었고, 복원 후에는 `main`과 같은 커밋을 가리키는 별칭으로 유지한다. 삭제는 별도 결정으로 올린다. DEC-008의 통합 브랜치 지정은 이 결정으로 대체된다. | `docs/tasks/TASK_trunk_main_restore.md`, 대표 승인(2026-09-17) | 유지 |
 
 결정을 바꾸려면 변경 이유, 기대 KPI 영향, 되돌림 조건을 이 표에 새 행으로 기록한다.
 기존 행을 지워 과거 결정을 숨기지 않는다.
