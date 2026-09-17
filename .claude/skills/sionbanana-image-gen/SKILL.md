@@ -17,6 +17,16 @@ Prefer the local helper workflow over editing app code. `docs/agent-automation-w
 
 **실측 교훈의 상세·실패 서사·예문 전문은 [`references/LESSONS.md`](references/LESSONS.md)에 있다.** 본문 곳곳의 §번호·①~⑦·진주성N이 그 원장의 절 번호다. 어려운 컷을 설계하거나 같은 결함이 반복되면 해당 절을 연다.
 
+## 참조 문서 지도 (이 스킬 폴더 기준 · 필요한 순간에 연다)
+
+| 파일 | 언제 읽나 | 담긴 절 |
+|---|---|---|
+| [references/sheets-and-anchoring.md](references/sheets-and-anchoring.md) | 시나리오·다컷 작업에서 시트를 만들거나 걸 때 · 같은 씬의 컷을 여러 장 만들 때 | Phase 1d 시트 템플릿, Phase 1e 마스터샷 앵커링, Phase 1f 커버리지 검증 |
+| [references/pipeline-details.md](references/pipeline-details.md) | jobs 배열 생성 · 업스케일 확정 · 반복 502 · 다수 컷 검수 · 딜리버리 정리 · 캐릭터 라이브러리·폴더·MCP | Phase 1b·3·4·5, 안전 필터 대응, 캐릭터 라이브러리, Folder Naming, MCP |
+| [references/prompt-skeleton.md](references/prompt-skeleton.md) | 컷 프롬프트 본문을 쓸 때 | 표준 골격, Prompt 카탈로그 |
+| [references/ppt-slides.md](references/ppt-slides.md) | PPT·슬라이드 요청 | 스타일 카탈로그 절차, 언어 지시 문장, PPT 전용 검수 Rubric·재생성 규칙 |
+| [references/LESSONS.md](references/LESSONS.md) · [references/LESSONS-prompt-sheets.md](references/LESSONS-prompt-sheets.md) · [references/LESSONS-pipeline-review.md](references/LESSONS-pipeline-review.md) | 같은 결함이 두 번 나올 때 · 규칙 인덱스의 §번호를 열 때 | 실측 교훈 원장 A·B / C·D / E·F |
+
 ## Prerequisites
 
 - Run from the 시온바나나 project directory.
@@ -28,67 +38,7 @@ curl -s http://localhost:3002/api/health
 ```
 
 ## PPT·슬라이드 요청 시 — 스타일을 먼저 확정한다 ★
-
-사용자가 "이 문서 PPT로", "발표자료 만들어줘", "슬라이드로 만들어줘" 라고 하면 **즉흥으로 스타일을 지어내지 말고** 등록된 스타일 카탈로그를 먼저 쓴다.
-
-> ★ **운영 스펙 본문은 [`data/styles/PPT-STYLES.md`](../../../data/styles/PPT-STYLES.md)에 있다. PPT 요청을 받으면 반드시 이 문서를 먼저 읽어라.**
-> 이 SKILL의 아래 절차는 요약일 뿐이고, 실제 조판 규격(6단계 파이프라인, 콘텐츠 유형 21종 매핑, 텍스트 보존 등급, 스타일별 비주얼 애셋 규격·조판 상한, 모드 A/B/C)은 그 문서에만 있다.
-
-카탈로그 위치:
-
-- 운영 스펙: `data/styles/PPT-STYLES.md` — **PPT 작업의 소스 오브 트루스**
-- 데이터: `data/styles/styles.json` — PPT 15종(스테디셀러·베스트셀러·최신트렌드 각 5) + 카메라·필름룩 10종 + 캐릭터 8종. 고정 `id`와 주입용 `styleBlock`. **PPT 항목에 한해** `colorTone`, `koreanTypeface`, `latinTypeface`, `arrangement`가 추가로 있다(카메라·캐릭터 항목에는 없다).
-- 갤러리: `data/styles/index.html` — 33개 카드(샘플 썸네일 + 복사용 프롬프트 + `#id` 앵커)
-- 샘플 이미지: `data/styles/samples/scene-1/<id>.png`
-
-절차:
-
-1. `PPT-STYLES.md`와 `styles.json`을 읽고 주제에 맞는 PPT 스타일 **2~3개를 추천**한다. (표·수치 많은 문서 → `ppt-steady-04` / 투자·IR·공공 → `ppt-steady-01` / 일반 교육·온보딩 → `ppt-best-03` / 초중등·워크숍 → `ppt-best-05` / 테크 무대 → `ppt-trend-04` / 시스템·구조 → `ppt-trend-05`)
-2. `open data/styles/index.html` 로 갤러리를 열어 **실제 샘플을 눈으로 보게** 한다. 승인 질문 UI에는 썸네일을 넣을 수 없으므로, 이 단계가 "디자인 카드를 보여주는" 역할이다.
-3. **스타일 + 분량**을 선택지로 물어 승인받는다. 선택 응답이 곧 착수 승인이다.
-4. `PPT-STYLES.md`의 **6단계 파이프라인**을 그대로 밟는다: 섹션 인벤토리 → 장수 수렴 → 유형 매핑 → 텍스트 예산 → 5블록 조립 → 검수.
-5. 프롬프트는 **5블록 고정**으로 조립한다. `styleBlock`만 붙이면 비주얼 규격·상한·negative가 통째로 빠진다.
-
-```text
-[1] 스타일 블록      ← PPT-STYLES.md 2부 "주입 블록"의 앞부분
-[2] 비주얼 애셋 블록  ← 같은 "주입 블록"의 뒷부분 (사진·아이콘·차트·3D·배치)
-[3] 레이아웃 지시     ← 유형 매핑표의 시각 형식
-[4] 실제 텍스트       ← 보존 등급 적용 + 아래 언어 지시 문장
-[5] 금지·품질 지시    ← negative prompt
-```
-
-주의:
-
-- **언어 지시는 반드시 이 문장을 쓴다.** 그냥 "한국어만 사용한다"라고 쓰면 영문 고유명사까지 번역된다 — 실측에서 `React SSR → 리액트 서버 렌더링`, `PostgreSQL → 포스트그레스큐엘`로 전부 한글화됐다.
-  > 본문은 한국어로 쓰되, 영문 제품명·기술명·지표명(예: React SSR, PostgreSQL, D1)은 원문 영문 표기를 그대로 유지하고 한글로 번역하거나 음차하지 않는다.
-- PPT `styleBlock`에는 색감뿐 아니라 **한글·영문 폰트 느낌과 배열**이 들어 있다. 임의로 잘라내지 마라. 폰트 파일은 불러올 수 없으므로 항상 시각 속성(굵기·폭·세리프 여부·대문자·자간·크기 위계)으로 서술돼 있다. 한글 명조·세리프 재현은 불안정하므로(실측 60여 장에서 전부 산세리프) 세리프 인상은 영문·숫자로 만든다.
-- 다크·글래스 계열(`ppt-trend-04`, `ppt-trend-01`)은 표가 밀집된 문서에서 한글 가독성이 떨어진다. 표 많은 기획안에는 밝은 계열을 권한다.
-- **전 슬라이드를 표로 채우지 마라.** 표 슬라이드는 덱 전체의 1/3 이하로 유지하고, 서사·개념 슬라이드(페르소나·루프·밸런스 곡선·로드맵 등)는 일러스트·차트 중심으로 조판한다. (실측: 22장을 전부 표·텍스트로 뽑았다가 "딱딱하고 장황하다"는 피드백을 받아 10장을 시각화로 재생성했다.)
-- 표를 시각으로 바꿀 때의 대응 예: 확률 표 → 하강 곡선 그래프 / 사용자 유형 표 → 페르소나 아바타 카드 / 단계 이름 목록 → 진화 일러스트 띠 / 도입 순서 → 스텝·퍼널 그래픽 / 채널 표 → 아이콘 행.
-- **산출물은 PNG 슬라이드 묶음 + HTML 인덱스다.** `.pptx` 파일을 만들지 않는다. 편집 가능한 덱이 필요하면 `PPT-STYLES.md` 3부의 모드 B/C로 배경·애셋만 생성하고 텍스트는 편집기에서 넣는다.
-
-**PPT 작업의 Phase 라우팅** — 아래 Phase 1~5는 스토리보드(시나리오·캐릭터·장소) 전용이다. PPT는 다음만 적용한다:
-
-| Phase | PPT 적용 |
-|---|---|
-| 1b·1c (jobs·storyboard spec) | **적용** — 슬라이드마다 prompt가 다르므로 spec 방식 |
-| 1d·1e (캐릭터·장소·소품 시트, 마스터샷) | **미적용** — PPT에는 등장인물 연속성이 없다 |
-| 1f (시트 커버리지 검증) | **미적용** |
-| 2 (index) · 5 (딜리버리 정리) | **적용** |
-| 4 (검수) | **PPT 전용 Rubric으로 대체** — 아래 |
-
-**PPT 전용 검수 Rubric** (Medium Rubric의 subject·pose·style 대신 이것을 쓴다):
-
-- `numbers`: 원문의 모든 수치·단위·비율이 슬라이드와 동일한가
-- `tokens`: 영문 제품명·기술명이 번역·음차되지 않았는가
-- `hangul`: 오탈자·깨진 글리프·자모 분리가 없는가
-- `table`: 행·열이 어긋나지 않고 헤더가 구분되는가
-- `mapping`: 유형 매핑표에서 정한 시각 형식으로 나왔는가
-- `budget`: 글자 수·표 행이 해당 스타일 상한 이내인가
-
-**재생성 규칙** — 수치·불변 토큰·한글 오류는 **무조건 재생성(상한 2회)**. 2회로도 안 되면 그 컷만 모드 B/C로 전환한다. 미관 문제(구도·색 편차)는 재생성하지 않는다. (Phase 4의 "최대 1회 자동 재생성"은 스토리보드 기준이며 PPT에는 이 규칙이 우선한다.)
-
-새 스타일을 추가할 때는 `styles.json`에 항목을 넣고, 같은 견본(`sampleSubjects`)으로 샘플 1장을 생성한 뒤 갤러리와 `PPT-STYLES.md`를 갱신한다.
+PPT 요청은 즉흥 스타일이 아니라 등록된 스타일 카탈로그로 시작한다 — 운영 스펙의 정본은 `data/styles/PPT-STYLES.md`. 스타일 2~3개 추천 → 갤러리를 열어 실제 샘플 보여주기 → 스타일+분량 승인 → 6단계 파이프라인 → 5블록 고정 프롬프트(`styleBlock`만 붙이면 규격·negative가 빠진다). 산출물은 PNG 슬라이드 + HTML 인덱스이며 `.pptx`를 만들지 않는다. 절차·언어 지시 문장·Phase 라우팅·PPT 전용 검수 Rubric·재생성 규칙: [references/ppt-slides.md](references/ppt-slides.md).
 
 ## Workflow
 
@@ -124,34 +74,7 @@ node scripts/agent-generate.mjs --prompt "..." --category xxx --slug yyy
 ```
 
 ### Phase 1b: 스토리보드 (서로 다른 prompt 다건)
-
-컷마다 prompt가 다른 경우 `--batch`가 아니라 jobs 배열을 사용. stdin은 JSON 객체(`{"jobs":[...]}`) 또는 배열을 받을 수 있음:
-
-```bash
-node scripts/agent-generate.mjs --concurrency 4 --retry 2 --port 3002 < storyboard-jobs.json
-```
-
-`storyboard-jobs.json` 예:
-
-```json
-[
-  {
-    "slug": "cut-01",
-    "category": "storyboard-demo",
-    "prompt": "첫 컷 prompt",
-    "quality": "medium",
-    "count": 1
-  },
-  {
-    "slug": "cut-02",
-    "category": "storyboard-demo",
-    "prompt": "두 번째 컷 prompt",
-    "referenceSlug": "cut-01"
-  }
-]
-```
-
-출력은 JSON 하나이며 `jobs[].ids`, `jobs[].imageUrls`, `jobs[].outputPaths`, `jobs[].manifestPath`를 포함. 같은 `category`의 성공 run이 있으면 마지막에 index가 생성됨.
+컷마다 prompt가 다르면 `--batch` 대신 jobs 배열(stdin JSON)로 생성한다. 예시 JSON·출력 형식: [references/pipeline-details.md](references/pipeline-details.md) §Phase 1b.
 
 ### Phase 1c: 스토리보드 일괄 생성 (spec 기반)
 
@@ -180,6 +103,7 @@ node scripts/storyboard.mjs organize data/storyboard/<project>.spec.json data/st
 - 전경에 큰 신체부위(다리/발/손)가 들어가는 prompt는 원근 왜곡 위험이 높다. 주인공 중심 구도를 명확히 쓰고 negative prompt에 `giant oversized leg, distorted limbs, foot in foreground, extra limbs, deformed hands`를 넣는 편이 안전하다.
 - 시나리오 헤더의 컷 수와 실제 컷 번호가 불일치할 수 있으니, 자동화는 문서 헤더보다 실제 cut 번호와 slug 기준으로 진행한다.
 - `scenes[].n`은 **1 이상의 정수만** 허용된다 (`n=0` 거부, 실측). 프롤로그·에필로그는 scene 1(또는 마지막 scene)로 넣고 `title`을 "프롤로그 · …"로 적어 구분한다 — cut slug(`cut-0-1` 등)는 자유.
+- 컷 프롬프트 본문은 [references/prompt-skeleton.md](references/prompt-skeleton.md)의 표준 골격(배경/장면 · 주체 · 핵심 디테일 · 제약)을 복사해 채운다.
 
 ### 프레임 규격 — 화면비는 `size`가 아니라 프롬프트가 지배한다 ★중요
 
@@ -200,98 +124,10 @@ node scripts/storyboard.mjs organize data/storyboard/<project>.spec.json data/st
 4. 그래도 비율이 안 잡히는 컷은 후처리 크롭(`sips -c 864 1536`)을 폴백으로 쓴다. 단 `organize`가 canonical 원본을 다시 복사하므로 **크롭은 organize 이후 마지막 단계**로 한다.
 
 ### Phase 1d: 레퍼런스 시트 자동 생성
-
-시나리오/스토리보드 작업 시, 사용자가 캐릭터·장소·오브젝트 레퍼런스 시트를 첨부하지 않은 경우 키프레임 생성 전에 먼저 생성한다. 첨부된 경우 이 단계를 건너뛴다.
-
-**판단 기준**: 시나리오 텍스트에 연속성 바이블(인물/공간/오브젝트 비주얼 상세)이 있으나 참조 이미지 첨부가 없으면 자동 생성 대상.
-
-> ★ **시트 ↔ 시나리오 정합성 검증 (시트 첨부 시 필수)**
-> 사용자가 시트를 첨부한 경우, **키프레임 생성 전에 시트의 실제 외형과 시나리오 연속성 바이블의 외형(특히 의상·헤어·소품)이 일치하는지 반드시 대조**한다. 불일치하면(예: 바이블은 "후드집업+데님재킷"인데 시트는 "원피스") **컷 생성을 시작하기 전에 둘 중 하나로 통일**한다:
-> - (A) 시나리오 바이블을 시트에 맞게 수정, 또는
-> - (B) 시트를 바이블에 맞게 재생성(권장 — 서사 의도 보존).
->
-> 이 단계를 건너뛰고 "프롬프트마다 의상을 글로 강제"하는 식으로 땜질하면, 의상 문구가 빠진 컷에서 시트 원본 외형이 튀어나와 **컷마다 옷이 바뀐다**(실측: 데님재킷 명시한 컷은 유지, 빠진 컷은 시트의 원피스로 회귀). 근본 해결은 시트와 시나리오를 처음부터 일치시키는 것이다. 불일치 발견 시 사용자에게 보고하고 (A)/(B)를 확인받는다.
-
-#### 캐릭터 시트
-
-인물마다 1장. 프롬프트 구조:
-
-```
-Character reference sheet for {인물명}. 
-Left half: full-body front view and full-body back view standing on a plain light background.
-Right half: 4-panel face grid (front, 3/4 left, 3/4 right, profile).
-{나이, 성별, 체형, 신장 등 신체 특징}
-{헤어스타일, 색상}
-{의상 상세: 색상, 소재, 질감, 특이사항(찢어짐, 얼룩 등)}
-{소품: 모자, 신발, 액세서리}
-Hyperrealistic cinematic photography, natural cinematic side lighting, 35mm film look, NOT 3D game render or CGI, consistent identity across all views.
-```
-
-- `--slug "ref-char-{인물명}"`, `--quality high`, `--aspect "16:9"`
-- ⚠️ 실사 작품의 시트에 "균일 스튜디오 조명 + 중립 회색 배경" 조합을 쓰지 마라 — 게임 에셋 턴테이블 톤이 되고 그 톤이 컷에 전이된다 (진주성 3). 위 템플릿의 시네마틱 측광 문구를 유지할 것.
-
-#### 장소 시트
-
-주요 공간마다 1장. 프롬프트 구조:
-
-```
-Location reference sheet for {장소명}, 4-panel grid labeled 정면/후면/좌측/우측.
-{시대, 지역, 건축 양식}
-{주요 구조물: 지붕, 벽, 바닥 재질}
-{주변 환경: 식생, 지형, 돌담 등}
-{조명 조건: 시간대, 계절, 날씨}
-Hyperrealistic photography, architectural reference style.
-```
-
-- `--slug "ref-loc-{장소명}"`, `--quality high`, `--aspect "16:9"`
-
-#### 오브젝트 시트 ★중요
-
-서사적으로 반복 등장하는 소품(카메라, 무기, 탈것, 휴대폰, 상징 물건 등)은 **반드시 오브젝트 시트로 외형을 고정**한다. 시트 없이 `"futuristic vlog camera"`, `"미래형 카메라"` 같은 **추상 표현만 쓰면 컷마다 완전히 다른 물건**이 나온다 (실측: 같은 카메라가 짐벌캠·태블릿·고프로로 제각각 생성됨). 캐릭터를 시트로 고정하듯 핵심 소품도 똑같이 고정해야 한다.
-
-권장 절차:
-1. **구체적 실물 모델로 지정** — `"미래형 카메라"`(X) → `"compact mirrorless camera modeled on a Sony a7c, silver-and-black body, short retractable lens, flip-out LCD"`(O).
-2. 그 묘사로 오브젝트 시트 1장 생성 → `data/images/<bucket>/<id>.png`로 등록.
-3. 소품이 **프레임에 보이는 컷**에만 그 시트를 `referenceGallery`(또는 `--reference-gallery-slugs`)에 추가하고, 프롬프트에 `"keep this exact same {소품} design as the reference sheet"`를 명시한다.
-4. 소품이 안 보이는 컷(POV·화면 overlay·떡밥 컷 등)은 시트를 넣지 않는다.
-
-프롬프트 구조:
-
-```
-Prop reference sheet for {오브젝트명}.
-Left half: front view and side view on white background.
-Right half: close-up detail panels with annotation callouts showing {질감, 마모, 색상 변화 등}.
-{소재, 크기, 시대, 용도}
-{특이사항: 벗겨진 칠, 금, 얼룩 등}
-Product photography style, hyperrealistic, studio lighting.
-```
-
-- `--slug "ref-obj-{오브젝트명}"`, `--quality high`, `--aspect "16:9"`
-
-생성된 시트는 이후 키프레임 생성 시 `--reference-slug` 또는 `--reference-gallery-slugs`로 연결하거나, 프롬프트 앞에 `[연속성 바이블]` 텍스트 블록으로 주입한다.
+시트가 첨부되지 않은 시나리오 작업은 키프레임 전에 캐릭터·장소·오브젝트 시트를 먼저 만든다(첨부됐으면 시트↔시나리오 바이블의 외형 일치를 먼저 대조하고, 불일치는 컷 생성 전에 통일). 반복 등장 소품은 **오브젝트 시트로 외형을 고정**한다 — 추상 표현만 쓰면 컷마다 다른 물건이 나온다. 시트 프롬프트 템플릿 3종·슬러그·연결 방법: [references/sheets-and-anchoring.md](references/sheets-and-anchoring.md) §Phase 1d.
 
 ### Phase 1e: 씬 마스터샷 앵커링 (블로킹·공간 일관성) ★중요
-
-> ★ **레퍼런스 슬롯은 4개가 상한이다 (실측).** 시트를 늘려서 전부 걸 수는 없다. 따라서 "필요한 시트를 다 첨부한다"는 애초에 불가능한 전략이고, **마스터샷 1장이 공간·조명·색보정·블로킹·축선을 한 슬롯에 담는 것**이 유일하게 확장 가능한 방법이다. 결함은 거의 항상 **슬롯이 모자라 뺀 자리**에서 난다 — 컷을 짤 때 "이 컷에서 무엇을 뺐나"를 먼저 적어라.
->
-> ⚠️ **cross-category `referenceSlug`는 해석되지 않는다 (실측).** `referenceSlug`/`referenceGallerySlugs`는 **같은 `category` 안에서만** 최신 run을 찾는다. 다른 카테고리의 시트(예: 시트는 `hope-characters`, 컷은 `hope-cuts`)를 걸려면 파일을 해당 버킷(`data/images/<bucket>/`)에 복사하고 **`/api/images/<id>` 전체 URL**을 `referenceGallery`에 직접 넣는다. slug만 적으면 조용히 무시되고, 그 컷만 시트 없이 생성된다.
-
-캐릭터·공간 시트는 **인물 외형과 사무실 생김새**는 고정하지만, **같은 씬 안에서 "누가 어느 자리에 앉아 어느 방향을 보는가(블로킹)"와 "카메라가 어느 쪽에 있나(앵글·축선)"는 고정하지 못한다.** 그래서 시트만 걸면 같은 씬인데도 컷마다 책상 구조·좌석 배치·시선 방향이 새로 그려진다 (실측: 4인 상담 씬에서 컷마다 좌우 배치·카메라 위치가 제각각).
-
-해결: **씬마다 마스터샷 1컷을 먼저 확정하고, 그 이미지를 후속 컷의 reference 1순위로 건다.**
-
-절차:
-1. 씬의 **첫 와이드/설정 샷**(인물 배치가 다 보이는 컷)을 먼저 생성하고 베스트 1장을 확정한다 → 이게 그 씬의 "마스터샷".
-   - ★★ **마스터가 될 수 있는 컷과 될 수 없는 컷이 있다. 마스터는 "첫 컷"이 아니라 "가장 많이 담은 컷"이다.** 인물의 외형과 상황이 **동시에** 읽히는 **미디엄 와이드**여야 한다 — 너무 넓으면 얼굴이 죽어 캐릭터 앵커 구실을 못 하고, 클로즈업이면 배치·축선이 안 담긴다 (실측 실패: 씬의 첫 컷이 인물 한 명의 작업 클로즈업이라 방어선 배치도 적의 방향도 담기지 않았고, 그 씬 14컷이 컷마다 다른 공간으로 생성됐다 — 절반은 공간 시트조차 안 걸려 있었다).
-   - 카메라는 **인물들이 바라보는 방향의 측면 앞쪽**에 둔다. 그래야 인물이 3/4 앞모습으로 잡혀 얼굴이 읽히면서 배치와 적 방향이 함께 프레임에 들어온다.
-2. 같은 씬의 후속 컷은 reference를 **`[마스터샷 URL, (그 컷 주연 캐릭터 시트), ...]`** 순서로 구성한다. 마스터샷이 배치·공간·축선을 담당하고, 캐릭터 시트가 클로즈업 시 얼굴 디테일을 보강한다.
-   - storyboard spec에서는 후속 cut의 `referenceSlug`/`referenceGallerySlugs`에 마스터 컷 slug를 넣거나, 마스터샷의 `/api/images/<id>`를 `referenceGallery` 맨 앞에 직접 넣는다.
-3. 후속 컷 프롬프트 앞에 **블로킹 고정 문구**를 명시한다:
-   > "첫 번째 참조 이미지는 이 씬의 마스터 와이드샷이다. 그 마스터샷과 동일한 좌석 배치·책상 구조·공간 레이아웃·카메라 축선을 그대로 유지하라: {좌측 인물}은 왼쪽, {우측 인물}은 오른쪽. 이 배치를 유지한 채 {이 컷의 동작}을 그린다."
-4. 클로즈업 컷은 "마스터샷의 {특정 좌석} 인물에게 카메라가 다가간 클로즈업"으로 지시해 좌우 방향(180도 축선)을 깨지 않는다.
-5. ★ **좌우 배치(화면축) 규약을 못 박고, 어떤 컷에서도 반전하지 않는다.** 같은 시퀀스에 반복 등장하는 두 인물은 **화면 좌/우 위치를 규약으로 고정**한다(예: "원장 = 항상 화면 왼쪽, 고객 = 항상 오른쪽"). 카메라가 특정 인물을 favor하거나 **리액션·발끈·돌격 같은 동작 컷이어도 좌우를 절대 반전하지 않는다.** 좌우가 뒤집히면 컷 사이에서 인물이 순간이동한 듯 **튀어 보인다**(실측 실패: 평온 투샷은 "원장 왼쪽/고객 오른쪽"인데 바로 다음 발끈 컷에서 좌우 반전 → 축선 붕괴 → 사용자가 지적). 각 컷 프롬프트에 한국어로 "A는 화면 '왼쪽', B는 화면 '오른쪽', 절대 좌우 반전 금지"를 명시하고, **그 시퀀스의 첫 투샷(또는 마스터샷)을 reference 1순위로** 건다. favor 인물은 샷 크기로 표현하되(예: 오른쪽 인물 미디엄) 좌우 위치 자체는 유지한다.
-
-한계 (정직히): gpt-image 계열은 seed·카메라 좌표 정밀 제어가 없어 **완벽히 동일하진 않다(체감 80~90%)**. 픽셀 단위 동일 배치가 필요하면 동일 베이스 이미지 인페인트나 3D 레이아웃이 필요하며 이 도구 범위를 넘는다. 그래도 마스터샷 앵커링만으로 "같은 씬으로 보이는" 수준은 안정적으로 확보된다 (실측 검증됨).
+씬마다 마스터샷(인물 외형과 배치가 함께 읽히는 **미디엄 와이드**) 1컷을 먼저 확정하고 후속 컷의 reference 1순위로 건다. 레퍼런스 슬롯은 4개가 상한이고, cross-category `referenceSlug`는 조용히 무시되며, 두 인물의 좌우 배치(화면축)는 어떤 컷에서도 반전하지 않는다. 절차·블로킹 고정 문구·한계: [references/sheets-and-anchoring.md](references/sheets-and-anchoring.md) §Phase 1e.
 
 ### 배경 텍스트 고정 (칠판·현판·간판·게시물) ★중요
 
@@ -327,132 +163,25 @@ index에는 체크박스 + "선택 복사" 버튼이 있어, 사용자가 고른
 ```
 
 ### Phase 3: 확정 (업스케일)
-
-사용자가 번호를 주면, 각 `#NN`을 카테고리 index의 run 디렉토리에 매핑 후 업스케일. `--upscale-from`이 manifest에서 revisedPrompt + reference를 자동 추출:
-
-```bash
-node scripts/agent-generate.mjs \
-  --upscale-from "data/agent-runs/2026-05-16T02-38-05-879Z-attempt-02" \
-  --size 2048x1152 \
-  --quality high
-```
-
-여러 개면 `--batch`로 묶거나 각각 호출. 커스텀 출력명은 `--slug`.
+사용자가 고른 `#NN`을 카테고리 index의 run 디렉토리에 매핑해 `--upscale-from`으로 2K(`--size 2048x1152 --quality high`) 확정한다. 커맨드: [references/pipeline-details.md](references/pipeline-details.md) §Phase 3.
 
 ### Phase 1f: 시트 커버리지 정적 검증 (생성 전 필수, 토큰 0) ★중요
-
-키프레임 생성을 시작하기 **전에**, 각 컷이 등장 요소(인물·소품)의 레퍼런스 시트를 빠짐없이 걸었는지 코드로 전수 점검한다. 시트를 만들어도 **그게 보이는 컷에 reference로 안 걸리면 그 컷만 엉뚱한 물건이 나온다** (실측: 가방 시트가 있는데 cut-1-4에만 안 걸어서 갈색 켈리백이 나옴 — 나머지 컷은 정상).
-
-```bash
-node scripts/check-coverage.mjs path/to/storyboard.spec.json path/to/coverage-rules.json
-```
-
-- `coverage-rules.json`은 `{ "rules": [ { "slug": "pa-obj-bag", "any": ["handbag on the counter", "holding the black beaded handbag", ...], "label": "가방" } ] }` 형태. 각 rule은 "프롬프트/스토리에 any 키워드가 있으면 그 컷은 slug 시트를 reference에 가져야 한다"는 뜻.
-- 키워드는 **근접/클로즈업 신호**(들고 있음·카운터 위·핀셋이 닿음 등)로 좁혀라. 단순히 "bag"/"bead"만 쓰면 전경 멀리 있는 컷까지 과탐지된다.
-- `ok:false`로 나온 MISS 컷은 생성 전에 spec의 `referenceGallery`에 해당 시트를 추가한다. **이미지가 아니라 spec을 고쳐야** 재생성·재현 시에도 유지된다.
+키프레임 생성 전에 `scripts/check-coverage.mjs`로 각 컷이 등장 요소(인물·소품)의 시트를 reference에 걸었는지 코드로 전수 점검한다. MISS는 이미지가 아니라 spec의 `referenceGallery`를 고친다. 규칙 파일 형식·키워드 잡는 법: [references/sheets-and-anchoring.md](references/sheets-and-anchoring.md) §Phase 1f.
 
 ### 안전 필터 대응 — 반복 502 (★중요)
-
-특정 컷이 `--retry`를 줘도 **반복적으로 502 "Codex가 이미지를 반환하지 않았습니다"**로 실패하면, 서버 부하가 아니라 **콘텐츠 안전 필터가 이미지 반환을 거부**하는 신호일 수 있다. 판별 기준:
-
-- **다른 컷은 성공하는데 특정 컷만 3회 이상 연속 502** (일시적 부하라면 재시도 시 분산되어 풀린다).
-- 실패 컷의 공통 소재: **미성년자(아동) + 폭력·총기·유혈·공포·위난** 조합. (실측: 8세 아동이 총성·유혈·공포에 노출되는 3개 컷만 동시 502 → 폭력 수위 낮은 17컷은 전부 통과.)
-
-retry로는 절대 안 풀린다. 프롬프트를 단계적으로 완화해 우회한다 (실측: 아래 순서로 3컷 전부 통과):
-
-1. **재현 톤 명시** — 프롬프트 앞에 "역사 다큐멘터리 드라마의 재현 장면" 등을 붙여 기록·재현 맥락을 분명히 한다.
-2. **직접적 폭력 표현 간접화** — "총성·피·비명·짓밟힘"을 빼고 "긴장·보호·충격의 정서"로 바꾼다.
-3. **군중 패닉·위난 묘사 제거, 인물 중심으로** — 혼란 배경을 단순화하고 보호·유대 정서 중심으로 재구성한다.
-4. **그래도 막히면 미성년자를 프레임에서 제외** — 주인공(성인/연장자) 단독 컷으로 재구성한다.
-
-완화는 **정서·서사 의미를 보존**하는 선에서 최소한으로.
+다른 컷은 되는데 특정 컷만 3회 이상 연속 502이면 부하가 아니라 콘텐츠 안전 필터다(미성년자 + 폭력·총기·유혈·공포·위난 조합). retry로는 안 풀린다 — 재현 톤 명시 → 직접 폭력 간접화 → 군중 위난 제거 → 미성년자 프레임 제외 순으로 최소 완화. 상세: [references/pipeline-details.md](references/pipeline-details.md) §안전 필터 대응.
 
 ### Phase 4: 검수 및 맥락 보충
-
-시나리오/스토리보드의 다수 컷 생성 후, 씬 순서대로 리뷰하며 서사 연결을 점검한다. 단일 이미지 탐색에서는 생략.
-
-> ★ **전수 검수 원칙 (표본 금지)**: 생성된 컷은 **표본 몇 개만 보고 "좋다"고 보고하지 말 것.** 반드시 **모든 컷의 썸네일을 Read로 직접 본다.** (실측 실패: 22컷 중 6컷만 보고 통과 보고 → 안 본 17컷 중 2컷에 결함 — 사용자가 발견.) 컷이 많아 토큰이 부담되면 "전수 vs 표본"을 먼저 확인하되, 기본은 전수다.
-
-1. **시트 일치 확인** — 각 컷의 인물·소품이 레퍼런스 시트와 같은지. Phase 1f를 통과해도 이미지가 시트와 다를 수 있으니 눈으로 재확인.
-2. **검수 Rubric** 기준으로 각 컷 평가 (아래 참조)
-3. **문서·간판 텍스트 확인** — 한글 문구가 스토리와 맞는지, 빈 양식이 아닌지. ★배경에 **작게** 들어간 액자·간판·판서는 썸네일 수준 검수로는 안 읽힌다 — **해당 영역을 크롭 확대해서 직접 읽는다.** 확대해 읽지 않았으면 "문제 없음"이라고 보고하지 않는다 (실측 실패: 액자 확대 안 하고 '오류 없음' 오보고 → 사용자가 발견).
-4. **서사 연결 점검** — 씬 오프닝 에스터블리싱 부재 / 급격한 전환에 브릿지 컷 필요 / 주요 인물이 여러 컷 사라짐(리액션 누락) / 씬 전환 컷 부재.
-5. **보충 컷 제안**: 누락을 사용자에게 보고하고 확인 후 추가 생성한다.
-6. **외부 모델 교차 검증** (컷이 수십 장이면 필수에 가깝다) — 분업 원칙은 ⑦, 부재 질문은 §16, 자율 개방 질문·채택률 60% 등 상세는 LESSONS F.
-7. **채택 목록과 실제 재생성 spec을 코드로 대조한다.** "채택" 판정 후 spec에 안 넣으면 그대로 누락되고 최종 보고가 틀린다 (실측).
-
-   ```bash
-   # spec에 실제로 들어간 slug
-   grep -ho '"slug": *"[^"]*"' batch*.spec.json p0-fix.spec.json \
-     | sed 's/.*: *"//;s/"$//' | sort -u > /tmp/regenerated.txt
-   # 채택 목록(accepted.txt)과 비교 — 왼쪽에만 있으면 누락
-   comm -23 <(sort -u accepted.txt) /tmp/regenerated.txt
-   ```
-
-8. **전술·지형 기하** (방어선·바리케이드·엄폐·매복·차단 컷). 축선이 맞아도 배치가 성립 안 할 수 있다: 차단물이 실제로 통로를 막는가(우회 공간이 열려 있지 않은가) / 엄폐물이 방어자와 적 **사이**인가 / 사선에 자기편 구조물이 걸리지 않는가 / 각 인물이 실제로 엄폐를 받는가. (실측: 검수자는 통과시켰고 사용자가 발견 — 체크리스트에 없었기 때문.)
-9. **무기는 앞뒤를 나눠 본다.** 앞쪽(운반손잡이·총열덮개·탄창)이 정확하면 전체를 정확하다고 판정하기 쉽다. **개머리판·멜빵처럼 인물에 가려지는 뒤쪽은 별도 항목으로** (실측: 전수 검수를 하고도 개머리판 부재를 놓침).
-
-보충 컷의 slug는 `cut-{씬}-{번호}b`로 구분한다.
+다수 컷은 씬 순서대로 **전수** 검수한다(표본 금지) — 시트 일치, Rubric, 배경 글자는 크롭 확대해 읽기, 서사 연결(에스터블리싱·브릿지·리액션·전환), 보충 컷 제안, 외부 모델 교차 검증, 채택 목록↔재생성 spec 코드 대조, 전술·지형 기하, 무기는 앞뒤를 나눠 보기. 항목별 기준·커맨드: [references/pipeline-details.md](references/pipeline-details.md) §Phase 4.
 
 ### Phase 5: 딜리버리 정리
-
-다수 컷(2씬 이상)을 생성한 경우, 최종 결과물을 씬별 폴더로 정리한다.
-
-```text
-data/agent-runs/_{category}-delivery/
-├── 레퍼런스/                        ← Phase 1d에서 생성한 경우
-│   ├── ref-char-{인물명}.png
-│   ├── ref-loc-{장소명}.png
-│   └── ref-obj-{오브젝트명}.png
-├── 씬1-{씬이름}/
-│   ├── cut-1-0_{컷설명}.png
-│   └── ...
-├── 씬2-{씬이름}/
-│   └── ...
-└── ...
-```
-
-규칙:
-- 딜리버리 폴더는 `_{category}-delivery`로 생성한다.
-- 씬 폴더명은 `씬{N}-{한글씬이름}`, 파일명은 `cut-{씬}-{번호}_{한글컷설명}.png`. 보충 컷은 `cut-{씬}-{번호}b`.
-- 원본 `agent-runs/` 타임스탬프 디렉토리에서 `cp`(복사)한다. 원본은 삭제하지 않는다.
-- 정리 후 `open -R`로 파인더에서 딜리버리 폴더를 연다.
-- Phase 1c(`storyboard.mjs organize`)를 사용한 경우 `outDir`이 이미 정리되므로 이 단계는 생략한다.
-
-단일 이미지 탐색이나 씬이 1개뿐인 경우 생략.
+2씬 이상이면 `data/agent-runs/_{category}-delivery/` 아래 레퍼런스·씬별 폴더로 `cp`(원본 삭제 금지)하고 `open -R`로 연다. `storyboard.mjs organize`를 썼으면 생략. 폴더·파일명 규칙: [references/pipeline-details.md](references/pipeline-details.md) §Phase 5.
 
 ## 캐릭터 라이브러리 (재사용 캐릭터)
-
-웹 UI `/studio/characters`에서 캐릭터를 등록(name + handle)하면, 단일 생성 prompt에서 `@handle`로 호출 가능:
-
-- **등록**: 프리셋 시트 결과 / 히스토리 / 단일 생성 결과의 "캐릭터로 등록" 버튼 (copy-on-import로 원본 보호)
-- **사용**: 단일 생성 prompt에 `@민수가 카페에 들어선다` → 매칭된 캐릭터 이미지가 참조 슬롯에 자동 첨부 + Reference map prompt 자동 합성
-- **picker**: "캐릭터 라이브러리에서" 버튼 → 검색/태그 필터 모달
-
-helper(CLI)에서 캐릭터를 쓰려면 해당 이미지 URL(`/api/images/<id>`)을 `--reference`로 전달.
-이전 helper run을 참조할 때는 URL을 직접 복사하지 않고 slug로도 지정 가능:
-
-```bash
-node scripts/agent-generate.mjs \
-  --prompt "cut-03 prompt" \
-  --category "storyboard-demo" \
-  --slug "cut-03" \
-  --reference-slug "cut-02" \
-  --reference-gallery-slugs "character-base,prop-base"
-```
-
-`--reference-slug`는 같은 category 안에서 `manifest.slug`와 run 디렉토리 suffix가 일치하는 최신 run의 첫 `/api/images/<id>`를 사용. `--reference`를 직접 주면 직접 URL이 우선.
+웹 UI `/studio/characters`에 등록한 캐릭터는 단일 생성 prompt에서 `@handle`로 호출된다. CLI에서는 `--reference`(URL)·`--reference-slug`·`--reference-gallery-slugs`로 같은 category의 최신 run을 연결한다. 상세: [references/pipeline-details.md](references/pipeline-details.md) §캐릭터 라이브러리.
 
 ## Prompt 카탈로그
-
-`docs/prompts-catalog.md`에 **434개** 이미지 prompt가 카테고리별로 정리돼 있음 (prompt 메이커/참고용):
-
-- 캐릭터 / 360도 턴어라운드 / 캐릭터 시트
-- 톤 20 / Cinematography 19 (framing·angle·special)
-- 조명 66 / 포즈 42 / 카메라 34 / 방향 14 / Aspect Ratio 5
-- 날씨·대기·시간·톤앤매너 57 / 외부 프리셋 91 / 프리셋 배치 뷰 93
-
-prompt 작성 시 이 카탈로그에서 키워드를 가져와 조합.
+`docs/prompts-catalog.md`의 이미지 prompt 434개(캐릭터·톤·조명·포즈·카메라·날씨 등)에서 키워드를 가져와 조합한다. 분류표: [references/prompt-skeleton.md](references/prompt-skeleton.md) §Prompt 카탈로그.
 
 ## 검수 Rubric (Medium)
 
@@ -468,20 +197,10 @@ prompt 작성 시 이 카탈로그에서 키워드를 가져와 조합.
 명백한 누락이면 최대 1회 자동 재생성 후 사용자에게 비교 보고 (semi-auto).
 
 ## Folder Naming
-
-```text
-data/agent-runs/{ISO-timestamp}-{slug}/
-  manifest.json   (prompt, reference, params, revisedPrompt)
-  review.html
-  images/
-```
+`data/agent-runs/{ISO-timestamp}-{slug}/`에 manifest.json·review.html·images/. [references/pipeline-details.md](references/pipeline-details.md) §Folder Naming.
 
 ## MCP (다른 세션에서 사용)
-
-`scripts/mcp-server.mjs`를 Claude Desktop/Claude.ai에 등록하면 다른 세션에서도 도구로 사용 가능 (`docs/mcp-server-setup.md`).
-
-- `generate`: 단건 또는 같은 prompt batch. `batch`/`concurrency`/`retry`/`referenceSlug` 지원.
-- `generate_many`: 서로 다른 prompt jobs 배열. `concurrency` 기본 3, `retry` 지원.
+`scripts/mcp-server.mjs`의 `generate`·`generate_many`(`docs/mcp-server-setup.md`). 외부 세션의 사용법은 전역 `sionbanana-remote` 스킬이 압축해 두었다. 상세: [references/pipeline-details.md](references/pipeline-details.md) §MCP.
 
 ## Limits
 
@@ -499,6 +218,8 @@ data/agent-runs/{ISO-timestamp}-{slug}/
 ## 규칙 인덱스 — 실측 교훈 (상세·실패 서사·예문: [references/LESSONS.md](references/LESSONS.md))
 
 한 줄 요약이다. 번호는 원장과 동일하며 불변이다. **같은 결함이 두 번 나오면 해당 절을 열어 예문까지 읽어라.**
+
+원장은 세 파일이다 — A·B: [references/LESSONS.md](references/LESSONS.md) · C·D: [references/LESSONS-prompt-sheets.md](references/LESSONS-prompt-sheets.md) · E·F: [references/LESSONS-pipeline-review.md](references/LESSONS-pipeline-review.md). 번호는 파일이 달라도 같다. 본문의 "LESSONS C/E/F" 표기는 이 파일들을 뜻한다.
 
 **파이프라인 순서 (씬 단위 다컷 작업의 기본 궤도):**
 
@@ -558,30 +279,4 @@ data/agent-runs/{ISO-timestamp}-{slug}/
 ---
 
 ## 표준 골격 (복사해서 쓸 것)
-
-```text
-배경/장면:
-[장소]를 [카메라 위치·높이]에서 본 [가로/세로] 사진. [핵심 배경 3~4개]. [조명]. [렌즈·심도].
-★심도는 주제만 남기고 다 뭉개지 말 것 — 조리개를 적당히 조여 배경 질감도 형태가 남게.
-
-주체:
-[주체 A]는 [행동과 자세 — 「~하고 있다」로, 앞발·손은 무언가를 쥐거나 누르게(§34)]. [주체 B]는 [행동과 자세].
-★시점: [정면 / 3/4 / 후면] — 보여야 할 것(얼굴·착용물)이 이 시점에서 동시에 보이는지 확인(§32). 안 보이는 쪽은 노출 포기를 명시.
-★두 주체의 관계를 화면상 선으로: [같은 면 위에 있음 / 그 면이 A 아래를 지나 B까지 이어짐 / 가까운 쪽이 화면 아래]
-
-핵심 디테일:  (6개 안팎, 그 이상이면 컷을 쪼갠다)
-1. 크기 — [불변·자명 기준물] 대비 + 절대 치수. 결합된 소품은 비례로 함께 묶는다.
-2. 연결물 — 양 끝의 부착점과 통과점을 한 문장에.
-3. 접촉 — 가림 · 눌림 · 그림자 세 증거로.
-4. 관절 — [허벅지→무릎→종아리→발목→구두]처럼 사슬로 이어서.
-5~6. [캐릭터 시트가 고정하는 것 중 이 컷에서 중요한 것]
-
-제약:
-[개수가 중요한 것의 정확한 수]. [전역·이진 금지: 글자·워터마크·격자 없음].
-[참조 시트 사용법: 형태만, 시트의 격자·설명 글자·배경은 넣지 않음].
-[정확한 화면비].
-```
-
-**작업 순서:** 구도·시점 확정(§20·§32) → 금지어 grep(§29) → 신규 생성 → 확대 검증(§28) → 편집 1~2회(§21) → 더 필요하면 신규로 리셋
-
-**시리즈 작업이면 먼저:** 프레임이 물건인지 행동인지 확인하고(§34), 반복 실패 요소는 시트로 승격(§33).
+컷 프롬프트는 배경/장면 · 주체 · 핵심 디테일(6개 안팎, 넘으면 컷을 쪼갠다) · 제약의 네 덩어리 골격을 복사해 쓴다. 골격 전문과 작업 순서(구도·시점 확정 → 금지어 grep → 신규 생성 → 확대 검증 → 편집 1~2회): [references/prompt-skeleton.md](references/prompt-skeleton.md).
